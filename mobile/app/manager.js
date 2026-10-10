@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = 'https://ejnkgsddglyabzsivcuu.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqbmtnc2RkZ2x5YWJ6c2l2Y3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5Mjg0MzMsImV4cCI6MjEwNTUwNDQzM30.rfaPQ-qk820zX-bfhmEnqFdpk_4MQJmB-C3ppNJBUtI';
+const SUPABASE_ANON_KEY = 'sb_publishable_RKZg5K10ckrn_icSUUM7KQ_MM71egkI';
 
 export default function ManagerDashboard() {
   const router = useRouter();
