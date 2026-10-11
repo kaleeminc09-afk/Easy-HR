@@ -1,20 +1,10 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { computeTodayHours, matchByName, findNearestWorksite } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-// ---------- Shared helpers ----------
-function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371e3;
-  const p1 = (lat1 * Math.PI) / 180;
-  const p2 = (lat2 * Math.PI) / 180;
-  const dp = ((lat2 - lat1) * Math.PI) / 180;
-  const dl = ((lon2 - lon1) * Math.PI) / 180;
-  const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
 
 // ---------- Manager tools ----------
 const managerTools = [
@@ -288,22 +278,25 @@ Deno.serve(async (req) => {
 
           if (pErr) {
             output = { error: pErr.message };
-          } else if (!profs || profs.length === 0) {
-            output = { error: `No employee found matching "${args.employee_name}". Ask the manager for the exact name.` };
-          } else if (profs.length > 1) {
-            output = { error: `Multiple employees match "${args.employee_name}": ${profs.map((p: any) => p.full_name).join(", ")}. Ask the manager which one.` };
           } else {
-            const { error: insErr } = await supabase.from("tasks").insert([{
-              title: args.title,
-              description: args.description || null,
-              assigned_to: profs[0].id,
-              assigned_by: managerId,
-              due_date: args.due_date || null,
-              status: "pending",
-            }]);
-            output = insErr
-              ? { error: insErr.message }
-              : { success: true, task: args.title, assigned_to: profs[0].full_name, due_date: args.due_date || "no due date", status: "pending" };
+            const match = matchByName(profs || [], (p: any) => p.full_name || "", args.employee_name);
+            if (match.kind === "none") {
+              output = { error: `No employee found matching "${args.employee_name}". Ask the manager for the exact name.` };
+            } else if (match.kind === "many") {
+              output = { error: `Multiple employees match "${args.employee_name}": ${match.values.map((p: any) => p.full_name).join(", ")}. Ask the manager which one.` };
+            } else {
+              const { error: insErr } = await supabase.from("tasks").insert([{
+                title: args.title,
+                description: args.description || null,
+                assigned_to: match.value.id,
+                assigned_by: managerId,
+                due_date: args.due_date || null,
+                status: "pending",
+              }]);
+              output = insErr
+                ? { error: insErr.message }
+                : { success: true, task: args.title, assigned_to: match.value.full_name, due_date: args.due_date || "no due date", status: "pending" };
+            }
           }
         } else if (fn === "update_task_status") {
           const { data, error } = await supabase
@@ -314,20 +307,20 @@ Deno.serve(async (req) => {
           if (error) {
             output = { error: error.message };
           } else {
-            let matches = data || [];
+            let candidates = data || [];
             if (args.employee_name) {
-              const needle = args.employee_name.toLowerCase();
-              matches = matches.filter((t: any) => (t.profiles?.full_name || "").toLowerCase().includes(needle));
+              const m = matchByName(candidates, (t: any) => t.profiles?.full_name || "", args.employee_name);
+              candidates = m.kind === "one" ? [m.value] : m.kind === "many" ? m.values : [];
             }
-            if (matches.length === 0) {
+            if (candidates.length === 0) {
               output = { error: `No task found matching "${args.title_contains}".` };
-            } else if (matches.length > 1) {
-              output = { error: `Multiple tasks match: ${matches.map((t: any) => `"${t.title}" (${t.profiles?.full_name || "unassigned"})`).join(", ")}. Ask which one.` };
+            } else if (candidates.length > 1) {
+              output = { error: `Multiple tasks match: ${candidates.map((t: any) => `"${t.title}" (${t.profiles?.full_name || "unassigned"})`).join(", ")}. Ask which one.` };
             } else {
-              const { error: updErr } = await supabase.from("tasks").update({ status: args.status, updated_at: new Date().toISOString() }).eq("id", matches[0].id);
+              const { error: updErr } = await supabase.from("tasks").update({ status: args.status, updated_at: new Date().toISOString() }).eq("id", candidates[0].id);
               output = updErr
                 ? { error: updErr.message }
-                : { success: true, task: matches[0].title, new_status: args.status };
+                : { success: true, task: candidates[0].title, new_status: args.status };
             }
           }
         } else if (fn === "get_tasks") {
@@ -344,8 +337,8 @@ Deno.serve(async (req) => {
           } else {
             let rows = data || [];
             if (args.employee_name) {
-              const needle = args.employee_name.toLowerCase();
-              rows = rows.filter((t: any) => (t.profiles?.full_name || "").toLowerCase().includes(needle));
+              const m = matchByName(rows, (t: any) => t.profiles?.full_name || "", args.employee_name);
+              rows = m.kind === "one" ? [m.value] : m.kind === "many" ? m.values : [];
             }
             output = rows.length === 0
               ? { message: "No tasks found." }
@@ -373,23 +366,13 @@ Deno.serve(async (req) => {
           } else if (!data || data.length === 0) {
             output = { message: "No shifts found yet." };
           } else {
-            const todayStart = new Date();
-            todayStart.setHours(0, 0, 0, 0);
-            let todayMs = 0;
-            const shifts = data.map((item: any) => {
-              const s = new Date(item.clock_in).getTime();
-              if (s >= todayStart.getTime()) {
-                const e = item.clock_out ? new Date(item.clock_out).getTime() : Date.now();
-                if (e > s) todayMs += e - s;
-              }
-              return {
-                worksite: item.worksites?.name || "Unknown",
-                clock_in: item.clock_in,
-                clock_out: item.clock_out,
-                flag: item.ai_anomaly_flag,
-              };
-            });
-            output = { today_hours: +(todayMs / 3600000).toFixed(2), shifts };
+            const shifts = data.map((item: any) => ({
+              worksite: item.worksites?.name || "Unknown",
+              clock_in: item.clock_in,
+              clock_out: item.clock_out,
+              flag: item.ai_anomaly_flag,
+            }));
+            output = { today_hours: computeTodayHours(data, Date.now()), shifts };
           }
         } else if (fn === "submit_exception_request") {
           if (location?.latitude == null || location?.longitude == null) {
@@ -399,24 +382,19 @@ Deno.serve(async (req) => {
             if (wsError || !worksites || worksites.length === 0) {
               output = { error: "No worksites are configured yet." };
             } else {
-              let nearest: any = null;
-              let minDist = Infinity;
-              for (const site of worksites) {
-                const d = haversineMeters(location.latitude, location.longitude, site.latitude, site.longitude);
-                if (d < minDist) { minDist = d; nearest = site; }
-              }
+              const nearest = findNearestWorksite(worksites, location.latitude, location.longitude)!;
               const { error: insError } = await supabase.from("time_exceptions").insert([{
                 user_id: effectiveUserId,
-                worksite_id: nearest.id,
+                worksite_id: nearest.site.id,
                 latitude: location.latitude,
                 longitude: location.longitude,
-                distance_meters: Math.round(minDist),
+                distance_meters: nearest.distanceMeters,
                 reason_note: args.reason_note,
                 status: "pending",
               }]);
               output = insError
                 ? { error: insError.message }
-                : { success: true, worksite: nearest.name, distance_meters: Math.round(minDist), status: "pending — sent to your manager for review" };
+                : { success: true, worksite: nearest.site.name, distance_meters: nearest.distanceMeters, status: "pending — sent to your manager for review" };
             }
           }
         } else if (fn === "report_blocker") {

@@ -1,0 +1,647 @@
+diff --git a/.github/workflows/test.yml b/.github/workflows/test.yml
+new file mode 100644
+index 0000000..f0c3685
+--- /dev/null
++++ b/.github/workflows/test.yml
+@@ -0,0 +1,24 @@
++name: Easy HR tests
++
++# The test bot: runs the Jest suite on every push and pull request.
++# If a change breaks the bot's core logic (hours math, task matching,
++# geofence distance, anomaly flags), this goes red before it reaches the app.
++
++on:
++  push:
++  pull_request:
++
++jobs:
++  test:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 20
++      - name: Install dependencies
++        working-directory: mobile
++        run: npm install
++      - name: Run tests
++        working-directory: mobile
++        run: npm test
+diff --git a/mobile/jest.config.js b/mobile/jest.config.js
+new file mode 100644
+index 0000000..fbe6e19
+--- /dev/null
++++ b/mobile/jest.config.js
+@@ -0,0 +1,8 @@
++// Jest config for Easy HR bot-logic tests.
++// Run with: npm test   (from the mobile/ folder)
++module.exports = {
++  testEnvironment: "node",
++  roots: ["<rootDir>/supabase/functions"],
++  testMatch: ["**/*.test.ts"],
++  transform: { "^.+\\.tsx?$": "esbuild-jest" },
++};
+diff --git a/mobile/package.json b/mobile/package.json
+index 1d66682..c14bcd6 100644
+--- a/mobile/package.json
++++ b/mobile/package.json
+@@ -32,7 +32,11 @@
+   },
+   "devDependencies": {
+     "@types/react": "~19.2.2",
+-    "typescript": "~6.0.3"
++    "typescript": "~6.0.3",
++    "jest": "^29.7.0",
++    "@types/jest": "^29.5.12",
++    "esbuild-jest": "^0.5.0",
++    "esbuild": "^0.21.0"
+   },
+   "scripts": {
+     "start": "expo start",
+@@ -40,7 +44,8 @@
+     "android": "expo run:android",
+     "ios": "expo run:ios",
+     "web": "expo start --web",
+-    "lint": "expo lint"
++    "lint": "expo lint",
++    "test": "jest"
+   },
+   "private": true
+ }
+diff --git a/mobile/supabase/functions/hr-ai-bot/index.ts b/mobile/supabase/functions/hr-ai-bot/index.ts
+index 0fbb7e0..ab7f9a4 100644
+--- a/mobile/supabase/functions/hr-ai-bot/index.ts
++++ b/mobile/supabase/functions/hr-ai-bot/index.ts
+@@ -1,21 +1,11 @@
+ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
++import { computeTodayHours, matchByName, findNearestWorksite } from "./logic.ts";
+ 
+ const corsHeaders = {
+   "Access-Control-Allow-Origin": "*",
+   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+ };
+ 
+-// ---------- Shared helpers ----------
+-function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+-  const R = 6371e3;
+-  const p1 = (lat1 * Math.PI) / 180;
+-  const p2 = (lat2 * Math.PI) / 180;
+-  const dp = ((lat2 - lat1) * Math.PI) / 180;
+-  const dl = ((lon2 - lon1) * Math.PI) / 180;
+-  const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+-  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+-}
+-
+ // ---------- Manager tools ----------
+ const managerTools = [
+   {
+@@ -288,22 +278,25 @@ Deno.serve(async (req) => {
+ 
+           if (pErr) {
+             output = { error: pErr.message };
+-          } else if (!profs || profs.length === 0) {
+-            output = { error: `No employee found matching "${args.employee_name}". Ask the manager for the exact name.` };
+-          } else if (profs.length > 1) {
+-            output = { error: `Multiple employees match "${args.employee_name}": ${profs.map((p: any) => p.full_name).join(", ")}. Ask the manager which one.` };
+           } else {
+-            const { error: insErr } = await supabase.from("tasks").insert([{
+-              title: args.title,
+-              description: args.description || null,
+-              assigned_to: profs[0].id,
+-              assigned_by: managerId,
+-              due_date: args.due_date || null,
+-              status: "pending",
+-            }]);
+-            output = insErr
+-              ? { error: insErr.message }
+-              : { success: true, task: args.title, assigned_to: profs[0].full_name, due_date: args.due_date || "no due date", status: "pending" };
++            const match = matchByName(profs || [], (p: any) => p.full_name || "", args.employee_name);
++            if (match.kind === "none") {
++              output = { error: `No employee found matching "${args.employee_name}". Ask the manager for the exact name.` };
++            } else if (match.kind === "many") {
++              output = { error: `Multiple employees match "${args.employee_name}": ${match.values.map((p: any) => p.full_name).join(", ")}. Ask the manager which one.` };
++            } else {
++              const { error: insErr } = await supabase.from("tasks").insert([{
++                title: args.title,
++                description: args.description || null,
++                assigned_to: match.value.id,
++                assigned_by: managerId,
++                due_date: args.due_date || null,
++                status: "pending",
++              }]);
++              output = insErr
++                ? { error: insErr.message }
++                : { success: true, task: args.title, assigned_to: match.value.full_name, due_date: args.due_date || "no due date", status: "pending" };
++            }
+           }
+         } else if (fn === "update_task_status") {
+           const { data, error } = await supabase
+@@ -314,20 +307,20 @@ Deno.serve(async (req) => {
+           if (error) {
+             output = { error: error.message };
+           } else {
+-            let matches = data || [];
++            let candidates = data || [];
+             if (args.employee_name) {
+-              const needle = args.employee_name.toLowerCase();
+-              matches = matches.filter((t: any) => (t.profiles?.full_name || "").toLowerCase().includes(needle));
++              const m = matchByName(candidates, (t: any) => t.profiles?.full_name || "", args.employee_name);
++              candidates = m.kind === "one" ? [m.value] : m.kind === "many" ? m.values : [];
+             }
+-            if (matches.length === 0) {
++            if (candidates.length === 0) {
+               output = { error: `No task found matching "${args.title_contains}".` };
+-            } else if (matches.length > 1) {
+-              output = { error: `Multiple tasks match: ${matches.map((t: any) => `"${t.title}" (${t.profiles?.full_name || "unassigned"})`).join(", ")}. Ask which one.` };
++            } else if (candidates.length > 1) {
++              output = { error: `Multiple tasks match: ${candidates.map((t: any) => `"${t.title}" (${t.profiles?.full_name || "unassigned"})`).join(", ")}. Ask which one.` };
+             } else {
+-              const { error: updErr } = await supabase.from("tasks").update({ status: args.status, updated_at: new Date().toISOString() }).eq("id", matches[0].id);
++              const { error: updErr } = await supabase.from("tasks").update({ status: args.status, updated_at: new Date().toISOString() }).eq("id", candidates[0].id);
+               output = updErr
+                 ? { error: updErr.message }
+-                : { success: true, task: matches[0].title, new_status: args.status };
++                : { success: true, task: candidates[0].title, new_status: args.status };
+             }
+           }
+         } else if (fn === "get_tasks") {
+@@ -344,8 +337,8 @@ Deno.serve(async (req) => {
+           } else {
+             let rows = data || [];
+             if (args.employee_name) {
+-              const needle = args.employee_name.toLowerCase();
+-              rows = rows.filter((t: any) => (t.profiles?.full_name || "").toLowerCase().includes(needle));
++              const m = matchByName(rows, (t: any) => t.profiles?.full_name || "", args.employee_name);
++              rows = m.kind === "one" ? [m.value] : m.kind === "many" ? m.values : [];
+             }
+             output = rows.length === 0
+               ? { message: "No tasks found." }
+@@ -373,23 +366,13 @@ Deno.serve(async (req) => {
+           } else if (!data || data.length === 0) {
+             output = { message: "No shifts found yet." };
+           } else {
+-            const todayStart = new Date();
+-            todayStart.setHours(0, 0, 0, 0);
+-            let todayMs = 0;
+-            const shifts = data.map((item: any) => {
+-              const s = new Date(item.clock_in).getTime();
+-              if (s >= todayStart.getTime()) {
+-                const e = item.clock_out ? new Date(item.clock_out).getTime() : Date.now();
+-                if (e > s) todayMs += e - s;
+-              }
+-              return {
+-                worksite: item.worksites?.name || "Unknown",
+-                clock_in: item.clock_in,
+-                clock_out: item.clock_out,
+-                flag: item.ai_anomaly_flag,
+-              };
+-            });
+-            output = { today_hours: +(todayMs / 3600000).toFixed(2), shifts };
++            const shifts = data.map((item: any) => ({
++              worksite: item.worksites?.name || "Unknown",
++              clock_in: item.clock_in,
++              clock_out: item.clock_out,
++              flag: item.ai_anomaly_flag,
++            }));
++            output = { today_hours: computeTodayHours(data, Date.now()), shifts };
+           }
+         } else if (fn === "submit_exception_request") {
+           if (location?.latitude == null || location?.longitude == null) {
+@@ -399,24 +382,19 @@ Deno.serve(async (req) => {
+             if (wsError || !worksites || worksites.length === 0) {
+               output = { error: "No worksites are configured yet." };
+             } else {
+-              let nearest: any = null;
+-              let minDist = Infinity;
+-              for (const site of worksites) {
+-                const d = haversineMeters(location.latitude, location.longitude, site.latitude, site.longitude);
+-                if (d < minDist) { minDist = d; nearest = site; }
+-              }
++              const nearest = findNearestWorksite(worksites, location.latitude, location.longitude)!;
+               const { error: insError } = await supabase.from("time_exceptions").insert([{
+                 user_id: effectiveUserId,
+-                worksite_id: nearest.id,
++                worksite_id: nearest.site.id,
+                 latitude: location.latitude,
+                 longitude: location.longitude,
+-                distance_meters: Math.round(minDist),
++                distance_meters: nearest.distanceMeters,
+                 reason_note: args.reason_note,
+                 status: "pending",
+               }]);
+               output = insError
+                 ? { error: insError.message }
+-                : { success: true, worksite: nearest.name, distance_meters: Math.round(minDist), status: "pending — sent to your manager for review" };
++                : { success: true, worksite: nearest.site.name, distance_meters: nearest.distanceMeters, status: "pending — sent to your manager for review" };
+             }
+           }
+         } else if (fn === "report_blocker") {
+diff --git a/mobile/supabase/functions/hr-ai-bot/logic.test.ts b/mobile/supabase/functions/hr-ai-bot/logic.test.ts
+new file mode 100644
+index 0000000..ea5488a
+--- /dev/null
++++ b/mobile/supabase/functions/hr-ai-bot/logic.test.ts
+@@ -0,0 +1,134 @@
++// Easy HR — unit tests for the bot's core logic (logic.ts).
++// Run with: npm test   (from the mobile/ folder)
++
++import {
++  haversineMeters,
++  computeTodayHours,
++  matchByName,
++  findNearestWorksite,
++  anomalyFlagForShift,
++} from "./logic";
++
++describe("haversineMeters", () => {
++  test("same point is zero distance", () => {
++    expect(haversineMeters(43.6532, -79.3832, 43.6532, -79.3832)).toBe(0);
++  });
++
++  test("Toronto downtown to Scarborough is roughly 15km", () => {
++    // Downtown Toronto -> Scarborough Town Centre, ~15km apart
++    const d = haversineMeters(43.6532, -79.3832, 43.7731, -79.2578);
++    expect(d).toBeGreaterThan(12000);
++    expect(d).toBeLessThan(18000);
++  });
++
++  test("150m geofence boundary behaves", () => {
++    // ~100m north of a point should be inside a 150m fence
++    const d = haversineMeters(43.6532, -79.3832, 43.6541, -79.3832);
++    expect(d).toBeGreaterThan(50);
++    expect(d).toBeLessThan(150);
++  });
++});
++
++describe("computeTodayHours", () => {
++  // Fixed "now": 2026-10-10 18:00 local
++  const now = new Date(2026, 9, 10, 18, 0, 0).getTime();
++
++  test("sums today's completed shifts", () => {
++    const logs = [
++      { clock_in: new Date(2026, 9, 10, 9, 0, 0).toISOString(), clock_out: new Date(2026, 9, 10, 13, 0, 0).toISOString() },
++      { clock_in: new Date(2026, 9, 10, 14, 0, 0).toISOString(), clock_out: new Date(2026, 9, 10, 17, 30, 0).toISOString() },
++    ];
++    expect(computeTodayHours(logs, now)).toBe(7.5);
++  });
++
++  test("counts an open shift up to now", () => {
++    const logs = [
++      { clock_in: new Date(2026, 9, 10, 9, 0, 0).toISOString(), clock_out: null },
++    ];
++    expect(computeTodayHours(logs, now)).toBe(9);
++  });
++
++  test("ignores yesterday's shifts", () => {
++    const logs = [
++      { clock_in: new Date(2026, 9, 9, 9, 0, 0).toISOString(), clock_out: new Date(2026, 9, 9, 17, 0, 0).toISOString() },
++    ];
++    expect(computeTodayHours(logs, now)).toBe(0);
++  });
++
++  test("ignores corrupt rows where clock_out is before clock_in", () => {
++    const logs = [
++      { clock_in: new Date(2026, 9, 10, 17, 0, 0).toISOString(), clock_out: new Date(2026, 9, 10, 9, 0, 0).toISOString() },
++    ];
++    expect(computeTodayHours(logs, now)).toBe(0);
++  });
++});
++
++describe("matchByName", () => {
++  const people = [
++    { id: "1", full_name: "Ahmed Khan" },
++    { id: "2", full_name: "Ahmed Raza" },
++    { id: "3", full_name: "Sara Malik" },
++  ];
++  const getName = (p: { full_name: string }) => p.full_name;
++
++  test("exact single match", () => {
++    const m = matchByName(people, getName, "Sara Malik");
++    expect(m.kind).toBe("one");
++    if (m.kind === "one") expect(m.value.id).toBe("3");
++  });
++
++  test("case-insensitive partial match", () => {
++    const m = matchByName(people, getName, "sara");
++    expect(m.kind).toBe("one");
++  });
++
++  test("ambiguous name returns many", () => {
++    const m = matchByName(people, getName, "ahmed");
++    expect(m.kind).toBe("many");
++    if (m.kind === "many") expect(m.values).toHaveLength(2);
++  });
++
++  test("unknown name returns none", () => {
++    expect(matchByName(people, getName, "Zubair").kind).toBe("none");
++  });
++
++  test("blank needle returns none", () => {
++    expect(matchByName(people, getName, "   ").kind).toBe("none");
++  });
++});
++
++describe("findNearestWorksite", () => {
++  const sites = [
++    { id: "a", name: "Downtown Office", latitude: 43.6532, longitude: -79.3832 },
++    { id: "b", name: "Scarborough Depot", latitude: 43.7731, longitude: -79.2578 },
++  ];
++
++  test("picks the closest site with rounded meters", () => {
++    const r = findNearestWorksite(sites, 43.654, -79.384, )!;
++    expect(r.site.id).toBe("a");
++    expect(r.distanceMeters).toBeGreaterThan(0);
++    expect(Number.isInteger(r.distanceMeters)).toBe(true);
++  });
++
++  test("empty site list returns null", () => {
++    expect(findNearestWorksite([], 43.65, -79.38)).toBeNull();
++  });
++});
++
++describe("anomalyFlagForShift", () => {
++  test("normal 8h shift is clean", () => {
++    expect(anomalyFlagForShift("2026-10-10T09:00:00Z", "2026-10-10T17:00:00Z")).toBe("Normal Shift");
++  });
++
++  test("13h shift is flagged excessive", () => {
++    expect(anomalyFlagForShift("2026-10-10T06:00:00Z", "2026-10-10T19:00:00Z")).toContain("Excessive Duration");
++  });
++
++  test("1-minute shift is flagged short", () => {
++    expect(anomalyFlagForShift("2026-10-10T09:00:00Z", "2026-10-10T09:01:00Z")).toContain("Unusually Short Shift");
++  });
++
++  test("exactly 12h is NOT flagged", () => {
++    expect(anomalyFlagForShift("2026-10-10T06:00:00Z", "2026-10-10T18:00:00Z")).toBe("Normal Shift");
++  });
++});
+diff --git a/mobile/supabase/functions/hr-ai-bot/logic.ts b/mobile/supabase/functions/hr-ai-bot/logic.ts
+new file mode 100644
+index 0000000..c49d378
+--- /dev/null
++++ b/mobile/supabase/functions/hr-ai-bot/logic.ts
+@@ -0,0 +1,91 @@
++// Easy HR — pure, testable logic for hr-ai-bot.
++//
++// This module has NO Deno or Supabase imports on purpose: every function here is
++// deterministic and unit-testable with plain Jest (see logic.test.ts).
++// index.ts imports these so the deployed bot and the tests run the same code.
++
++export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
++  const R = 6371e3;
++  const p1 = (lat1 * Math.PI) / 180;
++  const p2 = (lat2 * Math.PI) / 180;
++  const dp = ((lat2 - lat1) * Math.PI) / 180;
++  const dl = ((lon2 - lon1) * Math.PI) / 180;
++  const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
++  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
++}
++
++export interface ShiftLog {
++  clock_in: string;
++  clock_out: string | null;
++}
++
++/** Total hours worked since local midnight, given raw time_logs rows. */
++export function computeTodayHours(logs: ShiftLog[], nowMs: number): number {
++  const todayStart = new Date(nowMs);
++  todayStart.setHours(0, 0, 0, 0);
++  let ms = 0;
++  for (const log of logs) {
++    const s = new Date(log.clock_in).getTime();
++    if (s >= todayStart.getTime()) {
++      const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
++      if (e > s) ms += e - s;
++    }
++  }
++  return +(ms / 3600000).toFixed(2);
++}
++
++export type NameMatch<T> =
++  | { kind: "one"; value: T }
++  | { kind: "many"; values: T[] }
++  | { kind: "none" };
++
++/**
++ * Fuzzy name lookup used by assign_task / update_task_status / get_tasks.
++ * Returns exactly-one, ambiguous-many, or none — the bot turns each case
++ * into either an action or a clarifying question.
++ */
++export function matchByName<T>(items: T[], getName: (t: T) => string, needle: string): NameMatch<T> {
++  const n = needle.trim().toLowerCase();
++  if (!n) return { kind: "none" };
++  const hits = items.filter((i) => getName(i).toLowerCase().includes(n));
++  if (hits.length === 1) return { kind: "one", value: hits[0] };
++  if (hits.length > 1) return { kind: "many", values: hits };
++  return { kind: "none" };
++}
++
++export interface Worksite {
++  id: string;
++  name: string;
++  latitude: number;
++  longitude: number;
++}
++
++/** Nearest worksite to a GPS fix, with rounded distance in meters. */
++export function findNearestWorksite(
++  sites: Worksite[],
++  lat: number,
++  lng: number
++): { site: Worksite; distanceMeters: number } | null {
++  if (sites.length === 0) return null;
++  let best = sites[0];
++  let bestD = haversineMeters(lat, lng, best.latitude, best.longitude);
++  for (const s of sites.slice(1)) {
++    const d = haversineMeters(lat, lng, s.latitude, s.longitude);
++    if (d < bestD) {
++      bestD = d;
++      best = s;
++    }
++  }
++  return { site: best, distanceMeters: Math.round(bestD) };
++}
++
++/**
++ * Mirrors the clock-out anomaly rule in mobile/app/index.js.
++ * Keep both in sync: >12h shift or <3min shift gets flagged.
++ */
++export function anomalyFlagForShift(clockInIso: string, clockOutIso: string): string {
++  const hrs = (new Date(clockOutIso).getTime() - new Date(clockInIso).getTime()) / 3600000;
++  if (hrs > 12) return "⚠️ Flagged: Excessive Duration (> 12 Hours)";
++  if (hrs < 0.05) return "⚠️ Flagged: Unusually Short Shift (< 3 Mins)";
++  return "Normal Shift";
++}
+diff --git a/rls-policies.sql b/rls-policies.sql
+new file mode 100644
+index 0000000..d46421d
+--- /dev/null
++++ b/rls-policies.sql
+@@ -0,0 +1,165 @@
++-- Easy HR: Row Level Security hardening
++-- Run once in the Supabase dashboard SQL editor (project ejnkgsddglyabzsivcuu),
++-- AFTER tasks-migration.sql.
++--
++-- What this does:
++--  - Turns on RLS for every table (previously anyone with the app key could read/write everything).
++--  - Employees can only touch their OWN rows; managers can see/manage everything.
++--  - The AI edge function is unaffected (it uses the service-role key, which bypasses RLS).
++--  - New signups automatically get a profiles row so the checks work from day one.
++--  - Legacy tables (locations, clock_ins, geo_exceptions) are locked down completely.
++
++-- 0. Tasks table (created here too so this script runs standalone —
++--    safe to run even if tasks-migration.sql was already executed).
++CREATE TABLE IF NOT EXISTS public.tasks (
++  id uuid NOT NULL DEFAULT gen_random_uuid(),
++  title text NOT NULL,
++  description text,
++  assigned_to uuid,
++  assigned_by uuid,
++  status text NOT NULL DEFAULT 'pending'::text,
++  due_date date,
++  created_at timestamp with time zone DEFAULT now(),
++  updated_at timestamp with time zone DEFAULT now(),
++  CONSTRAINT tasks_pkey PRIMARY KEY (id),
++  CONSTRAINT tasks_assigned_to_fkey FOREIGN KEY (assigned_to) REFERENCES public.profiles(id),
++  CONSTRAINT tasks_assigned_by_fkey FOREIGN KEY (assigned_by) REFERENCES public.profiles(id)
++);
++
++-- 1. Manager check helper. SECURITY DEFINER avoids infinite recursion
++--    when a profiles policy needs to look at the profiles table.
++CREATE OR REPLACE FUNCTION public.is_manager()
++RETURNS boolean
++LANGUAGE sql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'manager');
++$$;
++
++-- 2. Auto-create a profile row on every new signup (id = auth user id).
++CREATE OR REPLACE FUNCTION public.handle_new_user()
++RETURNS trigger
++LANGUAGE plpgsql
++SECURITY DEFINER
++SET search_path = public
++AS $$
++BEGIN
++  INSERT INTO public.profiles (id, full_name, email, role)
++  VALUES (
++    NEW.id,
++    COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
++    NEW.email,
++    COALESCE(NEW.raw_user_meta_data->>'role', 'employee')
++  )
++  ON CONFLICT (id) DO NOTHING;
++  RETURN NEW;
++END;
++$$;
++
++DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
++CREATE TRIGGER on_auth_user_created
++AFTER INSERT ON auth.users
++FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
++
++-- 3. Enable RLS everywhere.
++ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.worksites ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.time_logs ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.time_breaks ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.time_exceptions ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.tasks ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.agent_audit_logs ENABLE ROW LEVEL SECURITY;
++-- Legacy / unused tables: locked down completely (no policies = deny all).
++ALTER TABLE public.locations ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.clock_ins ENABLE ROW LEVEL SECURITY;
++ALTER TABLE public.geo_exceptions ENABLE ROW LEVEL SECURITY;
++
++-- 4. profiles: own row, or everything for managers.
++DROP POLICY IF EXISTS "profiles_select_own_or_manager" ON public.profiles;
++CREATE POLICY "profiles_select_own_or_manager" ON public.profiles
++  FOR SELECT TO authenticated USING (auth.uid() = id OR public.is_manager());
++DROP POLICY IF EXISTS "profiles_insert_own" ON public.profiles;
++CREATE POLICY "profiles_insert_own" ON public.profiles
++  FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
++DROP POLICY IF EXISTS "profiles_update_own_or_manager" ON public.profiles;
++CREATE POLICY "profiles_update_own_or_manager" ON public.profiles
++  FOR UPDATE TO authenticated
++  USING (auth.uid() = id OR public.is_manager())
++  WITH CHECK (auth.uid() = id OR public.is_manager());
++
++-- 5. worksites: everyone can read (needed for GPS clock-in); nobody writes via the app.
++DROP POLICY IF EXISTS "worksites_select_all" ON public.worksites;
++CREATE POLICY "worksites_select_all" ON public.worksites
++  FOR SELECT TO authenticated USING (true);
++
++-- 6. time_logs: own rows, or everything for managers.
++DROP POLICY IF EXISTS "time_logs_select_own_or_manager" ON public.time_logs;
++CREATE POLICY "time_logs_select_own_or_manager" ON public.time_logs
++  FOR SELECT TO authenticated USING (auth.uid() = user_id OR public.is_manager());
++DROP POLICY IF EXISTS "time_logs_insert_own" ON public.time_logs;
++CREATE POLICY "time_logs_insert_own" ON public.time_logs
++  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
++DROP POLICY IF EXISTS "time_logs_update_own_or_manager" ON public.time_logs;
++CREATE POLICY "time_logs_update_own_or_manager" ON public.time_logs
++  FOR UPDATE TO authenticated
++  USING (auth.uid() = user_id OR public.is_manager())
++  WITH CHECK (auth.uid() = user_id OR public.is_manager());
++
++-- 7. time_breaks: tied to the employee's own time_log.
++DROP POLICY IF EXISTS "time_breaks_select_own_or_manager" ON public.time_breaks;
++CREATE POLICY "time_breaks_select_own_or_manager" ON public.time_breaks
++  FOR SELECT TO authenticated USING (
++    public.is_manager() OR EXISTS (
++      SELECT 1 FROM public.time_logs tl
++      WHERE tl.id = time_breaks.time_log_id AND tl.user_id = auth.uid()));
++DROP POLICY IF EXISTS "time_breaks_insert_own" ON public.time_breaks;
++CREATE POLICY "time_breaks_insert_own" ON public.time_breaks
++  FOR INSERT TO authenticated WITH CHECK (
++    public.is_manager() OR EXISTS (
++      SELECT 1 FROM public.time_logs tl
++      WHERE tl.id = time_breaks.time_log_id AND tl.user_id = auth.uid()));
++DROP POLICY IF EXISTS "time_breaks_update_own_or_manager" ON public.time_breaks;
++CREATE POLICY "time_breaks_update_own_or_manager" ON public.time_breaks
++  FOR UPDATE TO authenticated
++  USING (public.is_manager() OR EXISTS (
++      SELECT 1 FROM public.time_logs tl
++      WHERE tl.id = time_breaks.time_log_id AND tl.user_id = auth.uid()))
++  WITH CHECK (public.is_manager() OR EXISTS (
++      SELECT 1 FROM public.time_logs tl
++      WHERE tl.id = time_breaks.time_log_id AND tl.user_id = auth.uid()));
++
++-- 8. time_exceptions: employees file and view their own; only managers approve/reject.
++DROP POLICY IF EXISTS "time_exceptions_select_own_or_manager" ON public.time_exceptions;
++CREATE POLICY "time_exceptions_select_own_or_manager" ON public.time_exceptions
++  FOR SELECT TO authenticated USING (auth.uid() = user_id OR public.is_manager());
++DROP POLICY IF EXISTS "time_exceptions_insert_own" ON public.time_exceptions;
++CREATE POLICY "time_exceptions_insert_own" ON public.time_exceptions
++  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
++DROP POLICY IF EXISTS "time_exceptions_update_manager" ON public.time_exceptions;
++CREATE POLICY "time_exceptions_update_manager" ON public.time_exceptions
++  FOR UPDATE TO authenticated
++  USING (public.is_manager())
++  WITH CHECK (public.is_manager());
++
++-- 9. tasks: managers manage; employees see tasks assigned to/by them.
++DROP POLICY IF EXISTS "tasks_select_assigned_or_manager" ON public.tasks;
++CREATE POLICY "tasks_select_assigned_or_manager" ON public.tasks
++  FOR SELECT TO authenticated USING (
++    public.is_manager() OR auth.uid() = assigned_to OR auth.uid() = assigned_by);
++DROP POLICY IF EXISTS "tasks_insert_manager" ON public.tasks;
++CREATE POLICY "tasks_insert_manager" ON public.tasks
++  FOR INSERT TO authenticated WITH CHECK (public.is_manager());
++DROP POLICY IF EXISTS "tasks_update_manager" ON public.tasks;
++CREATE POLICY "tasks_update_manager" ON public.tasks
++  FOR UPDATE TO authenticated
++  USING (public.is_manager())
++  WITH CHECK (public.is_manager());
++
++-- 10. agent_audit_logs: employees log their own blockers; managers review all.
++DROP POLICY IF EXISTS "audit_select_own_or_manager" ON public.agent_audit_logs;
++CREATE POLICY "audit_select_own_or_manager" ON public.agent_audit_logs
++  FOR SELECT TO authenticated USING (auth.uid() = user_id OR public.is_manager());
++DROP POLICY IF EXISTS "audit_insert_own" ON public.agent_audit_logs;
++CREATE POLICY "audit_insert_own" ON public.agent_audit_logs
++  FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
