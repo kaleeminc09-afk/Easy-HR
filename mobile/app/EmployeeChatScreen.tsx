@@ -47,6 +47,12 @@ export default function EmployeeChatScreen() {
     setInputText('');
     setIsChatLoading(true);
 
+    // Send recent conversation so the bot follows pronouns and short follow-ups.
+    const history = [...messages, userMsg].slice(-20).map((m) => ({
+      role: m.role === 'bot' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
         method: 'POST',
@@ -59,13 +65,14 @@ export default function EmployeeChatScreen() {
           userId: session.user.id,
           role: 'employee',
           location: coords,
+          history,
         }),
       });
 
       const data = await response.json();
       if (data.error) throw new Error(data.error);
 
-      const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: data.reply };
+      const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: (data.reply || '').replace(/\*\*/g, '') };
       setMessages((prev) => [...prev, botMsg]);
     } catch (error: any) {
       const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: `Error: ${error.message}` };

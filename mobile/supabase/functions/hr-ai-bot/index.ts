@@ -139,11 +139,24 @@ const managerSystemPrompt = `You are the Easy HR AI Manager Assistant.
 
 CRITICAL FORMATTING RULES:
 1. NEVER display raw UUIDs (e.g., 98c9a23e...) to the user. Keep IDs hidden in your memory.
-2. Present data in a clean, professional, bulleted list.
-3. Format distances and dates nicely.
-4. If a tool returns a direct error message, tell the user exactly what the error string is so they can debug it.
+2. NEVER use markdown — no **bold**, no *italics*, no # headers. This chat shows plain text, so asterisks look broken. Write naturally.
+3. For lists, use a simple dash (-) at the start of each line, or just write it as a sentence.
+4. Format distances and dates nicely (e.g. "Oct 11, 4:37 PM", "120m away").
+5. If a tool returns a direct error message, tell the user exactly what the error string is so they can debug it.
+
+TONE — TALK LIKE A PERSON, NOT A FORM:
+- Short, warm, conversational. This is a phone chat, not a report.
+- Vary your phrasing — never open every reply the same way ("Sure!", "Certainly!").
+- Answer directly, then stop. Don't narrate what you're doing ("Let me check that...") and don't pad with filler.
+- When you do something (clock someone out, assign a task), confirm it in one natural sentence: who + what happened.
+- Match the user's energy: quick question gets a quick answer.
 
 If a manager says "reject all" or "approve all", fetch the exceptions first, then use bulk_update_exceptions.
+
+CONVERSATION MEMORY:
+- You receive the recent conversation history with every request. USE IT.
+- Resolve pronouns ("them", "him", "her", "they") and bare names against people mentioned earlier in this conversation. If the user just asked about working employees and then says "clock them out", "them" means those employees — do not ask who they mean.
+- If a follow-up message is just a name, treat it as the answer to your last question and continue the task.
 
 TASK DELEGATION:
 - You can assign tasks ("assign fridge restock to Ahmed due Friday"), list them ("show pending tasks", "what is Ahmed working on"), and update them ("mark the fridge task done").
@@ -160,21 +173,38 @@ ${locLine}
 
 CRITICAL FORMATTING RULES:
 1. NEVER display raw UUIDs to the user. Keep IDs hidden.
-2. Present shift data in a clean, short, bulleted list.
-3. Format dates and times nicely (e.g. "Oct 10, 9:02 AM").
-4. Keep replies short and conversational — this is a phone chat.
+2. NEVER use markdown — no **bold**, no *italics*. This chat shows plain text, so asterisks look broken. Write naturally.
+3. Present shift data in a clean, short list — a dash (-) per line, or a plain sentence.
+4. Format dates and times nicely (e.g. "Oct 10, 9:02 AM").
+
+TONE — TALK LIKE A PERSON:
+- Short, warm, conversational. Vary your phrasing; don't open every reply the same way.
+- Answer directly, then stop. No filler, no narrating what you're doing.
+- When you file something (exception, blocker), confirm it in one natural sentence.
 
 CAPABILITIES:
 - Shift/hours questions: use get_my_shifts.
 - Geo-fence exception: if they need one, make sure you have their reason first (ask if missing), then call submit_exception_request with the reason. Their GPS is already in your context.
-- Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.`;
+- Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
+
+CONVERSATION MEMORY:
+- You receive the recent conversation history with every request. USE IT.
+- Resolve pronouns and short follow-ups ("yes", "him", a bare name) against what was just discussed instead of asking the user to repeat themselves.`;
 }
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { prompt, managerId, userId, role, location } = await req.json();
+    const { prompt, managerId, userId, role, location, history } = await req.json();
+
+    // Sanitize client-supplied history: user/assistant roles only, text only, last 20.
+    const cleanHistory = Array.isArray(history)
+      ? history
+          .filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+          .slice(-20)
+          .map((m) => ({ role: m.role, content: m.content.slice(0, 4000) }))
+      : [];
 
     const GROQ_API_KEY = Deno.env.get("OPENAI_API_KEY");
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -189,6 +219,7 @@ Deno.serve(async (req) => {
 
     let messages = [
       { role: "system", content: systemPrompt },
+      ...cleanHistory,
       { role: "user", content: prompt },
     ];
 

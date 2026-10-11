@@ -196,6 +196,12 @@ export default function ManagerDashboard() {
     setInputText('');
     setIsChatLoading(true);
 
+    // Send recent conversation so the bot can resolve "them", bare names, etc.
+    const history = [...messages, userMsg].slice(-20).map((m) => ({
+      role: m.role === 'bot' ? 'assistant' : 'user',
+      content: m.content,
+    }));
+
     try {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
         method: 'POST',
@@ -206,13 +212,14 @@ export default function ManagerDashboard() {
         body: JSON.stringify({
           prompt: text,
           managerId: currentUser?.id || 'mgr_123',
+          history,
         }),
       });
 
       const data = await response.json();
       if (data.error) throw new Error(data.error);
 
-      const botMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: data.reply };
+      const botMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: (data.reply || '').replace(/\*\*/g, '') };
       setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
       const errorMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: `Error: ${error.message}` };
