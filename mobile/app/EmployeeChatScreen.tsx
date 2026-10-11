@@ -4,8 +4,8 @@ import { Link } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 
-const SUPABASE_URL = 'https://ejnkgsddglyabzsivcuu.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_RKZg5K10ckrn_icSUUM7KQ_MM71egkI';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 type ChatMessage = { id: string; role: 'user' | 'bot'; content: string };
 

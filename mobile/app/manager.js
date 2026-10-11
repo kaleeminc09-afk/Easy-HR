@@ -4,8 +4,8 @@ import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 
 // Added Keys for the Edge Function connection
-const SUPABASE_URL = 'https://ejnkgsddglyabzsivcuu.supabase.co';
-const SUPABASE_ANON_KEY = 'sb_publishable_RKZg5K10ckrn_icSUUM7KQ_MM71egkI';
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 export default function ManagerDashboard() {
   const router = useRouter();
