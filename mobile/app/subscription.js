@@ -6,15 +6,16 @@ import { colors, spacing, radius, type, elevation } from '../lib/theme';
 
 // First month free on every plan — no permanent free tier.
 const PLANS = {
-  pro: { name: 'Pro', price: '$29/mo', limit: 10, features: ['Up to 10 employees', 'Geofenced clock in/out', 'AI assistant & anomaly review', 'Payroll CSV export'] },
-  business: { name: 'Business', price: '$59/mo', limit: 30, features: ['Up to 30 employees', 'Everything in Pro', 'Priority support'] },
+  starter: { name: 'Starter', price: '$25/mo', limit: 5, features: ['Up to 5 employees', 'Geofenced clock in/out', 'Shift logs & exceptions'] },
+  growth: { name: 'Growth', price: '$59/mo', limit: 15, features: ['Up to 15 employees', 'Everything in Starter', 'AI assistant & anomaly review', 'Payroll CSV export'] },
+  business: { name: 'Business', price: '$119/mo', limit: 40, features: ['Up to 40 employees', 'Everything in Growth', 'Priority support'] },
 };
 
 export default function SubscriptionScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [plan, setPlan] = useState('pro');
+  const [plan, setPlan] = useState('starter');
   const [status, setStatus] = useState('trialing');
   const [periodEnd, setPeriodEnd] = useState(null);
   const [employeeCount, setEmployeeCount] = useState(0);
@@ -39,7 +40,7 @@ export default function SubscriptionScreen() {
       .eq('owner_id', session.user.id)
       .maybeSingle();
     if (sub) {
-      setPlan(sub.plan || 'pro');
+      setPlan(sub.plan || 'starter');
       setStatus(sub.status || 'trialing');
       setPeriodEnd(sub.current_period_end);
     }
@@ -99,7 +100,7 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const planInfo = PLANS[plan] || PLANS.pro;
+  const planInfo = PLANS[plan] || PLANS.starter;
   const usagePct = Math.min(100, Math.round((employeeCount / planInfo.limit) * 100));
   const isTrial = status === 'trialing';
   const daysLeft = periodEnd
