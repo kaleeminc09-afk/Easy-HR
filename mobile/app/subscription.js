@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation } from '../lib/theme';
 
+// First month free on every plan — no permanent free tier.
 const PLANS = {
-  free: { name: 'Free', price: '$0', limit: 5, features: ['Up to 5 employees', 'Geofenced clock in/out', 'Shift logs & exceptions'] },
-  pro: { name: 'Pro', price: '$29/mo', limit: 10, features: ['Up to 10 employees', 'Everything in Free', 'AI assistant & anomaly review', 'Payroll CSV export'] },
+  pro: { name: 'Pro', price: '$29/mo', limit: 10, features: ['Up to 10 employees', 'Geofenced clock in/out', 'AI assistant & anomaly review', 'Payroll CSV export'] },
   business: { name: 'Business', price: '$59/mo', limit: 30, features: ['Up to 30 employees', 'Everything in Pro', 'Priority support'] },
 };
 
@@ -14,17 +14,22 @@ export default function SubscriptionScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [plan, setPlan] = useState('free');
-  const [status, setStatus] = useState('active');
+  const [plan, setPlan] = useState('pro');
+  const [status, setStatus] = useState('trialing');
   const [periodEnd, setPeriodEnd] = useState(null);
   const [employeeCount, setEmployeeCount] = useState(0);
+  const [businessId, setBusinessId] = useState(null);
+  const [businessName, setBusinessName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
+  const [savingBiz, setSavingBiz] = useState(false);
+  const [bizMessage, setBizMessage] = useState('');
 
   useEffect(() => { init(); }, []);
 
   const init = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
-    const { data: me } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
     if (!me || me.role !== 'admin') { setLoading(false); return; }
     setIsAdmin(true);
 
@@ -34,14 +39,39 @@ export default function SubscriptionScreen() {
       .eq('owner_id', session.user.id)
       .maybeSingle();
     if (sub) {
-      setPlan(sub.plan || 'free');
-      setStatus(sub.status || 'active');
+      setPlan(sub.plan || 'pro');
+      setStatus(sub.status || 'trialing');
       setPeriodEnd(sub.current_period_end);
+    }
+
+    if (me.business_id) {
+      const { data: biz } = await supabase
+        .from('businesses')
+        .select('id, business_name, account_number')
+        .eq('id', me.business_id)
+        .single();
+      if (biz) {
+        setBusinessId(biz.id);
+        setBusinessName(biz.business_name || '');
+        setAccountNumber(biz.account_number || '');
+      }
     }
 
     const { count } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
     setEmployeeCount(count || 0);
     setLoading(false);
+  };
+
+  const saveBusiness = async () => {
+    if (!businessId) return;
+    setSavingBiz(true);
+    setBizMessage('');
+    const { error } = await supabase
+      .from('businesses')
+      .update({ business_name: businessName.trim() })
+      .eq('id', businessId);
+    setBizMessage(error ? 'Could not save. Check your connection and try again.' : 'Business name updated.');
+    setSavingBiz(false);
   };
 
   if (loading) {
@@ -69,8 +99,12 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const planInfo = PLANS[plan] || PLANS.free;
+  const planInfo = PLANS[plan] || PLANS.pro;
   const usagePct = Math.min(100, Math.round((employeeCount / planInfo.limit) * 100));
+  const isTrial = status === 'trialing';
+  const daysLeft = periodEnd
+    ? Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / 86400000))
+    : 30;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -92,9 +126,17 @@ export default function SubscriptionScreen() {
               <Text style={styles.planPrice}>{planInfo.price}</Text>
             </View>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{status.toUpperCase()}</Text>
+              <Text style={styles.statusText}>{isTrial ? 'TRIAL' : status.toUpperCase()}</Text>
             </View>
           </View>
+
+          {isTrial && (
+            <View style={styles.trialBanner}>
+              <Text style={styles.trialText}>
+                First month free — {daysLeft} day{daysLeft === 1 ? '' : 's'} left. Then {planInfo.price} after the trial.
+              </Text>
+            </View>
+          )}
 
           <Text style={styles.sectionLabel}>Team usage</Text>
           <View style={styles.usageRow}>
@@ -105,7 +147,7 @@ export default function SubscriptionScreen() {
             <View style={[styles.progressFill, { width: `${usagePct}%` }]} />
           </View>
 
-          {periodEnd && (
+          {periodEnd && !isTrial && (
             <Text style={styles.renewText}>
               Renews {new Date(periodEnd).toLocaleDateString()}
             </Text>
@@ -118,15 +160,14 @@ export default function SubscriptionScreen() {
 
           <Link href="/payment" asChild>
             <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>
-                {plan === 'free' ? 'Upgrade Plan' : 'Change Plan'}
-              </Text>
+              <Text style={styles.primaryButtonText}>Change Plan</Text>
             </TouchableOpacity>
           </Link>
         </View>
 
         <View style={styles.allPlansCard}>
           <Text style={styles.sectionLabel}>All plans</Text>
+          <Text style={styles.trialNote}>Every plan starts with a free first month.</Text>
           {Object.entries(PLANS).map(([key, p]) => (
             <View key={key} style={[styles.planRow, key === plan && styles.planRowActive]}>
               <View>
@@ -136,6 +177,25 @@ export default function SubscriptionScreen() {
               {key === plan && <Text style={styles.currentTag}>CURRENT</Text>}
             </View>
           ))}
+        </View>
+
+        <View style={styles.allPlansCard}>
+          <Text style={styles.sectionLabel}>Business</Text>
+          <Text style={styles.trialNote}>Shown to every employee and manager. Only admins can change it.</Text>
+          <Text style={styles.fieldLabel}>Business name</Text>
+          <TextInput
+            style={styles.input}
+            value={businessName}
+            onChangeText={setBusinessName}
+            placeholder="Your company name"
+            placeholderTextColor={colors.inputPlaceholder}
+          />
+          <Text style={styles.fieldLabel}>Account number</Text>
+          <Text style={styles.accountNumber}>{accountNumber || '—'}</Text>
+          {bizMessage ? <Text style={styles.bizMessage}>{bizMessage}</Text> : null}
+          <TouchableOpacity style={styles.primaryButton} onPress={saveBusiness} disabled={savingBiz || !businessId}>
+            {savingBiz ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Business Name</Text>}
+          </TouchableOpacity>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -151,12 +211,15 @@ const styles = StyleSheet.create({
   navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
   content: { padding: spacing.lg, gap: spacing.md },
   planCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
+  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
   planName: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
   planPrice: { fontSize: 15, color: colors.accent, fontWeight: '600', marginTop: 2 },
   statusBadge: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   statusText: { ...type.label, color: colors.accent },
+  trialBanner: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  trialText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600', textAlign: 'center' },
   sectionLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
+  trialNote: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
   usageRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
   usageText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
   progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
@@ -171,6 +234,10 @@ const styles = StyleSheet.create({
   planRowName: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
   planRowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   currentTag: { ...type.label, color: colors.accent },
+  fieldLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.xs },
+  input: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary },
+  accountNumber: { fontSize: 16, fontWeight: '700', color: colors.accent, letterSpacing: 1 },
+  bizMessage: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   deniedEmoji: { fontSize: 48, marginBottom: spacing.md },
   deniedTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },

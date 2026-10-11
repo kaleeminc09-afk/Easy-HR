@@ -13,6 +13,8 @@ export default function ProfileScreen() {
   const [email, setEmail] = useState('');
   const [role, setRole] = useState('employee');
   const [fullName, setFullName] = useState('');
+  const [businessName, setBusinessName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -24,10 +26,14 @@ export default function ProfileScreen() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
     setEmail(session.user.email || '');
-    const { data } = await supabase.from('profiles').select('full_name, role').eq('id', session.user.id).single();
+    const { data } = await supabase.from('profiles').select('full_name, role, business_id').eq('id', session.user.id).single();
     if (data) {
       setFullName(data.full_name || '');
       setRole(data.role || 'employee');
+      if (data.business_id) {
+        const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', data.business_id).single();
+        if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
+      }
     }
     setLoading(false);
   };
@@ -101,6 +107,12 @@ export default function ProfileScreen() {
           <View style={styles.roleBadge}>
             <Text style={styles.roleBadgeText}>{role.toUpperCase()}</Text>
           </View>
+          {businessName ? (
+            <View style={styles.bizBox}>
+              <Text style={styles.bizName}>{businessName}</Text>
+              {accountNumber ? <Text style={styles.bizAcct}>Acct #{accountNumber}</Text> : null}
+            </View>
+          ) : null}
 
           <Text style={styles.label}>Full name</Text>
           <TextInput
@@ -158,6 +170,9 @@ const styles = StyleSheet.create({
   email: { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
   roleBadge: { marginTop: spacing.sm, marginBottom: spacing.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   roleBadgeText: { ...type.label, color: colors.accent },
+  bizBox: { alignItems: 'center', marginBottom: spacing.lg },
+  bizName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  bizAcct: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs, alignSelf: 'flex-start' },
   input: { width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
   message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },

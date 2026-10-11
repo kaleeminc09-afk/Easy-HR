@@ -7,6 +7,7 @@ import { colors, spacing, radius, type, elevation } from '../lib/theme';
 
 export default function App() {
   const [session, setSession] = useState(null);
+  const [businessName, setBusinessName] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Auth Form State
@@ -42,6 +43,17 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!session) { setBusinessName(''); return; }
+    (async () => {
+      const { data } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
+      if (data && data.business_id) {
+        const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', data.business_id).single();
+        if (biz) setBusinessName(biz.business_name || '');
+      }
+    })();
+  }, [session]);
 
   useEffect(() => {
     let timer = null;
@@ -394,7 +406,7 @@ export default function App() {
       <View style={styles.empHeader}>
         <View>
           <Text style={styles.empBrand}>\u2726 NorthShift</Text>
-          <Text style={styles.empEmail}>{session.user.email}</Text>
+          <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
         </View>
         <View style={styles.empHeaderRight}>
           <Link href="/EmployeeChatScreen" asChild>

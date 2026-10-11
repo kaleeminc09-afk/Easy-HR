@@ -1,0 +1,485 @@
+diff --git a/business-migration.sql b/business-migration.sql
+new file mode 100644
+index 0000000..39f15b2
+--- /dev/null
++++ b/business-migration.sql
+@@ -0,0 +1,75 @@
++-- NorthShift business identity migration. Run once in the Supabase SQL editor.
++-- Safe to re-run.
++--
++-- What it does:
++--  1. Creates public.businesses: each client company gets a unique
++--     account number (e.g. NS-7K2P9X) and an admin-editable business name.
++--  2. Links public.profiles to a business via business_id.
++--  3. Seeds one business per existing admin and assigns all existing
++--     profiles to the first admin's business.
++--
++-- Notes:
++--  - Only admins can create/edit businesses (RLS). Every signed-in user
++--    can see their own business's name and account number.
++--  - Support email shown in the app: support@northshiftapp.com
++--    (confirm/create this mailbox before launch).
++
++-- 1) Businesses table
++CREATE TABLE IF NOT EXISTS public.businesses (
++  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
++  account_number TEXT UNIQUE NOT NULL,
++  business_name TEXT NOT NULL DEFAULT 'My Business',
++  owner_id UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
++  created_at TIMESTAMPTZ DEFAULT now()
++);
++
++-- 2) Account number generator: NS-XXXXXX, collision-safe
++CREATE OR REPLACE FUNCTION public.generate_account_number()
++RETURNS TEXT
++LANGUAGE plpgsql
++SET search_path = public
++AS $$
++DECLARE
++  new_num TEXT;
++BEGIN
++  LOOP
++    new_num := 'NS-' || upper(substr(md5(random()::text || clock_timestamp()::text), 1, 6));
++    EXIT WHEN NOT EXISTS (SELECT 1 FROM public.businesses WHERE account_number = new_num);
++  END LOOP;
++  RETURN new_num;
++END;
++$$;
++
++-- 3) Link profiles to a business
++ALTER TABLE public.profiles
++  ADD COLUMN IF NOT EXISTS business_id UUID REFERENCES public.businesses(id) ON DELETE SET NULL;
++
++-- 4) RLS
++ALTER TABLE public.businesses ENABLE ROW LEVEL SECURITY;
++
++DROP POLICY IF EXISTS businesses_select_own_or_admin ON public.businesses;
++CREATE POLICY businesses_select_own_or_admin ON public.businesses
++  FOR SELECT TO authenticated
++  USING (
++    public.is_admin()
++    OR id IN (SELECT business_id FROM public.profiles WHERE id = auth.uid())
++  );
++
++DROP POLICY IF EXISTS businesses_admin_write ON public.businesses;
++CREATE POLICY businesses_admin_write ON public.businesses
++  FOR ALL TO authenticated
++  USING (public.is_admin())
++  WITH CHECK (public.is_admin());
++
++-- 5) Seed: one business per existing admin
++INSERT INTO public.businesses (account_number, business_name, owner_id)
++SELECT public.generate_account_number(), 'My Business', id
++FROM public.profiles
++WHERE role = 'admin'
++  AND NOT EXISTS (SELECT 1 FROM public.businesses WHERE owner_id = profiles.id);
++
++-- 6) Assign every profile without a business to the first business
++UPDATE public.profiles
++SET business_id = (SELECT id FROM public.businesses ORDER BY created_at LIMIT 1)
++WHERE business_id IS NULL
++  AND EXISTS (SELECT 1 FROM public.businesses);
+diff --git a/mobile/app/index.js b/mobile/app/index.js
+index f7460dc..7b3021f 100644
+--- a/mobile/app/index.js
++++ b/mobile/app/index.js
+@@ -7,6 +7,7 @@ import { colors, spacing, radius, type, elevation } from '../lib/theme';
+ 
+ export default function App() {
+   const [session, setSession] = useState(null);
++  const [businessName, setBusinessName] = useState('');
+   const [loading, setLoading] = useState(true);
+ 
+   // Auth Form State
+@@ -43,6 +44,17 @@ export default function App() {
+     return () => subscription.unsubscribe();
+   }, []);
+ 
++  useEffect(() => {
++    if (!session) { setBusinessName(''); return; }
++    (async () => {
++      const { data } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
++      if (data && data.business_id) {
++        const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', data.business_id).single();
++        if (biz) setBusinessName(biz.business_name || '');
++      }
++    })();
++  }, [session]);
++
+   useEffect(() => {
+     let timer = null;
+     if (activeSession && !activeBreak) {
+@@ -394,7 +406,7 @@ export default function App() {
+       <View style={styles.empHeader}>
+         <View>
+           <Text style={styles.empBrand}>\u2726 NorthShift</Text>
+-          <Text style={styles.empEmail}>{session.user.email}</Text>
++          <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
+         </View>
+         <View style={styles.empHeaderRight}>
+           <Link href="/EmployeeChatScreen" asChild>
+diff --git a/mobile/app/manager.js b/mobile/app/manager.js
+index 30ec066..4f3d60a 100644
+--- a/mobile/app/manager.js
++++ b/mobile/app/manager.js
+@@ -13,6 +13,7 @@ export default function ManagerDashboard() {
+   const [loading, setLoading] = useState(true);
+   const [isAuthorized, setIsAuthorized] = useState(false);
+   const [userRole, setUserRole] = useState('manager');
++  const [businessName, setBusinessName] = useState('');
+   const [currentUser, setCurrentUser] = useState(null);
+   
+   const [logs, setLogs] = useState([]);
+@@ -54,6 +55,11 @@ export default function ManagerDashboard() {
+ 
+       setIsAuthorized(true);
+       setUserRole(profile.role);
++      const { data: profBiz } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
++      if (profBiz && profBiz.business_id) {
++        const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', profBiz.business_id).single();
++        if (biz) setBusinessName(biz.business_name || '');
++      }
+       await fetchAllManagerData();
+     } catch (err) {
+       console.error('Authorization error:', err);
+@@ -248,7 +254,7 @@ export default function ManagerDashboard() {
+       <View style={styles.header}>
+         <View>
+           <Text style={styles.title}>\u2726 NorthShift</Text>
+-          <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>
++          {businessName ? <Text style={styles.subtitle}>{businessName} \u00b7 Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>}
+         </View>
+         <View style={{ flexDirection: 'row', gap: 8 }}>
+           <Link href="/profile" asChild>
+diff --git a/mobile/app/profile.js b/mobile/app/profile.js
+index 9c2a947..9deb344 100644
+--- a/mobile/app/profile.js
++++ b/mobile/app/profile.js
+@@ -13,6 +13,8 @@ export default function ProfileScreen() {
+   const [email, setEmail] = useState('');
+   const [role, setRole] = useState('employee');
+   const [fullName, setFullName] = useState('');
++  const [businessName, setBusinessName] = useState('');
++  const [accountNumber, setAccountNumber] = useState('');
+   const [saving, setSaving] = useState(false);
+   const [message, setMessage] = useState('');
+   const [confirmingDelete, setConfirmingDelete] = useState(false);
+@@ -24,10 +26,14 @@ export default function ProfileScreen() {
+     const { data: { session } } = await supabase.auth.getSession();
+     if (!session) { router.replace('/'); return; }
+     setEmail(session.user.email || '');
+-    const { data } = await supabase.from('profiles').select('full_name, role').eq('id', session.user.id).single();
++    const { data } = await supabase.from('profiles').select('full_name, role, business_id').eq('id', session.user.id).single();
+     if (data) {
+       setFullName(data.full_name || '');
+       setRole(data.role || 'employee');
++      if (data.business_id) {
++        const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', data.business_id).single();
++        if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
++      }
+     }
+     setLoading(false);
+   };
+@@ -101,6 +107,12 @@ export default function ProfileScreen() {
+           <View style={styles.roleBadge}>
+             <Text style={styles.roleBadgeText}>{role.toUpperCase()}</Text>
+           </View>
++          {businessName ? (
++            <View style={styles.bizBox}>
++              <Text style={styles.bizName}>{businessName}</Text>
++              {accountNumber ? <Text style={styles.bizAcct}>Acct #{accountNumber}</Text> : null}
++            </View>
++          ) : null}
+ 
+           <Text style={styles.label}>Full name</Text>
+           <TextInput
+@@ -158,6 +170,9 @@ const styles = StyleSheet.create({
+   email: { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
+   roleBadge: { marginTop: spacing.sm, marginBottom: spacing.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
+   roleBadgeText: { ...type.label, color: colors.accent },
++  bizBox: { alignItems: 'center', marginBottom: spacing.lg },
++  bizName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
++  bizAcct: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+   label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs, alignSelf: 'flex-start' },
+   input: { width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
+   message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
+diff --git a/mobile/app/subscription.js b/mobile/app/subscription.js
+index 475741a..ad01582 100644
+--- a/mobile/app/subscription.js
++++ b/mobile/app/subscription.js
+@@ -1,12 +1,12 @@
+ import React, { useState, useEffect } from 'react';
+-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
++import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
+ import { useRouter, Link } from 'expo-router';
+ import { supabase } from '../lib/supabase';
+ import { colors, spacing, radius, type, elevation } from '../lib/theme';
+ 
++// First month free on every plan — no permanent free tier.
+ const PLANS = {
+-  free: { name: 'Free', price: '$0', limit: 5, features: ['Up to 5 employees', 'Geofenced clock in/out', 'Shift logs & exceptions'] },
+-  pro: { name: 'Pro', price: '$29/mo', limit: 10, features: ['Up to 10 employees', 'Everything in Free', 'AI assistant & anomaly review', 'Payroll CSV export'] },
++  pro: { name: 'Pro', price: '$29/mo', limit: 10, features: ['Up to 10 employees', 'Geofenced clock in/out', 'AI assistant & anomaly review', 'Payroll CSV export'] },
+   business: { name: 'Business', price: '$59/mo', limit: 30, features: ['Up to 30 employees', 'Everything in Pro', 'Priority support'] },
+ };
+ 
+@@ -14,17 +14,22 @@ export default function SubscriptionScreen() {
+   const router = useRouter();
+   const [loading, setLoading] = useState(true);
+   const [isAdmin, setIsAdmin] = useState(false);
+-  const [plan, setPlan] = useState('free');
+-  const [status, setStatus] = useState('active');
++  const [plan, setPlan] = useState('pro');
++  const [status, setStatus] = useState('trialing');
+   const [periodEnd, setPeriodEnd] = useState(null);
+   const [employeeCount, setEmployeeCount] = useState(0);
++  const [businessId, setBusinessId] = useState(null);
++  const [businessName, setBusinessName] = useState('');
++  const [accountNumber, setAccountNumber] = useState('');
++  const [savingBiz, setSavingBiz] = useState(false);
++  const [bizMessage, setBizMessage] = useState('');
+ 
+   useEffect(() => { init(); }, []);
+ 
+   const init = async () => {
+     const { data: { session } } = await supabase.auth.getSession();
+     if (!session) { router.replace('/'); return; }
+-    const { data: me } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
++    const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
+     if (!me || me.role !== 'admin') { setLoading(false); return; }
+     setIsAdmin(true);
+ 
+@@ -34,16 +39,41 @@ export default function SubscriptionScreen() {
+       .eq('owner_id', session.user.id)
+       .maybeSingle();
+     if (sub) {
+-      setPlan(sub.plan || 'free');
+-      setStatus(sub.status || 'active');
++      setPlan(sub.plan || 'pro');
++      setStatus(sub.status || 'trialing');
+       setPeriodEnd(sub.current_period_end);
+     }
+ 
++    if (me.business_id) {
++      const { data: biz } = await supabase
++        .from('businesses')
++        .select('id, business_name, account_number')
++        .eq('id', me.business_id)
++        .single();
++      if (biz) {
++        setBusinessId(biz.id);
++        setBusinessName(biz.business_name || '');
++        setAccountNumber(biz.account_number || '');
++      }
++    }
++
+     const { count } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
+     setEmployeeCount(count || 0);
+     setLoading(false);
+   };
+ 
++  const saveBusiness = async () => {
++    if (!businessId) return;
++    setSavingBiz(true);
++    setBizMessage('');
++    const { error } = await supabase
++      .from('businesses')
++      .update({ business_name: businessName.trim() })
++      .eq('id', businessId);
++    setBizMessage(error ? 'Could not save. Check your connection and try again.' : 'Business name updated.');
++    setSavingBiz(false);
++  };
++
+   if (loading) {
+     return (
+       <View style={styles.loadingContainer}>
+@@ -69,8 +99,12 @@ export default function SubscriptionScreen() {
+     );
+   }
+ 
+-  const planInfo = PLANS[plan] || PLANS.free;
++  const planInfo = PLANS[plan] || PLANS.pro;
+   const usagePct = Math.min(100, Math.round((employeeCount / planInfo.limit) * 100));
++  const isTrial = status === 'trialing';
++  const daysLeft = periodEnd
++    ? Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / 86400000))
++    : 30;
+ 
+   return (
+     <SafeAreaView style={styles.container}>
+@@ -92,10 +126,18 @@ export default function SubscriptionScreen() {
+               <Text style={styles.planPrice}>{planInfo.price}</Text>
+             </View>
+             <View style={styles.statusBadge}>
+-              <Text style={styles.statusText}>{status.toUpperCase()}</Text>
++              <Text style={styles.statusText}>{isTrial ? 'TRIAL' : status.toUpperCase()}</Text>
+             </View>
+           </View>
+ 
++          {isTrial && (
++            <View style={styles.trialBanner}>
++              <Text style={styles.trialText}>
++                First month free — {daysLeft} day{daysLeft === 1 ? '' : 's'} left. Then {planInfo.price} after the trial.
++              </Text>
++            </View>
++          )}
++
+           <Text style={styles.sectionLabel}>Team usage</Text>
+           <View style={styles.usageRow}>
+             <Text style={styles.usageText}>{employeeCount} of {planInfo.limit} employees</Text>
+@@ -105,7 +147,7 @@ export default function SubscriptionScreen() {
+             <View style={[styles.progressFill, { width: `${usagePct}%` }]} />
+           </View>
+ 
+-          {periodEnd && (
++          {periodEnd && !isTrial && (
+             <Text style={styles.renewText}>
+               Renews {new Date(periodEnd).toLocaleDateString()}
+             </Text>
+@@ -118,15 +160,14 @@ export default function SubscriptionScreen() {
+ 
+           <Link href="/payment" asChild>
+             <TouchableOpacity style={styles.primaryButton}>
+-              <Text style={styles.primaryButtonText}>
+-                {plan === 'free' ? 'Upgrade Plan' : 'Change Plan'}
+-              </Text>
++              <Text style={styles.primaryButtonText}>Change Plan</Text>
+             </TouchableOpacity>
+           </Link>
+         </View>
+ 
+         <View style={styles.allPlansCard}>
+           <Text style={styles.sectionLabel}>All plans</Text>
++          <Text style={styles.trialNote}>Every plan starts with a free first month.</Text>
+           {Object.entries(PLANS).map(([key, p]) => (
+             <View key={key} style={[styles.planRow, key === plan && styles.planRowActive]}>
+               <View>
+@@ -137,6 +178,25 @@ export default function SubscriptionScreen() {
+             </View>
+           ))}
+         </View>
++
++        <View style={styles.allPlansCard}>
++          <Text style={styles.sectionLabel}>Business</Text>
++          <Text style={styles.trialNote}>Shown to every employee and manager. Only admins can change it.</Text>
++          <Text style={styles.fieldLabel}>Business name</Text>
++          <TextInput
++            style={styles.input}
++            value={businessName}
++            onChangeText={setBusinessName}
++            placeholder="Your company name"
++            placeholderTextColor={colors.inputPlaceholder}
++          />
++          <Text style={styles.fieldLabel}>Account number</Text>
++          <Text style={styles.accountNumber}>{accountNumber || '—'}</Text>
++          {bizMessage ? <Text style={styles.bizMessage}>{bizMessage}</Text> : null}
++          <TouchableOpacity style={styles.primaryButton} onPress={saveBusiness} disabled={savingBiz || !businessId}>
++            {savingBiz ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Business Name</Text>}
++          </TouchableOpacity>
++        </View>
+       </ScrollView>
+     </SafeAreaView>
+   );
+@@ -151,12 +211,15 @@ const styles = StyleSheet.create({
+   navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+   content: { padding: spacing.lg, gap: spacing.md },
+   planCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
+-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.lg },
++  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+   planName: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
+   planPrice: { fontSize: 15, color: colors.accent, fontWeight: '600', marginTop: 2 },
+   statusBadge: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
+   statusText: { ...type.label, color: colors.accent },
++  trialBanner: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
++  trialText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600', textAlign: 'center' },
+   sectionLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
++  trialNote: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
+   usageRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
+   usageText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+   progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
+@@ -171,6 +234,10 @@ const styles = StyleSheet.create({
+   planRowName: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
+   planRowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+   currentTag: { ...type.label, color: colors.accent },
++  fieldLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.xs },
++  input: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary },
++  accountNumber: { fontSize: 16, fontWeight: '700', color: colors.accent, letterSpacing: 1 },
++  bizMessage: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
+   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+   deniedEmoji: { fontSize: 48, marginBottom: spacing.md },
+   deniedTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
+diff --git a/mobile/app/users.js b/mobile/app/users.js
+index 120cb95..bee0103 100644
+--- a/mobile/app/users.js
++++ b/mobile/app/users.js
+@@ -12,6 +12,9 @@ export default function UsersScreen() {
+   const [myId, setMyId] = useState(null);
+   const [busyId, setBusyId] = useState(null);
+   const [message, setMessage] = useState('');
++  const [employeeLimit, setEmployeeLimit] = useState(null);
++  const [businessName, setBusinessName] = useState('');
++  const [accountNumber, setAccountNumber] = useState('');
+ 
+   useEffect(() => { init(); }, []);
+ 
+@@ -19,9 +22,15 @@ export default function UsersScreen() {
+     const { data: { session } } = await supabase.auth.getSession();
+     if (!session) { router.replace('/'); return; }
+     setMyId(session.user.id);
+-    const { data: me } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
++    const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
+     if (!me || me.role !== 'admin') { setLoading(false); return; }
+     setIsAdmin(true);
++    if (me.business_id) {
++      const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', me.business_id).single();
++      if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
++    }
++    const { data: sub } = await supabase.from('subscriptions').select('employee_limit').eq('owner_id', session.user.id).maybeSingle();
++    if (sub) setEmployeeLimit(sub.employee_limit);
+     await loadUsers();
+     setLoading(false);
+   };
+@@ -93,6 +102,27 @@ export default function UsersScreen() {
+ 
+       <ScrollView contentContainerStyle={styles.content}>
+         {message ? <Text style={styles.message}>{message}</Text> : null}
++        {employeeLimit !== null && (
++          <View style={styles.usageCard}>
++            <Text style={styles.usageText}>{users.length} of {employeeLimit} employees</Text>
++            <View style={styles.progressTrack}>
++              <View style={[styles.progressFill, { width: `${Math.min(100, Math.round((users.length / employeeLimit) * 100))}%` }]} />
++            </View>
++          </View>
++        )}
++        {employeeLimit !== null && users.length >= employeeLimit && (
++          <View style={styles.limitCard}>
++            <Text style={styles.limitTitle}>Team limit reached</Text>
++            <Text style={styles.limitText}>
++              Your plan covers {employeeLimit} employees. Upgrade your plan, or email support@northshiftapp.com with your account number ({accountNumber || '—'}) and company name ({businessName || '—'}) and we'll raise the limit.
++            </Text>
++            <Link href="/subscription" asChild>
++              <TouchableOpacity style={styles.limitButton}>
++                <Text style={styles.limitButtonText}>Upgrade Plan</Text>
++              </TouchableOpacity>
++            </Link>
++          </View>
++        )}
+         {users.map((u) => (
+           <View key={u.id} style={styles.userCard}>
+             <View style={styles.userInfo}>
+@@ -151,6 +181,15 @@ const styles = StyleSheet.create({
+   navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+   content: { padding: spacing.lg, gap: spacing.md },
+   message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
++  usageCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
++  usageText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs },
++  progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
++  progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
++  limitCard: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg },
++  limitTitle: { fontSize: 15, fontWeight: '700', color: colors.warning, marginBottom: spacing.xs },
++  limitText: { fontSize: 13, color: colors.textPrimary, marginBottom: spacing.md },
++  limitButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
++  limitButtonText: { color: '#0A0E1A', fontSize: 14, fontWeight: '700' },
+   userCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
+   userInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },

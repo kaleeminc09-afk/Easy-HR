@@ -13,6 +13,7 @@ export default function ManagerDashboard() {
   const [loading, setLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [userRole, setUserRole] = useState('manager');
+  const [businessName, setBusinessName] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
   
   const [logs, setLogs] = useState([]);
@@ -54,6 +55,11 @@ export default function ManagerDashboard() {
 
       setIsAuthorized(true);
       setUserRole(profile.role);
+      const { data: profBiz } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
+      if (profBiz && profBiz.business_id) {
+        const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', profBiz.business_id).single();
+        if (biz) setBusinessName(biz.business_name || '');
+      }
       await fetchAllManagerData();
     } catch (err) {
       console.error('Authorization error:', err);
@@ -248,7 +254,7 @@ export default function ManagerDashboard() {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>\u2726 NorthShift</Text>
-          <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>
+          {businessName ? <Text style={styles.subtitle}>{businessName} \u00b7 Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>}
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           <Link href="/profile" asChild>

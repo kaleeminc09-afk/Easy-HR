@@ -12,6 +12,9 @@ export default function UsersScreen() {
   const [myId, setMyId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [message, setMessage] = useState('');
+  const [employeeLimit, setEmployeeLimit] = useState(null);
+  const [businessName, setBusinessName] = useState('');
+  const [accountNumber, setAccountNumber] = useState('');
 
   useEffect(() => { init(); }, []);
 
@@ -19,9 +22,15 @@ export default function UsersScreen() {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
     setMyId(session.user.id);
-    const { data: me } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
     if (!me || me.role !== 'admin') { setLoading(false); return; }
     setIsAdmin(true);
+    if (me.business_id) {
+      const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', me.business_id).single();
+      if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
+    }
+    const { data: sub } = await supabase.from('subscriptions').select('employee_limit').eq('owner_id', session.user.id).maybeSingle();
+    if (sub) setEmployeeLimit(sub.employee_limit);
     await loadUsers();
     setLoading(false);
   };
@@ -93,6 +102,27 @@ export default function UsersScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         {message ? <Text style={styles.message}>{message}</Text> : null}
+        {employeeLimit !== null && (
+          <View style={styles.usageCard}>
+            <Text style={styles.usageText}>{users.length} of {employeeLimit} employees</Text>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${Math.min(100, Math.round((users.length / employeeLimit) * 100))}%` }]} />
+            </View>
+          </View>
+        )}
+        {employeeLimit !== null && users.length >= employeeLimit && (
+          <View style={styles.limitCard}>
+            <Text style={styles.limitTitle}>Team limit reached</Text>
+            <Text style={styles.limitText}>
+              Your plan covers {employeeLimit} employees. Upgrade your plan, or email support@northshiftapp.com with your account number ({accountNumber || '—'}) and company name ({businessName || '—'}) and we'll raise the limit.
+            </Text>
+            <Link href="/subscription" asChild>
+              <TouchableOpacity style={styles.limitButton}>
+                <Text style={styles.limitButtonText}>Upgrade Plan</Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
+        )}
         {users.map((u) => (
           <View key={u.id} style={styles.userCard}>
             <View style={styles.userInfo}>
@@ -151,6 +181,15 @@ const styles = StyleSheet.create({
   navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
   content: { padding: spacing.lg, gap: spacing.md },
   message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  usageCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
+  usageText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs },
+  progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
+  progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
+  limitCard: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg },
+  limitTitle: { fontSize: 15, fontWeight: '700', color: colors.warning, marginBottom: spacing.xs },
+  limitText: { fontSize: 13, color: colors.textPrimary, marginBottom: spacing.md },
+  limitButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+  limitButtonText: { color: '#0A0E1A', fontSize: 14, fontWeight: '700' },
   userCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
