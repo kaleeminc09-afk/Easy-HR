@@ -1,0 +1,175 @@
+import React, { useState, useEffect } from 'react';
+import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
+import { useRouter, Link } from 'expo-router';
+import { supabase } from '../lib/supabase';
+import { colors, spacing, radius, type, elevation } from '../lib/theme';
+
+export default function UsersScreen() {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [users, setUsers] = useState([]);
+  const [myId, setMyId] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+  const [message, setMessage] = useState('');
+
+  useEffect(() => { init(); }, []);
+
+  const init = async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { router.replace('/'); return; }
+    setMyId(session.user.id);
+    const { data: me } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+    if (!me || me.role !== 'admin') { setLoading(false); return; }
+    setIsAdmin(true);
+    await loadUsers();
+    setLoading(false);
+  };
+
+  const loadUsers = async () => {
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id, full_name, role, created_at')
+      .order('created_at', { ascending: true });
+    if (!error) setUsers(data || []);
+  };
+
+  const changeRole = async (userId, newRole) => {
+    if (userId === myId) { setMessage('You cannot change your own role.'); return; }
+    setBusyId(userId);
+    setMessage('');
+    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+    if (error) {
+      setMessage('Could not update role: ' + error.message);
+    } else {
+      setMessage('Role updated.');
+      await loadUsers();
+    }
+    setBusyId(null);
+  };
+
+  const roleStyle = (role) => {
+    if (role === 'admin') return [styles.roleBadge, styles.roleAdmin];
+    if (role === 'manager') return [styles.roleBadge, styles.roleManager];
+    return [styles.roleBadge, styles.roleEmployee];
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={colors.accent} />
+      </View>
+    );
+  }
+
+  if (!isAdmin) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.deniedContainer}>
+          <Text style={styles.deniedEmoji}>🔒</Text>
+          <Text style={styles.deniedTitle}>Admins only</Text>
+          <Text style={styles.deniedText}>You need an administrator account to manage users.</Text>
+          <Link href="/manager" asChild>
+            <TouchableOpacity style={styles.primaryButton}>
+              <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Link href="/manager" asChild>
+          <TouchableOpacity style={styles.navButton}>
+            <Text style={styles.navButtonText}>← Dashboard</Text>
+          </TouchableOpacity>
+        </Link>
+        <Text style={styles.headerTitle}>Manage Users</Text>
+        <View style={{ width: 110 }} />
+      </View>
+
+      <ScrollView contentContainerStyle={styles.content}>
+        {message ? <Text style={styles.message}>{message}</Text> : null}
+        {users.map((u) => (
+          <View key={u.id} style={styles.userCard}>
+            <View style={styles.userInfo}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{(u.full_name || '?').charAt(0).toUpperCase()}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.userName}>{u.full_name || 'Unnamed user'}{u.id === myId ? ' (you)' : ''}</Text>
+                <Text style={styles.userMeta}>Joined {new Date(u.created_at).toLocaleDateString()}</Text>
+              </View>
+              <View style={roleStyle(u.role)}>
+                <Text style={styles.roleText}>{u.role.toUpperCase()}</Text>
+              </View>
+            </View>
+            {u.id !== myId && u.role !== 'admin' && (
+              <View style={styles.actions}>
+                {u.role === 'employee' ? (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => changeRole(u.id, 'manager')}
+                    disabled={busyId === u.id}
+                  >
+                    {busyId === u.id
+                      ? <ActivityIndicator size="small" color={colors.accent} />
+                      : <Text style={styles.actionButtonText}>Make Manager</Text>}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={styles.actionButton}
+                    onPress={() => changeRole(u.id, 'employee')}
+                    disabled={busyId === u.id}
+                  >
+                    {busyId === u.id
+                      ? <ActivityIndicator size="small" color={colors.accent} />
+                      : <Text style={styles.actionButtonText}>Make Employee</Text>}
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+          </View>
+        ))}
+        {users.length === 0 && (
+          <Text style={styles.emptyText}>No users yet.</Text>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: colors.background },
+  loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+  navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
+  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  content: { padding: spacing.lg, gap: spacing.md },
+  message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  userCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
+  userInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
+  avatarText: { fontSize: 18, fontWeight: '700', color: colors.accent },
+  userName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  userMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  roleBadge: { borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 10, borderWidth: 1 },
+  roleAdmin: { backgroundColor: 'rgba(192,132,245,0.12)', borderColor: 'rgba(192,132,245,0.35)' },
+  roleManager: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+  roleEmployee: { backgroundColor: colors.surface, borderColor: colors.surfaceBorder },
+  roleText: { ...type.label, color: colors.textPrimary },
+  actions: { marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end' },
+  actionButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.sm, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
+  actionButtonText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
+  emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
+  deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+  deniedEmoji: { fontSize: 48, marginBottom: spacing.md },
+  deniedTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
+  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
+  primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, alignItems: 'center' },
+  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
+});

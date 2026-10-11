@@ -28,14 +28,49 @@ CREATE TABLE IF NOT EXISTS public.tasks (
 
 -- 1. Manager check helper. SECURITY DEFINER avoids infinite recursion
 --    when a profiles policy needs to look at the profiles table.
+--    Admins inherit every manager permission.
 CREATE OR REPLACE FUNCTION public.is_manager()
 RETURNS boolean
 LANGUAGE sql
 SECURITY DEFINER
 SET search_path = public
 AS $$
-  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'manager');
+  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('manager', 'admin'));
 $$;
+
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin');
+$$;
+
+-- 1b. Role guard: only admins may change the role column. Closes the
+--     escalation hole where a manager (or a user on their own row)
+--     could promote themselves.
+CREATE OR REPLACE FUNCTION public.prevent_role_escalation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  IF auth.jwt() IS NULL THEN
+    RETURN NEW; -- direct DB / dashboard access is already fully trusted
+  END IF;
+  IF NEW.role IS DISTINCT FROM OLD.role AND NOT public.is_admin() THEN
+    RAISE EXCEPTION 'Only admins can change user roles';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS profiles_role_guard ON public.profiles;
+CREATE TRIGGER profiles_role_guard
+  BEFORE UPDATE ON public.profiles
+  FOR EACH ROW EXECUTE FUNCTION public.prevent_role_escalation();
 
 -- 2. Auto-create a profile row on every new signup (id = auth user id).
 CREATE OR REPLACE FUNCTION public.handle_new_user()

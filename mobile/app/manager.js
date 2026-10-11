@@ -12,6 +12,7 @@ export default function ManagerDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [userRole, setUserRole] = useState('manager');
   const [currentUser, setCurrentUser] = useState(null);
   
   const [logs, setLogs] = useState([]);
@@ -45,13 +46,14 @@ export default function ManagerDashboard() {
         .eq('id', session.user.id)
         .single();
 
-      if (profileError || !profile || profile.role !== 'manager') {
+      if (profileError || !profile || (profile.role !== 'manager' && profile.role !== 'admin')) {
         setIsAuthorized(false);
         setLoading(false);
         return;
       }
 
       setIsAuthorized(true);
+      setUserRole(profile.role);
       await fetchAllManagerData();
     } catch (err) {
       console.error('Authorization error:', err);
@@ -262,6 +264,20 @@ export default function ManagerDashboard() {
         </View>
       </View>
 
+      {userRole === 'admin' && (
+        <View style={styles.adminCard}>
+          <View>
+            <Text style={styles.adminCardTitle}>Administration</Text>
+            <Text style={styles.adminCardText}>Add managers, manage roles and access.</Text>
+          </View>
+          <Link href="/users" asChild>
+            <TouchableOpacity style={styles.adminCardButton}>
+              <Text style={styles.adminCardButtonText}>Manage Users →</Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
+      )}
+
       <View style={styles.filterBar}>
         <TouchableOpacity style={[styles.filterTab, filter === 'ALL' && styles.activeFilterTab]} onPress={() => setFilter('ALL')}>
           <Text style={[styles.filterText, filter === 'ALL' && styles.activeFilterText]}>All Logs ({logs.length})</Text>
@@ -428,6 +444,11 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  adminCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, marginHorizontal: spacing.lg, marginTop: spacing.md, ...elevation.card },
+  adminCardTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
+  adminCardText: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  adminCardButton: { backgroundColor: colors.accent, borderRadius: radius.sm, paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
+  adminCardButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 13 },
   filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
