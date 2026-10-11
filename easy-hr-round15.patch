@@ -1,0 +1,93 @@
+diff --git a/mobile/app/index.js b/mobile/app/index.js
+index df7eea2..4c06126 100644
+--- a/mobile/app/index.js
++++ b/mobile/app/index.js
+@@ -19,6 +19,8 @@ export default function App() {
+   // Time Tracker State
+   const [activeSession, setActiveSession] = useState(null);
+   const [activeBreak, setActiveBreak] = useState(null);
++  const [breakSeconds, setBreakSeconds] = useState(0);
++  const [now, setNow] = useState(new Date());
+   const [todayHours, setTodayHours] = useState(0);
+   const [activeSessionSeconds, setActiveSessionSeconds] = useState(0);
+   const [statusMessage, setStatusMessage] = useState('');
+@@ -57,23 +59,29 @@ export default function App() {
+ 
+   useEffect(() => {
+     let timer = null;
+-    if (activeSession && !activeBreak) {
+-      const startTime = new Date(activeSession.clock_in).getTime();
++    if (activeSession) {
++      const shiftStart = new Date(activeSession.clock_in).getTime();
++      const breakStart = activeBreak ? new Date(activeBreak.start_time).getTime() : null;
+       const updateTicker = () => {
+-        const now = new Date().getTime();
+-        const diffSeconds = Math.floor((now - startTime) / 1000);
+-        setActiveSessionSeconds(diffSeconds > 0 ? diffSeconds : 0);
++        const t = Date.now();
++        setActiveSessionSeconds(Math.max(0, Math.floor((t - shiftStart) / 1000)));
++        if (breakStart) setBreakSeconds(Math.max(0, Math.floor((t - breakStart) / 1000)));
++        else setBreakSeconds(0);
+       };
+       updateTicker();
+       timer = setInterval(updateTicker, 1000);
+-    } else {
+-      setActiveSession(null);
+     }
+     return () => {
+       if (timer) clearInterval(timer);
+     };
+   }, [activeSession, activeBreak]);
+ 
++  // Live clock (device timezone), ticks every second
++  useEffect(() => {
++    const t = setInterval(() => setNow(new Date()), 1000);
++    return () => clearInterval(t);
++  }, []);
++
+   const handleLogin = async () => {
+     setAuthLoading(true);
+     setAuthError('');
+@@ -333,6 +341,10 @@ export default function App() {
+ 
+   const formatTimeCounter = (totalSecs) => {
+     const hrs = Math.floor(totalSecs / 3600);
++  const formatClock = (d) =>
++    d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
++    ' · ' +
++    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
+     const mins = Math.floor((totalSecs % 3600) / 60);
+     const secs = totalSecs % 60;
+     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+@@ -407,6 +419,7 @@ export default function App() {
+         <View>
+           <Text style={styles.empBrand}>✦ NorthShift</Text>
+           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
++          <Text style={styles.empClock}>{formatClock(now)}</Text>
+         </View>
+         <View style={styles.empHeaderRight}>
+           <Link href="/EmployeeChatScreen" asChild>
+@@ -459,8 +472,13 @@ export default function App() {
+                 </Text>
+               </View>
+               <Text style={styles.empTimer}>
+-                {activeSession ? formatTimeCounter(activeSessionSeconds) : '--:--:--'}
++                {activeBreak
++                  ? formatTimeCounter(breakSeconds)
++                  : (activeSession ? formatTimeCounter(activeSessionSeconds) : '--:--:--')}
+               </Text>
++              {activeBreak && activeSession ? (
++                <Text style={styles.empShiftSub}>Shift: {formatTimeCounter(activeSessionSeconds)}</Text>
++              ) : null}
+               <View style={styles.empHoursRow}>
+                 <Text style={styles.empHoursLabel}>Today&apos;s hours</Text>
+                 <Text style={styles.empHoursValue}>{todayHours} / 8h</Text>
+@@ -604,6 +622,8 @@ const styles = StyleSheet.create({
+   empStatusPill: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 6, paddingHorizontal: 14, marginBottom: spacing.md },
+   empStatusPillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+   empStatusPillText: { ...type.label, color: colors.accent },
++  empClock: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
++  empShiftSub: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
+   empTimer: { ...type.timer, color: colors.textPrimary, marginBottom: spacing.sm },
+   empHoursRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: spacing.sm },
+   empHoursLabel: { fontSize: 13, color: colors.textSecondary },
