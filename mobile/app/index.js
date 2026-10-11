@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, Acti
 import { Link } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
+import { colors, spacing, radius, type, elevation } from '../lib/theme';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -80,6 +81,12 @@ export default function App() {
     if (error) setAuthError(error.message);
     else setStatusMessage('Account created! You can now sign in.');
     setAuthLoading(false);
+  };
+
+  const handleBiometric = async () => {
+    // TODO(next): npx expo install expo-local-authentication, then replace with
+    // LocalAuthentication.authenticateAsync() -> Supabase session restore.
+    setStatusMessage('Biometric sign-in arrives in the next update — use your password for now.');
   };
 
   const handleLogout = async () => {
@@ -321,47 +328,61 @@ export default function App() {
 
   if (loading) {
     return (
-      <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading Easy HR...</Text>
+      <View style={styles.authLoadingContainer}>
+        <Text style={styles.authLogoMark}>\u2726</Text>
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={styles.authLoadingText}>Loading NorthShift...</Text>
       </View>
     );
   }
 
   if (!session) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Easy HR Login</Text>
-          <Text style={styles.subtitle}>Sign in to your employee or manager account</Text>
+      <SafeAreaView style={styles.authContainer}>
+        <View style={styles.authCard}>
+          <Text style={styles.authLogoMark}>\u2726</Text>
+          <Text style={styles.authTitle}>NorthShift</Text>
+          <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
 
+          <Text style={styles.authLabel}>Email</Text>
           <TextInput
-            style={styles.input}
-            placeholder="Email address"
-            placeholderTextColor="#95a5a6"
+            style={styles.authInput}
+            placeholder="you@company.com"
+            placeholderTextColor={colors.inputPlaceholder}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
             keyboardType="email-address"
           />
+          <Text style={styles.authLabel}>Password</Text>
           <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor="#95a5a6"
+            style={styles.authInput}
+            placeholder="Your password"
+            placeholderTextColor={colors.inputPlaceholder}
             value={password}
             onChangeText={setPassword}
             secureTextEntry
           />
 
-          {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
-          {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
+          {authError ? <Text style={styles.authError}>{authError}</Text> : null}
+          {statusMessage ? <Text style={styles.authMessage}>{statusMessage}</Text> : null}
 
-          <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={authLoading}>
-            {authLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
+          <TouchableOpacity style={styles.authPrimaryButton} onPress={handleLogin} disabled={authLoading}>
+            {authLoading ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.authPrimaryButtonText}>Sign In</Text>}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleSignUp} disabled={authLoading}>
-            <Text style={styles.secondaryButtonText}>Create New Account</Text>
+          <View style={styles.authDivider}>
+            <View style={styles.authDividerLine} />
+            <Text style={styles.authDividerText}>or</Text>
+            <View style={styles.authDividerLine} />
+          </View>
+
+          <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
+            <Text style={styles.authBiometricButtonText}>Sign in with Face ID</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.authSecondaryButton} onPress={handleSignUp} disabled={authLoading}>
+            <Text style={styles.authSecondaryButtonText}>New here? Create account</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -369,119 +390,110 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.empContainer}>
+      <View style={styles.empHeader}>
         <View>
-          <Text style={styles.headerTitle}>Easy HR</Text>
-          <Text style={styles.headerSubtitle}>{session.user.email}</Text>
+          <Text style={styles.empBrand}>\u2726 NorthShift</Text>
+          <Text style={styles.empEmail}>{session.user.email}</Text>
         </View>
-        <View style={styles.headerRight}>
+        <View style={styles.empHeaderRight}>
           <Link href="/EmployeeChatScreen" asChild>
-            <TouchableOpacity style={styles.assistantButton}>
-              <Text style={styles.navButtonText}>🤖 Assistant</Text>
+            <TouchableOpacity style={styles.empAssistantButton}>
+              <Text style={styles.empAssistantButtonText}>\u2726 Assistant</Text>
             </TouchableOpacity>
           </Link>
           <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Manager →</Text>
+            <TouchableOpacity style={styles.empNavButton}>
+              <Text style={styles.empNavButtonText}>Manager \u2192</Text>
             </TouchableOpacity>
           </Link>
-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <Text style={styles.logoutButtonText}>Logout</Text>
-          </TouchableOpacity>
+          <Link href="/profile" asChild>
+            <TouchableOpacity style={styles.empNavButton}>
+              <Text style={styles.empNavButtonText}>Profile</Text>
+            </TouchableOpacity>
+          </Link>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Time Tracker</Text>
-          <Text style={styles.subtitle}>Geo-fenced attendance & break controls</Text>
-
-          {outOfRangeData ? (
-            <View style={styles.exceptionBox}>
-              <Text style={styles.exceptionTitle}>⚠️ Out of Range Exception</Text>
-              <Text style={styles.exceptionText}>
-                You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Provide a note:
-              </Text>
-              <TextInput
-                style={styles.textArea}
-                placeholder="e.g., Client visit, remote field work..."
-                placeholderTextColor="#95a5a6"
-                value={exceptionNote}
-                onChangeText={setExceptionNote}
-                multiline
-                numberOfLines={3}
-              />
-              <TouchableOpacity style={styles.submitExceptionButton} onPress={handleExceptionSubmit} disabled={submittingException}>
-                {submittingException ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit Exception Request</Text>}
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setOutOfRangeData(null)}>
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <View style={styles.statusBox}>
-                <Text style={styles.statusLabel}>Current Status:</Text>
-                <Text style={[styles.statusValue, activeSession ? (activeBreak ? styles.breakText : styles.activeText) : styles.offlineText]}>
-                  {activeSession ? (activeBreak ? `☕ ON BREAK (${activeBreak.break_type})` : '🟢 ACTIVE (Clocked In)') : '⚪ OFFLINE'}
+      <ScrollView contentContainerStyle={styles.empContent}>
+        {outOfRangeData ? (
+          <View style={styles.empExceptionBox}>
+            <Text style={styles.empExceptionTitle}>Out of Range</Text>
+            <Text style={styles.empExceptionText}>
+              You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Add a note for your manager:
+            </Text>
+            <TextInput
+              style={styles.empTextArea}
+              placeholder="e.g., Client visit, remote field work..."
+              placeholderTextColor={colors.inputPlaceholder}
+              value={exceptionNote}
+              onChangeText={setExceptionNote}
+              multiline
+              numberOfLines={3}
+            />
+            <TouchableOpacity style={styles.empPrimaryButton} onPress={handleExceptionSubmit} disabled={submittingException}>
+              {submittingException ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.empGhostButton} onPress={() => setOutOfRangeData(null)}>
+              <Text style={styles.empGhostButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            <View style={styles.empStatusCard}>
+              <View style={[styles.empStatusPill, activeSession && !activeBreak ? styles.empStatusPillActive : null]}>
+                <Text style={styles.empStatusPillText}>
+                  {activeSession ? (activeBreak ? `ON BREAK \u00b7 ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
                 </Text>
               </View>
-
-              {activeSession && !activeBreak && (
-                <View style={styles.tickerBox}>
-                  <Text style={styles.tickerLabel}>Active Shift Duration:</Text>
-                  <Text style={styles.tickerValue}>{formatTimeCounter(activeSessionSeconds)}</Text>
-                </View>
-              )}
-
-              <View style={styles.hoursBox}>
-                <Text style={styles.hoursLabel}>Today's Total Hours:</Text>
-                <Text style={styles.hoursValue}>{todayHours} hrs</Text>
+              <Text style={styles.empTimer}>
+                {activeSession ? formatTimeCounter(activeSessionSeconds) : '--:--:--'}
+              </Text>
+              <View style={styles.empHoursRow}>
+                <Text style={styles.empHoursLabel}>Today&apos;s hours</Text>
+                <Text style={styles.empHoursValue}>{todayHours} / 8h</Text>
               </View>
+              <View style={styles.empProgressTrack}>
+                <View style={[styles.empProgressFill, { width: `${Math.min(100, (parseFloat(todayHours) || 0) / 8 * 100)}%` }]} />
+              </View>
+            </View>
 
-              {activeSession ? (
-                activeBreak ? (
-                  <TouchableOpacity style={styles.endBreakButton} onPress={handleEndBreak}>
-                    <Text style={styles.buttonText}>END BREAK (RETURN TO SHIFT)</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <>
-                    <View style={styles.breakContainer}>
-                      <View style={styles.breakRow}>
-                        <TouchableOpacity style={styles.lunchUnpaidButton} onPress={() => handleStartBreak('Unpaid Lunch')}>
-                          <Text style={styles.breakButtonText}>🍔 Unpaid Lunch</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.lunchPaidButton} onPress={() => handleStartBreak('Paid Lunch')}>
-                          <Text style={styles.breakButtonText}>🥗 Paid Lunch</Text>
-                        </TouchableOpacity>
-                      </View>
-                      <View style={styles.breakRow}>
-                        <TouchableOpacity style={styles.restButton} onPress={() => handleStartBreak('Paid Rest Break')}>
-                          <Text style={styles.breakButtonText}>☕ Rest Break</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </View>
-
-                    <TouchableOpacity style={styles.clockOutButton} onPress={handleClockOut}>
-                      <Text style={styles.buttonText}>CLOCK OUT & ANALYZE</Text>
-                    </TouchableOpacity>
-                  </>
-                )
-              ) : (
-                <TouchableOpacity
-                  style={[styles.clockInButton, locationChecking && styles.disabledButton]}
-                  onPress={handleClockIn}
-                  disabled={locationChecking}
-                >
-                  {locationChecking ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.buttonText}>CLOCK IN (AUTO-GPS)</Text>}
+            {activeSession ? (
+              activeBreak ? (
+                <TouchableOpacity style={styles.empCircleButton} onPress={handleEndBreak}>
+                  <Text style={styles.empCircleButtonText}>END{'\n'}BREAK</Text>
                 </TouchableOpacity>
-              )}
-            </>
-          )}
+              ) : (
+                <>
+                  <View style={styles.empBreakRow}>
+                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Unpaid Lunch')}>
+                      <Text style={styles.empChipText}>Unpaid Lunch</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Lunch')}>
+                      <Text style={styles.empChipText}>Paid Lunch</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Rest Break')}>
+                      <Text style={styles.empChipText}>Rest Break</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={styles.empCircleButton} onPress={handleClockOut}>
+                    <Text style={styles.empCircleButtonText}>CLOCK{'\n'}OUT</Text>
+                  </TouchableOpacity>
+                </>
+              )
+            ) : (
+              <TouchableOpacity
+                style={[styles.empCircleButton, locationChecking && styles.empCircleButtonDisabled]}
+                onPress={handleClockIn}
+                disabled={locationChecking}
+              >
+                {locationChecking ? <ActivityIndicator color="#0A0E1A" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
+              </TouchableOpacity>
+            )}
 
-          {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
-        </View>
+            {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
+          </>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -540,4 +552,65 @@ const styles = StyleSheet.create({
   cancelButton: { marginTop: 8, padding: 6 },
   cancelButtonText: { color: '#718093', fontSize: 13, fontWeight: '600' },
   message: { marginTop: 15, fontSize: 13, color: '#57606f', textAlign: 'center' },
+
+  // --- NorthShift auth theme (login reskin; employee/manager screens keep legacy styles until their pass) ---
+  authContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', padding: spacing.lg },
+  authLoadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
+  authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
+  authCard: { width: '100%', maxWidth: 400, alignSelf: 'center' },
+  authLogoMark: { fontSize: 54, color: colors.accent, textAlign: 'center', marginBottom: spacing.sm },
+  authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },
+  authSubtitle: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xl },
+  authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
+  authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
+  authError: { color: colors.danger, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
+  authMessage: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
+  authPrimaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md + 2, alignItems: 'center', marginTop: spacing.sm, ...elevation.accentGlow },
+  authPrimaryButtonText: { color: '#0A0E1A', fontSize: 16, fontWeight: '700' },
+  authDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: spacing.lg },
+  authDividerLine: { flex: 1, height: 1, backgroundColor: colors.surfaceBorder },
+  authDividerText: { color: colors.textMuted, marginHorizontal: spacing.md, fontSize: 13 },
+  authBiometricButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+  authBiometricButtonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
+  authSecondaryButton: { marginTop: spacing.lg, alignItems: 'center', padding: spacing.sm },
+  authSecondaryButtonText: { color: colors.textSecondary, fontSize: 14 },
+
+  // --- NorthShift employee theme (time tracker home) ---
+  empContainer: { flex: 1, backgroundColor: colors.background },
+  empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  empBrand: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
+  empEmail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
+  empAssistantButtonText: { color: colors.accent, fontWeight: '600', fontSize: 12 },
+  empNavButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
+  empNavButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 12 },
+  empLogoutButton: { paddingVertical: 8, paddingHorizontal: 8 },
+  empLogoutButtonText: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
+  empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
+  empStatusCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', ...elevation.card },
+  empStatusPill: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 6, paddingHorizontal: 14, marginBottom: spacing.md },
+  empStatusPillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+  empStatusPillText: { ...type.label, color: colors.accent },
+  empTimer: { ...type.timer, color: colors.textPrimary, marginBottom: spacing.sm },
+  empHoursRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: spacing.sm },
+  empHoursLabel: { fontSize: 13, color: colors.textSecondary },
+  empHoursValue: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  empProgressTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  empProgressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 4 },
+  empCircleButton: { width: 168, height: 168, borderRadius: 84, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center', marginTop: spacing.xl, ...elevation.accentGlow },
+  empCircleButtonDisabled: { opacity: 0.6 },
+  empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
+  empBreakRow: { flexDirection: 'row', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
+  empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
+  empChipText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  empMessage: { marginTop: spacing.lg, fontSize: 13, color: colors.textSecondary, textAlign: 'center', maxWidth: 400 },
+  empExceptionBox: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
+  empExceptionTitle: { fontSize: 17, fontWeight: '700', color: colors.warning, marginBottom: spacing.sm, textAlign: 'center' },
+  empExceptionText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
+  empTextArea: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 14, color: colors.textPrimary, height: 90, textAlignVertical: 'top', marginBottom: spacing.md },
+  empPrimaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+  empPrimaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
+  empGhostButton: { marginTop: spacing.sm, padding: spacing.sm, alignItems: 'center' },
+  empGhostButtonText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
 });

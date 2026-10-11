@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { colors, spacing, radius, type, elevation } from '../lib/theme';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -19,7 +20,7 @@ export default function ManagerDashboard() {
   const [payrollFormat, setPayrollFormat] = useState('STANDARD'); 
 
   // --- NEW AI CHAT STATE ---
-  const [messages, setMessages] = useState([{ id: '1', role: 'bot', content: 'Hello! I am your Easy HR assistant. How can I help you manage the team today?' }]);
+  const [messages, setMessages] = useState([{ id: '1', role: 'bot', content: 'Hello! I am your NorthShift assistant. How can I help you manage the team today?' }]);
   const [inputText, setInputText] = useState('');
   const [isChatLoading, setIsChatLoading] = useState(false);
 
@@ -229,10 +230,10 @@ export default function ManagerDashboard() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContainer}>
           <View style={styles.deniedCard}>
-            <Text style={styles.deniedTitle}>🚫 Access Denied</Text>
+            <Text style={styles.deniedTitle}>Access Denied</Text>
             <Text style={styles.deniedText}>You must be logged in with a Manager account to view this portal.</Text>
             <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
-              <Text style={styles.buttonText}>← Return to Employee Portal</Text>
+              <Text style={styles.primaryButtonText}>\u2190 Return to Employee Portal</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -244,14 +245,21 @@ export default function ManagerDashboard() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>Easy HR Manager Portal</Text>
-          <Text style={styles.subtitle}>Time Audits, Geo-Fencing & Exception Reviews</Text>
+          <Text style={styles.title}>\u2726 NorthShift</Text>
+          <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>
         </View>
-        <Link href="/" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Employee Portal</Text>
-          </TouchableOpacity>
-        </Link>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Link href="/profile" asChild>
+            <TouchableOpacity style={styles.navButton}>
+              <Text style={styles.navButtonText}>Profile</Text>
+            </TouchableOpacity>
+          </Link>
+          <Link href="/" asChild>
+            <TouchableOpacity style={styles.navButton}>
+              <Text style={styles.navButtonText}>← Employee Portal</Text>
+            </TouchableOpacity>
+          </Link>
+        </View>
       </View>
 
       <View style={styles.filterBar}>
@@ -274,7 +282,7 @@ export default function ManagerDashboard() {
         {/* NEW AI TAB */}
         <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.activeFilterTab, { backgroundColor: filter === 'AI' ? '#007AFF' : '#e8f0fe' }]} onPress={() => setFilter('AI')}>
           <Text style={[styles.filterText, filter === 'AI' && styles.activeFilterText, { color: filter === 'AI' ? '#fff' : '#007AFF' }]}>
-            🤖 AI Assistant
+            \u2726 AI Assistant
           </Text>
         </TouchableOpacity>
 
@@ -293,12 +301,12 @@ export default function ManagerDashboard() {
                 </TouchableOpacity>
               </View>
               <TouchableOpacity style={styles.exportButton} onPress={handlePayrollExport}>
-                <Text style={styles.exportButtonText}>📥 Export {payrollFormat}</Text>
+                <Text style={styles.exportButtonText}>Export {payrollFormat}</Text>
               </TouchableOpacity>
             </>
           )}
           <TouchableOpacity style={styles.refreshButton} onPress={fetchAllManagerData}>
-            <Text style={styles.refreshButtonText}>🔄</Text>
+            <Text style={styles.refreshButtonText}>\u21BB</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -322,6 +330,7 @@ export default function ManagerDashboard() {
             <TextInput
               style={styles.chatInput}
               placeholder="Ask about geo-exceptions..."
+              placeholderTextColor={colors.inputPlaceholder}
               value={inputText}
               onChangeText={setInputText}
               editable={!isChatLoading}
@@ -351,17 +360,17 @@ export default function ManagerDashboard() {
                       </Text>
                     </View>
                     <View style={styles.cardBody}>
-                      <View style={styles.infoRow}><Text style={styles.label}>Attempted Worksite:</Text><Text style={styles.worksiteValue}>📍 {worksiteName}</Text></View>
+                      <View style={styles.infoRow}><Text style={styles.label}>Attempted Worksite:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Distance from Site:</Text><Text style={styles.value}>{exc.distance_meters} meters away</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Attempted At:</Text><Text style={styles.value}>{formatDateTime(exc.attempted_at)}</Text></View>
                       <View style={styles.noteBox}><Text style={styles.noteLabel}>Employee Reason Note:</Text><Text style={styles.noteText}>"{exc.reason_note}"</Text></View>
                       {isPending && (
                         <View style={styles.approvalButtons}>
                           <TouchableOpacity style={styles.approveButton} onPress={() => handleUpdateException(exc.id, 'approved')}>
-                            <Text style={styles.buttonText}>✓ Approve Exception</Text>
+                            <Text style={styles.approveButtonText}>\u2713 Approve Exception</Text>
                           </TouchableOpacity>
                           <TouchableOpacity style={styles.rejectButton} onPress={() => handleUpdateException(exc.id, 'rejected')}>
-                            <Text style={styles.buttonText}>✕ Reject</Text>
+                            <Text style={styles.rejectButtonText}>\u2715 Reject</Text>
                           </TouchableOpacity>
                         </View>
                       )}
@@ -386,7 +395,7 @@ export default function ManagerDashboard() {
                       <Text style={[styles.statusBadge, isAnomaly ? styles.badgeDanger : styles.badgeNormal]}>{log.ai_anomaly_flag || 'Normal Shift'}</Text>
                     </View>
                     <View style={styles.cardBody}>
-                      <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>📍 {worksiteName}</Text></View>
+                      <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
@@ -403,70 +412,73 @@ export default function ManagerDashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f6fa' },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f6fa', padding: 20 },
-  loadingText: { marginTop: 10, color: '#555' },
-  deniedCard: { backgroundColor: '#ffffff', padding: 30, borderRadius: 12, alignItems: 'center', maxWidth: 400, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 4 },
-  deniedTitle: { fontSize: 20, fontWeight: 'bold', color: '#c0392b', marginBottom: 10 },
-  deniedText: { fontSize: 14, color: '#718093', textAlign: 'center', marginBottom: 20 },
-  primaryButton: { backgroundColor: '#2f3640', width: '100%', padding: 12, borderRadius: 8, alignItems: 'center' },
+  container: { flex: 1, backgroundColor: colors.background },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: spacing.lg },
+  loadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
+  deniedCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.lg, alignItems: 'center', maxWidth: 400, width: '100%', ...elevation.card },
+  deniedTitle: { fontSize: 20, fontWeight: 'bold', color: colors.danger, marginBottom: spacing.sm },
+  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
+  primaryButton: { backgroundColor: colors.accent, width: '100%', padding: spacing.md, borderRadius: radius.md, alignItems: 'center', ...elevation.accentGlow },
+  primaryButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 14 },
   buttonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25, paddingVertical: 20, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#dcdde1' },
-  title: { fontSize: 22, fontWeight: 'bold', color: '#2f3640' },
-  subtitle: { fontSize: 13, color: '#718093', marginTop: 2 },
-  navButton: { backgroundColor: '#f1f2f6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, borderWidth: 1, borderColor: '#dcdde1' },
-  navButtonText: { color: '#2f3640', fontWeight: '600', fontSize: 13 },
-  filterBar: { flexDirection: 'row', paddingHorizontal: 25, paddingVertical: 12, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#dcdde1', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
-  filterTab: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, backgroundColor: '#f1f2f6' },
-  activeFilterTab: { backgroundColor: '#2f3640' },
-  filterText: { fontSize: 13, color: '#57606f', fontWeight: '600' },
-  activeFilterText: { color: '#ffffff' },
+  approveButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 13 },
+  rejectButtonText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
+  subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
+  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
+  activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+  filterText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  activeFilterText: { color: colors.accent },
   exportSection: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 10, flexWrap: 'wrap' },
-  formatSelector: { flexDirection: 'row', backgroundColor: '#f1f2f6', borderRadius: 6, padding: 2, borderWidth: 1, borderColor: '#dcdde1' },
-  formatTab: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4 },
-  activeFormatTab: { backgroundColor: '#2f3640' },
-  formatText: { fontSize: 11, color: '#57606f', fontWeight: '600' },
-  activeFormatText: { color: '#ffffff' },
-  exportButton: { backgroundColor: '#27ae60', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
-  exportButtonText: { fontSize: 13, color: '#ffffff', fontWeight: '600' },
-  refreshButton: { backgroundColor: '#f1f2f6', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: '#dcdde1' },
-  refreshButtonText: { fontSize: 13 },
-  scrollContent: { padding: 25, maxWidth: 800, width: '100%', alignSelf: 'center' },
-  emptyCard: { backgroundColor: '#ffffff', padding: 30, borderRadius: 8, alignItems: 'center', marginTop: 20 },
-  emptyText: { color: '#718093', fontSize: 14 },
-  logCard: { backgroundColor: '#ffffff', borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#dcdde1', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
-  anomalyCard: { borderColor: '#f5b7b1', backgroundColor: '#fdfefe' },
-  pendingCard: { borderColor: '#f9e79f', backgroundColor: '#fef9e7' },
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
-  employeeName: { fontSize: 16, fontWeight: 'bold', color: '#2f3640' },
-  statusBadge: { fontSize: 12, fontWeight: '600', paddingVertical: 3, paddingHorizontal: 8, borderRadius: 4 },
-  badgeNormal: { backgroundColor: '#e8f8f5', color: '#16a085' },
-  badgeDanger: { backgroundColor: '#f5b7b1', color: '#c0392b' },
-  badgeWarning: { backgroundColor: '#fcf3cf', color: '#b7950b' },
+  formatSelector: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.sm, padding: 2, borderWidth: 1, borderColor: colors.surfaceBorder },
+  formatTab: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 4 },
+  activeFormatTab: { backgroundColor: colors.accent },
+  formatText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+  activeFormatText: { color: '#0A0E1A' },
+  exportButton: { backgroundColor: colors.accent, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
+  exportButtonText: { fontSize: 13, color: '#0A0E1A', fontWeight: '700' },
+  refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
+  refreshButtonText: { fontSize: 13, color: colors.textSecondary },
+  scrollContent: { padding: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
+  emptyText: { color: colors.textSecondary, fontSize: 14 },
+  logCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, ...elevation.card },
+  anomalyCard: { borderColor: colors.warning, borderLeftWidth: 3 },
+  pendingCard: { borderColor: colors.warning },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  employeeName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+  statusBadge: { fontSize: 12, fontWeight: '600', paddingVertical: 4, paddingHorizontal: 10, borderRadius: radius.pill, overflow: 'hidden' },
+  badgeNormal: { backgroundColor: 'rgba(52,211,153,0.14)', color: colors.success },
+  badgeDanger: { backgroundColor: 'rgba(248,113,113,0.14)', color: colors.danger },
+  badgeWarning: { backgroundColor: colors.warningSoft, color: colors.warning },
   cardBody: { gap: 6 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  label: { fontSize: 13, color: '#718093' },
-  value: { fontSize: 13, color: '#2f3640', fontWeight: '500' },
-  worksiteValue: { fontSize: 13, color: '#2980b9', fontWeight: 'bold' },
-  valueBold: { fontSize: 13, color: '#2f3640', fontWeight: 'bold' },
-  noteBox: { backgroundColor: '#fcf8e3', padding: 10, borderRadius: 6, marginTop: 4, borderWidth: 1, borderColor: '#faebcc' },
-  noteLabel: { fontSize: 11, fontWeight: 'bold', color: '#8a6d3b', marginBottom: 2 },
-  noteText: { fontSize: 13, color: '#8a6d3b', fontStyle: 'italic' },
-  approvalButtons: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  approveButton: { flex: 1, backgroundColor: '#27ae60', padding: 10, borderRadius: 6, alignItems: 'center' },
-  rejectButton: { backgroundColor: '#c0392b', padding: 10, borderRadius: 6, alignItems: 'center', paddingHorizontal: 16 },
-  
-  // --- NEW AI CHAT STYLES ---
-  chatWrapper: { flex: 1, backgroundColor: '#ffffff', maxWidth: 800, width: '100%', alignSelf: 'center', marginTop: 10, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#dcdde1' },
-  chatList: { padding: 15 },
-  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 10, marginBottom: 10 },
-  userBubble: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
-  botBubble: { alignSelf: 'flex-start', backgroundColor: '#f1f2f6', borderWidth: 1, borderColor: '#dcdde1' },
+  label: { fontSize: 13, color: colors.textSecondary },
+  value: { fontSize: 13, color: colors.textPrimary, fontWeight: '500' },
+  worksiteValue: { fontSize: 13, color: colors.accent, fontWeight: '700' },
+  valueBold: { fontSize: 13, color: colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  noteBox: { backgroundColor: colors.warningSoft, padding: spacing.md, borderRadius: radius.sm, marginTop: 4, borderWidth: 1, borderColor: colors.warning },
+  noteLabel: { fontSize: 11, fontWeight: '700', color: colors.warning, marginBottom: 2 },
+  noteText: { fontSize: 13, color: colors.textPrimary, fontStyle: 'italic' },
+  approvalButtons: { flexDirection: 'row', gap: 10, marginTop: spacing.md },
+  approveButton: { flex: 1, backgroundColor: colors.accent, padding: 12, borderRadius: radius.sm, alignItems: 'center' },
+  rejectButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, padding: 12, borderRadius: radius.sm, alignItems: 'center', paddingHorizontal: 16 },
+
+  // --- AI chat ---
+  chatWrapper: { flex: 1, backgroundColor: colors.background, maxWidth: 800, width: '100%', alignSelf: 'center', marginTop: spacing.md, borderRadius: radius.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.surfaceBorder },
+  chatList: { padding: spacing.md },
+  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: radius.md, marginBottom: 10 },
+  userBubble: { alignSelf: 'flex-end', backgroundColor: colors.accent },
+  botBubble: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   messageText: { fontSize: 15, lineHeight: 22 },
-  userText: { color: '#ffffff' },
-  botText: { color: '#2f3640' },
-  inputContainer: { flexDirection: 'row', padding: 12, backgroundColor: '#f5f6fa', borderTopWidth: 1, borderColor: '#dcdde1' },
-  chatInput: { flex: 1, borderWidth: 1, borderColor: '#dcdde1', backgroundColor: '#ffffff', borderRadius: 20, paddingHorizontal: 15, fontSize: 15, height: 42 },
-  sendButton: { marginLeft: 10, backgroundColor: '#007AFF', borderRadius: 20, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
-  sendButtonText: { color: '#ffffff', fontWeight: 'bold' }
+  userText: { color: '#0A0E1A' },
+  botText: { color: colors.textPrimary },
+  inputContainer: { flexDirection: 'row', padding: spacing.md, backgroundColor: colors.backgroundSecondary, borderTopWidth: 1, borderColor: colors.surfaceBorder },
+  chatInput: { flex: 1, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 15, fontSize: 15, height: 42 },
+  sendButton: { marginLeft: 10, backgroundColor: colors.accent, borderRadius: 20, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
+  sendButtonText: { color: '#0A0E1A', fontWeight: '700' }
 });

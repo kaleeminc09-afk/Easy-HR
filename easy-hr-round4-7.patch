@@ -1,0 +1,967 @@
+diff --git a/mobile/app/index.js b/mobile/app/index.js
+index cdeacbe..f7460dc 100644
+--- a/mobile/app/index.js
++++ b/mobile/app/index.js
+@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, Acti
+ import { Link } from 'expo-router';
+ import * as Location from 'expo-location';
+ import { supabase } from '../lib/supabase';
++import { colors, spacing, radius, type, elevation } from '../lib/theme';
+ 
+ export default function App() {
+   const [session, setSession] = useState(null);
+@@ -82,6 +83,12 @@ export default function App() {
+     setAuthLoading(false);
+   };
+ 
++  const handleBiometric = async () => {
++    // TODO(next): npx expo install expo-local-authentication, then replace with
++    // LocalAuthentication.authenticateAsync() -> Supabase session restore.
++    setStatusMessage('Biometric sign-in arrives in the next update — use your password for now.');
++  };
++
+   const handleLogout = async () => {
+     await supabase.auth.signOut();
+     setActiveSession(null);
+@@ -321,47 +328,61 @@ export default function App() {
+ 
+   if (loading) {
+     return (
+-      <View style={styles.centerContainer}>
+-        <ActivityIndicator size="large" color="#007AFF" />
+-        <Text style={styles.loadingText}>Loading Easy HR...</Text>
++      <View style={styles.authLoadingContainer}>
++        <Text style={styles.authLogoMark}>\u2726</Text>
++        <ActivityIndicator size="large" color={colors.accent} />
++        <Text style={styles.authLoadingText}>Loading NorthShift...</Text>
+       </View>
+     );
+   }
+ 
+   if (!session) {
+     return (
+-      <SafeAreaView style={styles.container}>
+-        <View style={styles.card}>
+-          <Text style={styles.title}>Easy HR Login</Text>
+-          <Text style={styles.subtitle}>Sign in to your employee or manager account</Text>
++      <SafeAreaView style={styles.authContainer}>
++        <View style={styles.authCard}>
++          <Text style={styles.authLogoMark}>\u2726</Text>
++          <Text style={styles.authTitle}>NorthShift</Text>
++          <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
+ 
++          <Text style={styles.authLabel}>Email</Text>
+           <TextInput
+-            style={styles.input}
+-            placeholder="Email address"
+-            placeholderTextColor="#95a5a6"
++            style={styles.authInput}
++            placeholder="you@company.com"
++            placeholderTextColor={colors.inputPlaceholder}
+             value={email}
+             onChangeText={setEmail}
+             autoCapitalize="none"
+             keyboardType="email-address"
+           />
++          <Text style={styles.authLabel}>Password</Text>
+           <TextInput
+-            style={styles.input}
+-            placeholder="Password"
+-            placeholderTextColor="#95a5a6"
++            style={styles.authInput}
++            placeholder="Your password"
++            placeholderTextColor={colors.inputPlaceholder}
+             value={password}
+             onChangeText={setPassword}
+             secureTextEntry
+           />
+ 
+-          {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
+-          {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
++          {authError ? <Text style={styles.authError}>{authError}</Text> : null}
++          {statusMessage ? <Text style={styles.authMessage}>{statusMessage}</Text> : null}
++
++          <TouchableOpacity style={styles.authPrimaryButton} onPress={handleLogin} disabled={authLoading}>
++            {authLoading ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.authPrimaryButtonText}>Sign In</Text>}
++          </TouchableOpacity>
++
++          <View style={styles.authDivider}>
++            <View style={styles.authDividerLine} />
++            <Text style={styles.authDividerText}>or</Text>
++            <View style={styles.authDividerLine} />
++          </View>
+ 
+-          <TouchableOpacity style={styles.primaryButton} onPress={handleLogin} disabled={authLoading}>
+-            {authLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
++          <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
++            <Text style={styles.authBiometricButtonText}>Sign in with Face ID</Text>
+           </TouchableOpacity>
+ 
+-          <TouchableOpacity style={styles.secondaryButton} onPress={handleSignUp} disabled={authLoading}>
+-            <Text style={styles.secondaryButtonText}>Create New Account</Text>
++          <TouchableOpacity style={styles.authSecondaryButton} onPress={handleSignUp} disabled={authLoading}>
++            <Text style={styles.authSecondaryButtonText}>New here? Create account</Text>
+           </TouchableOpacity>
+         </View>
+       </SafeAreaView>
+@@ -369,119 +390,110 @@ export default function App() {
+   }
+ 
+   return (
+-    <SafeAreaView style={styles.container}>
+-      <View style={styles.header}>
++    <SafeAreaView style={styles.empContainer}>
++      <View style={styles.empHeader}>
+         <View>
+-          <Text style={styles.headerTitle}>Easy HR</Text>
+-          <Text style={styles.headerSubtitle}>{session.user.email}</Text>
++          <Text style={styles.empBrand}>\u2726 NorthShift</Text>
++          <Text style={styles.empEmail}>{session.user.email}</Text>
+         </View>
+-        <View style={styles.headerRight}>
++        <View style={styles.empHeaderRight}>
+           <Link href="/EmployeeChatScreen" asChild>
+-            <TouchableOpacity style={styles.assistantButton}>
+-              <Text style={styles.navButtonText}>🤖 Assistant</Text>
++            <TouchableOpacity style={styles.empAssistantButton}>
++              <Text style={styles.empAssistantButtonText}>\u2726 Assistant</Text>
+             </TouchableOpacity>
+           </Link>
+           <Link href="/manager" asChild>
+-            <TouchableOpacity style={styles.navButton}>
+-              <Text style={styles.navButtonText}>Manager →</Text>
++            <TouchableOpacity style={styles.empNavButton}>
++              <Text style={styles.empNavButtonText}>Manager \u2192</Text>
++            </TouchableOpacity>
++          </Link>
++          <Link href="/profile" asChild>
++            <TouchableOpacity style={styles.empNavButton}>
++              <Text style={styles.empNavButtonText}>Profile</Text>
+             </TouchableOpacity>
+           </Link>
+-          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+-            <Text style={styles.logoutButtonText}>Logout</Text>
+-          </TouchableOpacity>
+         </View>
+       </View>
+ 
+-      <ScrollView contentContainerStyle={styles.content}>
+-        <View style={styles.card}>
+-          <Text style={styles.title}>Time Tracker</Text>
+-          <Text style={styles.subtitle}>Geo-fenced attendance & break controls</Text>
+-
+-          {outOfRangeData ? (
+-            <View style={styles.exceptionBox}>
+-              <Text style={styles.exceptionTitle}>⚠️ Out of Range Exception</Text>
+-              <Text style={styles.exceptionText}>
+-                You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Provide a note:
+-              </Text>
+-              <TextInput
+-                style={styles.textArea}
+-                placeholder="e.g., Client visit, remote field work..."
+-                placeholderTextColor="#95a5a6"
+-                value={exceptionNote}
+-                onChangeText={setExceptionNote}
+-                multiline
+-                numberOfLines={3}
+-              />
+-              <TouchableOpacity style={styles.submitExceptionButton} onPress={handleExceptionSubmit} disabled={submittingException}>
+-                {submittingException ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Submit Exception Request</Text>}
+-              </TouchableOpacity>
+-              <TouchableOpacity style={styles.cancelButton} onPress={() => setOutOfRangeData(null)}>
+-                <Text style={styles.cancelButtonText}>Cancel</Text>
+-              </TouchableOpacity>
+-            </View>
+-          ) : (
+-            <>
+-              <View style={styles.statusBox}>
+-                <Text style={styles.statusLabel}>Current Status:</Text>
+-                <Text style={[styles.statusValue, activeSession ? (activeBreak ? styles.breakText : styles.activeText) : styles.offlineText]}>
+-                  {activeSession ? (activeBreak ? `☕ ON BREAK (${activeBreak.break_type})` : '🟢 ACTIVE (Clocked In)') : '⚪ OFFLINE'}
++      <ScrollView contentContainerStyle={styles.empContent}>
++        {outOfRangeData ? (
++          <View style={styles.empExceptionBox}>
++            <Text style={styles.empExceptionTitle}>Out of Range</Text>
++            <Text style={styles.empExceptionText}>
++              You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Add a note for your manager:
++            </Text>
++            <TextInput
++              style={styles.empTextArea}
++              placeholder="e.g., Client visit, remote field work..."
++              placeholderTextColor={colors.inputPlaceholder}
++              value={exceptionNote}
++              onChangeText={setExceptionNote}
++              multiline
++              numberOfLines={3}
++            />
++            <TouchableOpacity style={styles.empPrimaryButton} onPress={handleExceptionSubmit} disabled={submittingException}>
++              {submittingException ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
++            </TouchableOpacity>
++            <TouchableOpacity style={styles.empGhostButton} onPress={() => setOutOfRangeData(null)}>
++              <Text style={styles.empGhostButtonText}>Cancel</Text>
++            </TouchableOpacity>
++          </View>
++        ) : (
++          <>
++            <View style={styles.empStatusCard}>
++              <View style={[styles.empStatusPill, activeSession && !activeBreak ? styles.empStatusPillActive : null]}>
++                <Text style={styles.empStatusPillText}>
++                  {activeSession ? (activeBreak ? `ON BREAK \u00b7 ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
+                 </Text>
+               </View>
+-
+-              {activeSession && !activeBreak && (
+-                <View style={styles.tickerBox}>
+-                  <Text style={styles.tickerLabel}>Active Shift Duration:</Text>
+-                  <Text style={styles.tickerValue}>{formatTimeCounter(activeSessionSeconds)}</Text>
+-                </View>
+-              )}
+-
+-              <View style={styles.hoursBox}>
+-                <Text style={styles.hoursLabel}>Today's Total Hours:</Text>
+-                <Text style={styles.hoursValue}>{todayHours} hrs</Text>
++              <Text style={styles.empTimer}>
++                {activeSession ? formatTimeCounter(activeSessionSeconds) : '--:--:--'}
++              </Text>
++              <View style={styles.empHoursRow}>
++                <Text style={styles.empHoursLabel}>Today&apos;s hours</Text>
++                <Text style={styles.empHoursValue}>{todayHours} / 8h</Text>
+               </View>
++              <View style={styles.empProgressTrack}>
++                <View style={[styles.empProgressFill, { width: `${Math.min(100, (parseFloat(todayHours) || 0) / 8 * 100)}%` }]} />
++              </View>
++            </View>
+ 
+-              {activeSession ? (
+-                activeBreak ? (
+-                  <TouchableOpacity style={styles.endBreakButton} onPress={handleEndBreak}>
+-                    <Text style={styles.buttonText}>END BREAK (RETURN TO SHIFT)</Text>
+-                  </TouchableOpacity>
+-                ) : (
+-                  <>
+-                    <View style={styles.breakContainer}>
+-                      <View style={styles.breakRow}>
+-                        <TouchableOpacity style={styles.lunchUnpaidButton} onPress={() => handleStartBreak('Unpaid Lunch')}>
+-                          <Text style={styles.breakButtonText}>🍔 Unpaid Lunch</Text>
+-                        </TouchableOpacity>
+-                        <TouchableOpacity style={styles.lunchPaidButton} onPress={() => handleStartBreak('Paid Lunch')}>
+-                          <Text style={styles.breakButtonText}>🥗 Paid Lunch</Text>
+-                        </TouchableOpacity>
+-                      </View>
+-                      <View style={styles.breakRow}>
+-                        <TouchableOpacity style={styles.restButton} onPress={() => handleStartBreak('Paid Rest Break')}>
+-                          <Text style={styles.breakButtonText}>☕ Rest Break</Text>
+-                        </TouchableOpacity>
+-                      </View>
+-                    </View>
+-
+-                    <TouchableOpacity style={styles.clockOutButton} onPress={handleClockOut}>
+-                      <Text style={styles.buttonText}>CLOCK OUT & ANALYZE</Text>
+-                    </TouchableOpacity>
+-                  </>
+-                )
+-              ) : (
+-                <TouchableOpacity
+-                  style={[styles.clockInButton, locationChecking && styles.disabledButton]}
+-                  onPress={handleClockIn}
+-                  disabled={locationChecking}
+-                >
+-                  {locationChecking ? <ActivityIndicator color="#ffffff" /> : <Text style={styles.buttonText}>CLOCK IN (AUTO-GPS)</Text>}
++            {activeSession ? (
++              activeBreak ? (
++                <TouchableOpacity style={styles.empCircleButton} onPress={handleEndBreak}>
++                  <Text style={styles.empCircleButtonText}>END{'\n'}BREAK</Text>
+                 </TouchableOpacity>
+-              )}
+-            </>
+-          )}
++              ) : (
++                <>
++                  <View style={styles.empBreakRow}>
++                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Unpaid Lunch')}>
++                      <Text style={styles.empChipText}>Unpaid Lunch</Text>
++                    </TouchableOpacity>
++                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Lunch')}>
++                      <Text style={styles.empChipText}>Paid Lunch</Text>
++                    </TouchableOpacity>
++                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Rest Break')}>
++                      <Text style={styles.empChipText}>Rest Break</Text>
++                    </TouchableOpacity>
++                  </View>
++                  <TouchableOpacity style={styles.empCircleButton} onPress={handleClockOut}>
++                    <Text style={styles.empCircleButtonText}>CLOCK{'\n'}OUT</Text>
++                  </TouchableOpacity>
++                </>
++              )
++            ) : (
++              <TouchableOpacity
++                style={[styles.empCircleButton, locationChecking && styles.empCircleButtonDisabled]}
++                onPress={handleClockIn}
++                disabled={locationChecking}
++              >
++                {locationChecking ? <ActivityIndicator color="#0A0E1A" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
++              </TouchableOpacity>
++            )}
+ 
+-          {statusMessage ? <Text style={styles.message}>{statusMessage}</Text> : null}
+-        </View>
++            {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
++          </>
++        )}
+       </ScrollView>
+     </SafeAreaView>
+   );
+@@ -540,4 +552,65 @@ const styles = StyleSheet.create({
+   cancelButton: { marginTop: 8, padding: 6 },
+   cancelButtonText: { color: '#718093', fontSize: 13, fontWeight: '600' },
+   message: { marginTop: 15, fontSize: 13, color: '#57606f', textAlign: 'center' },
++
++  // --- NorthShift auth theme (login reskin; employee/manager screens keep legacy styles until their pass) ---
++  authContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', padding: spacing.lg },
++  authLoadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
++  authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
++  authCard: { width: '100%', maxWidth: 400, alignSelf: 'center' },
++  authLogoMark: { fontSize: 54, color: colors.accent, textAlign: 'center', marginBottom: spacing.sm },
++  authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },
++  authSubtitle: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xl },
++  authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
++  authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
++  authError: { color: colors.danger, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
++  authMessage: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
++  authPrimaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md + 2, alignItems: 'center', marginTop: spacing.sm, ...elevation.accentGlow },
++  authPrimaryButtonText: { color: '#0A0E1A', fontSize: 16, fontWeight: '700' },
++  authDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: spacing.lg },
++  authDividerLine: { flex: 1, height: 1, backgroundColor: colors.surfaceBorder },
++  authDividerText: { color: colors.textMuted, marginHorizontal: spacing.md, fontSize: 13 },
++  authBiometricButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
++  authBiometricButtonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
++  authSecondaryButton: { marginTop: spacing.lg, alignItems: 'center', padding: spacing.sm },
++  authSecondaryButtonText: { color: colors.textSecondary, fontSize: 14 },
++
++  // --- NorthShift employee theme (time tracker home) ---
++  empContainer: { flex: 1, backgroundColor: colors.background },
++  empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
++  empBrand: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
++  empEmail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
++  empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
++  empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
++  empAssistantButtonText: { color: colors.accent, fontWeight: '600', fontSize: 12 },
++  empNavButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
++  empNavButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 12 },
++  empLogoutButton: { paddingVertical: 8, paddingHorizontal: 8 },
++  empLogoutButtonText: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
++  empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
++  empStatusCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', ...elevation.card },
++  empStatusPill: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 6, paddingHorizontal: 14, marginBottom: spacing.md },
++  empStatusPillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
++  empStatusPillText: { ...type.label, color: colors.accent },
++  empTimer: { ...type.timer, color: colors.textPrimary, marginBottom: spacing.sm },
++  empHoursRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: spacing.sm },
++  empHoursLabel: { fontSize: 13, color: colors.textSecondary },
++  empHoursValue: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
++  empProgressTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
++  empProgressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 4 },
++  empCircleButton: { width: 168, height: 168, borderRadius: 84, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center', marginTop: spacing.xl, ...elevation.accentGlow },
++  empCircleButtonDisabled: { opacity: 0.6 },
++  empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
++  empBreakRow: { flexDirection: 'row', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
++  empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
++  empChipText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
++  empMessage: { marginTop: spacing.lg, fontSize: 13, color: colors.textSecondary, textAlign: 'center', maxWidth: 400 },
++  empExceptionBox: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
++  empExceptionTitle: { fontSize: 17, fontWeight: '700', color: colors.warning, marginBottom: spacing.sm, textAlign: 'center' },
++  empExceptionText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
++  empTextArea: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 14, color: colors.textPrimary, height: 90, textAlignVertical: 'top', marginBottom: spacing.md },
++  empPrimaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
++  empPrimaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
++  empGhostButton: { marginTop: spacing.sm, padding: spacing.sm, alignItems: 'center' },
++  empGhostButtonText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
+ });
+diff --git a/mobile/app/manager.js b/mobile/app/manager.js
+index 3205fcb..22ec008 100644
+--- a/mobile/app/manager.js
++++ b/mobile/app/manager.js
+@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
+ import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
+ import { Link, useRouter } from 'expo-router';
+ import { supabase } from '../lib/supabase';
++import { colors, spacing, radius, type, elevation } from '../lib/theme';
+ 
+ // Added Keys for the Edge Function connection
+ const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+@@ -19,7 +20,7 @@ export default function ManagerDashboard() {
+   const [payrollFormat, setPayrollFormat] = useState('STANDARD'); 
+ 
+   // --- NEW AI CHAT STATE ---
+-  const [messages, setMessages] = useState([{ id: '1', role: 'bot', content: 'Hello! I am your Easy HR assistant. How can I help you manage the team today?' }]);
++  const [messages, setMessages] = useState([{ id: '1', role: 'bot', content: 'Hello! I am your NorthShift assistant. How can I help you manage the team today?' }]);
+   const [inputText, setInputText] = useState('');
+   const [isChatLoading, setIsChatLoading] = useState(false);
+ 
+@@ -229,10 +230,10 @@ export default function ManagerDashboard() {
+       <SafeAreaView style={styles.container}>
+         <View style={styles.centerContainer}>
+           <View style={styles.deniedCard}>
+-            <Text style={styles.deniedTitle}>🚫 Access Denied</Text>
++            <Text style={styles.deniedTitle}>Access Denied</Text>
+             <Text style={styles.deniedText}>You must be logged in with a Manager account to view this portal.</Text>
+             <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
+-              <Text style={styles.buttonText}>← Return to Employee Portal</Text>
++              <Text style={styles.primaryButtonText}>\u2190 Return to Employee Portal</Text>
+             </TouchableOpacity>
+           </View>
+         </View>
+@@ -244,14 +245,21 @@ export default function ManagerDashboard() {
+     <SafeAreaView style={styles.container}>
+       <View style={styles.header}>
+         <View>
+-          <Text style={styles.title}>Easy HR Manager Portal</Text>
+-          <Text style={styles.subtitle}>Time Audits, Geo-Fencing & Exception Reviews</Text>
++          <Text style={styles.title}>\u2726 NorthShift</Text>
++          <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>
++        </View>
++        <View style={{ flexDirection: 'row', gap: 8 }}>
++          <Link href="/profile" asChild>
++            <TouchableOpacity style={styles.navButton}>
++              <Text style={styles.navButtonText}>Profile</Text>
++            </TouchableOpacity>
++          </Link>
++          <Link href="/" asChild>
++            <TouchableOpacity style={styles.navButton}>
++              <Text style={styles.navButtonText}>← Employee Portal</Text>
++            </TouchableOpacity>
++          </Link>
+         </View>
+-        <Link href="/" asChild>
+-          <TouchableOpacity style={styles.navButton}>
+-            <Text style={styles.navButtonText}>← Employee Portal</Text>
+-          </TouchableOpacity>
+-        </Link>
+       </View>
+ 
+       <View style={styles.filterBar}>
+@@ -274,7 +282,7 @@ export default function ManagerDashboard() {
+         {/* NEW AI TAB */}
+         <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.activeFilterTab, { backgroundColor: filter === 'AI' ? '#007AFF' : '#e8f0fe' }]} onPress={() => setFilter('AI')}>
+           <Text style={[styles.filterText, filter === 'AI' && styles.activeFilterText, { color: filter === 'AI' ? '#fff' : '#007AFF' }]}>
+-            🤖 AI Assistant
++            \u2726 AI Assistant
+           </Text>
+         </TouchableOpacity>
+ 
+@@ -293,12 +301,12 @@ export default function ManagerDashboard() {
+                 </TouchableOpacity>
+               </View>
+               <TouchableOpacity style={styles.exportButton} onPress={handlePayrollExport}>
+-                <Text style={styles.exportButtonText}>📥 Export {payrollFormat}</Text>
++                <Text style={styles.exportButtonText}>Export {payrollFormat}</Text>
+               </TouchableOpacity>
+             </>
+           )}
+           <TouchableOpacity style={styles.refreshButton} onPress={fetchAllManagerData}>
+-            <Text style={styles.refreshButtonText}>🔄</Text>
++            <Text style={styles.refreshButtonText}>\u21BB</Text>
+           </TouchableOpacity>
+         </View>
+       </View>
+@@ -322,6 +330,7 @@ export default function ManagerDashboard() {
+             <TextInput
+               style={styles.chatInput}
+               placeholder="Ask about geo-exceptions..."
++              placeholderTextColor={colors.inputPlaceholder}
+               value={inputText}
+               onChangeText={setInputText}
+               editable={!isChatLoading}
+@@ -351,17 +360,17 @@ export default function ManagerDashboard() {
+                       </Text>
+                     </View>
+                     <View style={styles.cardBody}>
+-                      <View style={styles.infoRow}><Text style={styles.label}>Attempted Worksite:</Text><Text style={styles.worksiteValue}>📍 {worksiteName}</Text></View>
++                      <View style={styles.infoRow}><Text style={styles.label}>Attempted Worksite:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
+                       <View style={styles.infoRow}><Text style={styles.label}>Distance from Site:</Text><Text style={styles.value}>{exc.distance_meters} meters away</Text></View>
+                       <View style={styles.infoRow}><Text style={styles.label}>Attempted At:</Text><Text style={styles.value}>{formatDateTime(exc.attempted_at)}</Text></View>
+                       <View style={styles.noteBox}><Text style={styles.noteLabel}>Employee Reason Note:</Text><Text style={styles.noteText}>"{exc.reason_note}"</Text></View>
+                       {isPending && (
+                         <View style={styles.approvalButtons}>
+                           <TouchableOpacity style={styles.approveButton} onPress={() => handleUpdateException(exc.id, 'approved')}>
+-                            <Text style={styles.buttonText}>✓ Approve Exception</Text>
++                            <Text style={styles.approveButtonText}>\u2713 Approve Exception</Text>
+                           </TouchableOpacity>
+                           <TouchableOpacity style={styles.rejectButton} onPress={() => handleUpdateException(exc.id, 'rejected')}>
+-                            <Text style={styles.buttonText}>✕ Reject</Text>
++                            <Text style={styles.rejectButtonText}>\u2715 Reject</Text>
+                           </TouchableOpacity>
+                         </View>
+                       )}
+@@ -386,7 +395,7 @@ export default function ManagerDashboard() {
+                       <Text style={[styles.statusBadge, isAnomaly ? styles.badgeDanger : styles.badgeNormal]}>{log.ai_anomaly_flag || 'Normal Shift'}</Text>
+                     </View>
+                     <View style={styles.cardBody}>
+-                      <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>📍 {worksiteName}</Text></View>
++                      <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
+                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
+                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
+                       <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+@@ -403,70 +412,73 @@ export default function ManagerDashboard() {
+ }
+ 
+ const styles = StyleSheet.create({
+-  container: { flex: 1, backgroundColor: '#f5f6fa' },
+-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f6fa', padding: 20 },
+-  loadingText: { marginTop: 10, color: '#555' },
+-  deniedCard: { backgroundColor: '#ffffff', padding: 30, borderRadius: 12, alignItems: 'center', maxWidth: 400, width: '100%', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 4 },
+-  deniedTitle: { fontSize: 20, fontWeight: 'bold', color: '#c0392b', marginBottom: 10 },
+-  deniedText: { fontSize: 14, color: '#718093', textAlign: 'center', marginBottom: 20 },
+-  primaryButton: { backgroundColor: '#2f3640', width: '100%', padding: 12, borderRadius: 8, alignItems: 'center' },
++  container: { flex: 1, backgroundColor: colors.background },
++  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: spacing.lg },
++  loadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
++  deniedCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.lg, alignItems: 'center', maxWidth: 400, width: '100%', ...elevation.card },
++  deniedTitle: { fontSize: 20, fontWeight: 'bold', color: colors.danger, marginBottom: spacing.sm },
++  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
++  primaryButton: { backgroundColor: colors.accent, width: '100%', padding: spacing.md, borderRadius: radius.md, alignItems: 'center', ...elevation.accentGlow },
++  primaryButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 14 },
+   buttonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
+-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 25, paddingVertical: 20, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#dcdde1' },
+-  title: { fontSize: 22, fontWeight: 'bold', color: '#2f3640' },
+-  subtitle: { fontSize: 13, color: '#718093', marginTop: 2 },
+-  navButton: { backgroundColor: '#f1f2f6', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 6, borderWidth: 1, borderColor: '#dcdde1' },
+-  navButtonText: { color: '#2f3640', fontWeight: '600', fontSize: 13 },
+-  filterBar: { flexDirection: 'row', paddingHorizontal: 25, paddingVertical: 12, backgroundColor: '#ffffff', borderBottomWidth: 1, borderBottomColor: '#dcdde1', alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+-  filterTab: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6, backgroundColor: '#f1f2f6' },
+-  activeFilterTab: { backgroundColor: '#2f3640' },
+-  filterText: { fontSize: 13, color: '#57606f', fontWeight: '600' },
+-  activeFilterText: { color: '#ffffff' },
++  approveButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 13 },
++  rejectButtonText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
++  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
++  title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
++  subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
++  navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
++  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
++  filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
++  filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
++  activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
++  filterText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
++  activeFilterText: { color: colors.accent },
+   exportSection: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 10, flexWrap: 'wrap' },
+-  formatSelector: { flexDirection: 'row', backgroundColor: '#f1f2f6', borderRadius: 6, padding: 2, borderWidth: 1, borderColor: '#dcdde1' },
+-  formatTab: { paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4 },
+-  activeFormatTab: { backgroundColor: '#2f3640' },
+-  formatText: { fontSize: 11, color: '#57606f', fontWeight: '600' },
+-  activeFormatText: { color: '#ffffff' },
+-  exportButton: { backgroundColor: '#27ae60', paddingVertical: 6, paddingHorizontal: 12, borderRadius: 6 },
+-  exportButtonText: { fontSize: 13, color: '#ffffff', fontWeight: '600' },
+-  refreshButton: { backgroundColor: '#f1f2f6', paddingVertical: 6, paddingHorizontal: 10, borderRadius: 6, borderWidth: 1, borderColor: '#dcdde1' },
+-  refreshButtonText: { fontSize: 13 },
+-  scrollContent: { padding: 25, maxWidth: 800, width: '100%', alignSelf: 'center' },
+-  emptyCard: { backgroundColor: '#ffffff', padding: 30, borderRadius: 8, alignItems: 'center', marginTop: 20 },
+-  emptyText: { color: '#718093', fontSize: 14 },
+-  logCard: { backgroundColor: '#ffffff', borderRadius: 8, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#dcdde1', shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3, elevation: 2 },
+-  anomalyCard: { borderColor: '#f5b7b1', backgroundColor: '#fdfefe' },
+-  pendingCard: { borderColor: '#f9e79f', backgroundColor: '#fef9e7' },
+-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#f1f2f6' },
+-  employeeName: { fontSize: 16, fontWeight: 'bold', color: '#2f3640' },
+-  statusBadge: { fontSize: 12, fontWeight: '600', paddingVertical: 3, paddingHorizontal: 8, borderRadius: 4 },
+-  badgeNormal: { backgroundColor: '#e8f8f5', color: '#16a085' },
+-  badgeDanger: { backgroundColor: '#f5b7b1', color: '#c0392b' },
+-  badgeWarning: { backgroundColor: '#fcf3cf', color: '#b7950b' },
++  formatSelector: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.sm, padding: 2, borderWidth: 1, borderColor: colors.surfaceBorder },
++  formatTab: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 4 },
++  activeFormatTab: { backgroundColor: colors.accent },
++  formatText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
++  activeFormatText: { color: '#0A0E1A' },
++  exportButton: { backgroundColor: colors.accent, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
++  exportButtonText: { fontSize: 13, color: '#0A0E1A', fontWeight: '700' },
++  refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
++  refreshButtonText: { fontSize: 13, color: colors.textSecondary },
++  scrollContent: { padding: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center' },
++  emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
++  emptyText: { color: colors.textSecondary, fontSize: 14 },
++  logCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, ...elevation.card },
++  anomalyCard: { borderColor: colors.warning, borderLeftWidth: 3 },
++  pendingCard: { borderColor: colors.warning },
++  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
++  employeeName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
++  statusBadge: { fontSize: 12, fontWeight: '600', paddingVertical: 4, paddingHorizontal: 10, borderRadius: radius.pill, overflow: 'hidden' },
++  badgeNormal: { backgroundColor: 'rgba(52,211,153,0.14)', color: colors.success },
++  badgeDanger: { backgroundColor: 'rgba(248,113,113,0.14)', color: colors.danger },
++  badgeWarning: { backgroundColor: colors.warningSoft, color: colors.warning },
+   cardBody: { gap: 6 },
+   infoRow: { flexDirection: 'row', justifyContent: 'space-between' },
+-  label: { fontSize: 13, color: '#718093' },
+-  value: { fontSize: 13, color: '#2f3640', fontWeight: '500' },
+-  worksiteValue: { fontSize: 13, color: '#2980b9', fontWeight: 'bold' },
+-  valueBold: { fontSize: 13, color: '#2f3640', fontWeight: 'bold' },
+-  noteBox: { backgroundColor: '#fcf8e3', padding: 10, borderRadius: 6, marginTop: 4, borderWidth: 1, borderColor: '#faebcc' },
+-  noteLabel: { fontSize: 11, fontWeight: 'bold', color: '#8a6d3b', marginBottom: 2 },
+-  noteText: { fontSize: 13, color: '#8a6d3b', fontStyle: 'italic' },
+-  approvalButtons: { flexDirection: 'row', gap: 10, marginTop: 12 },
+-  approveButton: { flex: 1, backgroundColor: '#27ae60', padding: 10, borderRadius: 6, alignItems: 'center' },
+-  rejectButton: { backgroundColor: '#c0392b', padding: 10, borderRadius: 6, alignItems: 'center', paddingHorizontal: 16 },
+-  
+-  // --- NEW AI CHAT STYLES ---
+-  chatWrapper: { flex: 1, backgroundColor: '#ffffff', maxWidth: 800, width: '100%', alignSelf: 'center', marginTop: 10, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: '#dcdde1' },
+-  chatList: { padding: 15 },
+-  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 10, marginBottom: 10 },
+-  userBubble: { alignSelf: 'flex-end', backgroundColor: '#007AFF' },
+-  botBubble: { alignSelf: 'flex-start', backgroundColor: '#f1f2f6', borderWidth: 1, borderColor: '#dcdde1' },
++  label: { fontSize: 13, color: colors.textSecondary },
++  value: { fontSize: 13, color: colors.textPrimary, fontWeight: '500' },
++  worksiteValue: { fontSize: 13, color: colors.accent, fontWeight: '700' },
++  valueBold: { fontSize: 13, color: colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
++  noteBox: { backgroundColor: colors.warningSoft, padding: spacing.md, borderRadius: radius.sm, marginTop: 4, borderWidth: 1, borderColor: colors.warning },
++  noteLabel: { fontSize: 11, fontWeight: '700', color: colors.warning, marginBottom: 2 },
++  noteText: { fontSize: 13, color: colors.textPrimary, fontStyle: 'italic' },
++  approvalButtons: { flexDirection: 'row', gap: 10, marginTop: spacing.md },
++  approveButton: { flex: 1, backgroundColor: colors.accent, padding: 12, borderRadius: radius.sm, alignItems: 'center' },
++  rejectButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, padding: 12, borderRadius: radius.sm, alignItems: 'center', paddingHorizontal: 16 },
++
++  // --- AI chat ---
++  chatWrapper: { flex: 1, backgroundColor: colors.background, maxWidth: 800, width: '100%', alignSelf: 'center', marginTop: spacing.md, borderRadius: radius.md, overflow: 'hidden', borderWidth: 1, borderColor: colors.surfaceBorder },
++  chatList: { padding: spacing.md },
++  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: radius.md, marginBottom: 10 },
++  userBubble: { alignSelf: 'flex-end', backgroundColor: colors.accent },
++  botBubble: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
+   messageText: { fontSize: 15, lineHeight: 22 },
+-  userText: { color: '#ffffff' },
+-  botText: { color: '#2f3640' },
+-  inputContainer: { flexDirection: 'row', padding: 12, backgroundColor: '#f5f6fa', borderTopWidth: 1, borderColor: '#dcdde1' },
+-  chatInput: { flex: 1, borderWidth: 1, borderColor: '#dcdde1', backgroundColor: '#ffffff', borderRadius: 20, paddingHorizontal: 15, fontSize: 15, height: 42 },
+-  sendButton: { marginLeft: 10, backgroundColor: '#007AFF', borderRadius: 20, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
+-  sendButtonText: { color: '#ffffff', fontWeight: 'bold' }
+-});
+\ No newline at end of file
++  userText: { color: '#0A0E1A' },
++  botText: { color: colors.textPrimary },
++  inputContainer: { flexDirection: 'row', padding: spacing.md, backgroundColor: colors.backgroundSecondary, borderTopWidth: 1, borderColor: colors.surfaceBorder },
++  chatInput: { flex: 1, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 15, fontSize: 15, height: 42 },
++  sendButton: { marginLeft: 10, backgroundColor: colors.accent, borderRadius: 20, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
++  sendButtonText: { color: '#0A0E1A', fontWeight: '700' }
++});
+diff --git a/mobile/app/profile.js b/mobile/app/profile.js
+new file mode 100644
+index 0000000..9c2a947
+--- /dev/null
++++ b/mobile/app/profile.js
+@@ -0,0 +1,174 @@
++import React, { useState, useEffect } from 'react';
++import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
++import { useRouter, Link } from 'expo-router';
++import { supabase } from '../lib/supabase';
++import { colors, spacing, radius, type, elevation } from '../lib/theme';
++
++const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
++const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
++
++export default function ProfileScreen() {
++  const router = useRouter();
++  const [loading, setLoading] = useState(true);
++  const [email, setEmail] = useState('');
++  const [role, setRole] = useState('employee');
++  const [fullName, setFullName] = useState('');
++  const [saving, setSaving] = useState(false);
++  const [message, setMessage] = useState('');
++  const [confirmingDelete, setConfirmingDelete] = useState(false);
++  const [deleting, setDeleting] = useState(false);
++
++  useEffect(() => { loadProfile(); }, []);
++
++  const loadProfile = async () => {
++    const { data: { session } } = await supabase.auth.getSession();
++    if (!session) { router.replace('/'); return; }
++    setEmail(session.user.email || '');
++    const { data } = await supabase.from('profiles').select('full_name, role').eq('id', session.user.id).single();
++    if (data) {
++      setFullName(data.full_name || '');
++      setRole(data.role || 'employee');
++    }
++    setLoading(false);
++  };
++
++  const handleSave = async () => {
++    setSaving(true);
++    setMessage('');
++    const { data: { session } } = await supabase.auth.getSession();
++    const { error } = await supabase.from('profiles').update({ full_name: fullName.trim() }).eq('id', session.user.id);
++    setMessage(error ? 'Could not save. Check your connection and try again.' : 'Profile updated.');
++    setSaving(false);
++  };
++
++  const handleSignOut = async () => {
++    await supabase.auth.signOut();
++    router.replace('/');
++  };
++
++  const handleDelete = async () => {
++    if (!confirmingDelete) { setConfirmingDelete(true); return; }
++    setDeleting(true);
++    setMessage('');
++    try {
++      const { data: { session } } = await supabase.auth.getSession();
++      const res = await fetch(`${SUPABASE_URL}/functions/v1/delete-my-account`, {
++        method: 'POST',
++        headers: {
++          'Authorization': `Bearer ${session.access_token}`,
++          'apikey': SUPABASE_ANON_KEY,
++          'Content-Type': 'application/json',
++        },
++      });
++      const body = await res.json();
++      if (!res.ok) throw new Error(body.error || 'Delete failed');
++      await supabase.auth.signOut();
++      router.replace('/');
++    } catch (e) {
++      setMessage('Could not delete your account: ' + e.message);
++      setConfirmingDelete(false);
++    } finally {
++      setDeleting(false);
++    }
++  };
++
++  if (loading) {
++    return (
++      <View style={styles.loadingContainer}>
++        <ActivityIndicator size="large" color={colors.accent} />
++      </View>
++    );
++  }
++
++  return (
++    <SafeAreaView style={styles.container}>
++      <View style={styles.header}>
++        <Link href="/" asChild>
++          <TouchableOpacity style={styles.navButton}>
++            <Text style={styles.navButtonText}>← Back</Text>
++          </TouchableOpacity>
++        </Link>
++        <Text style={styles.headerTitle}>Profile</Text>
++        <View style={{ width: 80 }} />
++      </View>
++
++      <ScrollView contentContainerStyle={styles.content}>
++        <View style={styles.card}>
++          <View style={styles.avatar}>
++            <Text style={styles.avatarText}>{(fullName || email || '?').charAt(0).toUpperCase()}</Text>
++          </View>
++          <Text style={styles.email}>{email}</Text>
++          <View style={styles.roleBadge}>
++            <Text style={styles.roleBadgeText}>{role.toUpperCase()}</Text>
++          </View>
++
++          <Text style={styles.label}>Full name</Text>
++          <TextInput
++            style={styles.input}
++            value={fullName}
++            onChangeText={setFullName}
++            placeholder="Your name"
++            placeholderTextColor={colors.inputPlaceholder}
++          />
++
++          {message ? <Text style={styles.message}>{message}</Text> : null}
++
++          <TouchableOpacity style={styles.primaryButton} onPress={handleSave} disabled={saving}>
++            {saving ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
++          </TouchableOpacity>
++
++          <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
++            <Text style={styles.signOutButtonText}>Sign Out</Text>
++          </TouchableOpacity>
++
++          <View style={styles.dangerZone}>
++            <Text style={styles.dangerTitle}>Danger zone</Text>
++            <Text style={styles.dangerText}>
++              {confirmingDelete
++                ? 'This permanently deletes your account and profile data. Tap again to confirm.'
++                : 'Delete your NorthShift account and all profile data.'}
++            </Text>
++            <TouchableOpacity
++              style={[styles.deleteButton, confirmingDelete && styles.deleteButtonArmed]}
++              onPress={handleDelete}
++              disabled={deleting}
++            >
++              {deleting
++                ? <ActivityIndicator color="#fff" />
++                : <Text style={styles.deleteButtonText}>{confirmingDelete ? 'Tap again to confirm delete' : 'Delete My Account'}</Text>}
++            </TouchableOpacity>
++          </View>
++        </View>
++      </ScrollView>
++    </SafeAreaView>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: { flex: 1, backgroundColor: colors.background },
++  loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
++  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
++  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
++  navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
++  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
++  content: { padding: spacing.lg, alignItems: 'center' },
++  card: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center', ...elevation.card },
++  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
++  avatarText: { fontSize: 28, fontWeight: '700', color: colors.accent },
++  email: { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
++  roleBadge: { marginTop: spacing.sm, marginBottom: spacing.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
++  roleBadgeText: { ...type.label, color: colors.accent },
++  label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs, alignSelf: 'flex-start' },
++  input: { width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
++  message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
++  primaryButton: { width: '100%', backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.sm },
++  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
++  signOutButton: { marginTop: spacing.md, padding: spacing.sm, alignItems: 'center' },
++  signOutButtonText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
++  dangerZone: { width: '100%', marginTop: spacing.xl, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.surfaceBorder, alignItems: 'center' },
++  dangerTitle: { fontSize: 14, fontWeight: '700', color: colors.danger, marginBottom: spacing.xs },
++  dangerText: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
++  deleteButton: { width: '100%', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
++  deleteButtonArmed: { backgroundColor: colors.danger },
++  deleteButtonText: { color: colors.danger, fontSize: 14, fontWeight: '700' },
++});
+diff --git a/mobile/lib/theme.ts b/mobile/lib/theme.ts
+new file mode 100644
+index 0000000..0e2d4e0
+--- /dev/null
++++ b/mobile/lib/theme.ts
+@@ -0,0 +1,92 @@
++// NorthShift — Midnight Executive theme tokens (toned down).
++// Single source of truth for colors, spacing, radius and type.
++// Import: `import { colors, spacing, radius, type } from '../lib/theme';`
++
++export const colors = {
++  // Surfaces — deep navy, never pure black
++  background: '#0A0E1A',
++  backgroundSecondary: '#0E1526',
++  surface: 'rgba(255, 255, 255, 0.06)',
++  surfaceBorder: 'rgba(255, 255, 255, 0.10)',
++
++  // Accent — electric cyan, used sparingly (primary actions, active states)
++  accent: '#00D4FF',
++  accentSoft: 'rgba(0, 212, 255, 0.12)',
++  accentBorder: 'rgba(0, 212, 255, 0.35)',
++
++  // Semantic
++  warning: '#FFB800',
++  warningSoft: 'rgba(255, 184, 0, 0.12)',
++  success: '#34D399',
++  danger: '#F87171',
++
++  // Text
++  textPrimary: '#F2F5F9',
++  textSecondary: '#9AA4B2',
++  textMuted: '#6B7686',
++
++  // Inputs
++  inputBackground: 'rgba(255, 255, 255, 0.05)',
++  inputBorder: 'rgba(255, 255, 255, 0.14)',
++  inputPlaceholder: '#6B7686',
++};
++
++export const spacing = {
++  xs: 4,
++  sm: 8,
++  md: 16,
++  lg: 24,
++  xl: 32,
++  xxl: 48,
++};
++
++export const radius = {
++  sm: 8,
++  md: 12,
++  lg: 16,
++  pill: 999,
++};
++
++// Toned down: restrained elevation, no heavy glows.
++export const elevation = {
++  card: {
++    shadowColor: '#000',
++    shadowOffset: { width: 0, height: 2 },
++    shadowOpacity: 0.25,
++    shadowRadius: 8,
++    elevation: 3,
++  },
++  raised: {
++    shadowColor: '#000',
++    shadowOffset: { width: 0, height: 4 },
++    shadowOpacity: 0.3,
++    shadowRadius: 12,
++    elevation: 5,
++  },
++  // Accent glow — use ONLY on the single primary action per screen.
++  accentGlow: {
++    shadowColor: colors.accent,
++    shadowOffset: { width: 0, height: 0 },
++    shadowOpacity: 0.35,
++    shadowRadius: 16,
++    elevation: 6,
++  },
++};
++
++export const type = {
++  hero: { fontSize: 44, fontWeight: '700' as const, letterSpacing: -0.5 },
++  title: { fontSize: 24, fontWeight: '700' as const },
++  heading: { fontSize: 18, fontWeight: '600' as const },
++  body: { fontSize: 16, fontWeight: '400' as const },
++  caption: { fontSize: 13, fontWeight: '400' as const },
++  label: {
++    fontSize: 11,
++    fontWeight: '600' as const,
++    letterSpacing: 1.2,
++    textTransform: 'uppercase' as const,
++  },
++  timer: { fontSize: 52, fontWeight: '700' as const, fontVariant: ['tabular-nums'] as const },
++};
++
++export const theme = { colors, spacing, radius, elevation, type };
++export default theme;
+diff --git a/mobile/supabase/functions/delete-my-account/index.ts b/mobile/supabase/functions/delete-my-account/index.ts
+new file mode 100644
+index 0000000..18b0ad9
+--- /dev/null
++++ b/mobile/supabase/functions/delete-my-account/index.ts
+@@ -0,0 +1,42 @@
++// Deletes the calling user's own account. Called from the Profile screen's
++// "Delete My Account" flow. Apple requires in-app account deletion for apps
++// with account creation (guideline 5.1.1).
++//
++// Uses the service-role key, so it bypasses RLS. The caller's identity is
++// derived server-side from the Bearer JWT — never trust a client-supplied id.
++//
++// Deploy: supabase functions deploy delete-my-account
++import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
++import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
++
++function json(body: unknown, status: number) {
++  return new Response(JSON.stringify(body), {
++    status,
++    headers: { "Content-Type": "application/json" },
++  });
++}
++
++serve(async (req: Request) => {
++  try {
++    const jwt = (req.headers.get("Authorization") || "").replace("Bearer ", "");
++    if (!jwt) return json({ error: "Missing authorization" }, 401);
++
++    const supabase = createClient(
++      Deno.env.get("SUPABASE_URL")!,
++      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
++    );
++
++    const { data: { user }, error: userError } = await supabase.auth.getUser(jwt);
++    if (userError || !user) return json({ error: "Unauthorized" }, 401);
++
++    // Remove the profile row first (in case the FK has no ON DELETE CASCADE).
++    await supabase.from("profiles").delete().eq("id", user.id);
++
++    const { error: deleteError } = await supabase.auth.admin.deleteUser(user.id);
++    if (deleteError) throw deleteError;
++
++    return json({ ok: true }, 200);
++  } catch (e) {
++    return json({ error: e.message || "Delete failed" }, 500);
++  }
++});
