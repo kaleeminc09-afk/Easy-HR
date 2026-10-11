@@ -358,14 +358,15 @@ export default function App() {
 
   const formatTimeCounter = (totalSecs) => {
     const hrs = Math.floor(totalSecs / 3600);
-  const formatClock = (d) =>
-    d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
-    ' · ' +
-    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
     const mins = Math.floor((totalSecs % 3600) / 60);
     const secs = totalSecs % 60;
     return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
+
+  const formatClock = (d) =>
+    d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }) +
+    ' · ' +
+    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 
   if (loading) {
     return (
