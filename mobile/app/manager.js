@@ -270,11 +270,18 @@ export default function ManagerDashboard() {
             <Text style={styles.adminCardTitle}>Administration</Text>
             <Text style={styles.adminCardText}>Add managers, manage roles and access.</Text>
           </View>
-          <Link href="/users" asChild>
-            <TouchableOpacity style={styles.adminCardButton}>
-              <Text style={styles.adminCardButtonText}>Manage Users →</Text>
-            </TouchableOpacity>
-          </Link>
+          <View style={{ gap: 8 }}>
+            <Link href="/users" asChild>
+              <TouchableOpacity style={styles.adminCardButton}>
+                    <Text style={styles.adminCardButtonText}>Manage Users →</Text>
+              </TouchableOpacity>
+            </Link>
+            <Link href="/subscription" asChild>
+              <TouchableOpacity style={styles.adminCardButton}>
+                <Text style={styles.adminCardButtonText}>Subscription →</Text>
+              </TouchableOpacity>
+            </Link>
+          </View>
         </View>
       )}
 
