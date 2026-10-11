@@ -1,0 +1,108 @@
+diff --git a/mobile/app/index.js b/mobile/app/index.js
+index 7b3021f..df7eea2 100644
+--- a/mobile/app/index.js
++++ b/mobile/app/index.js
+@@ -341,7 +341,7 @@ export default function App() {
+   if (loading) {
+     return (
+       <View style={styles.authLoadingContainer}>
+-        <Text style={styles.authLogoMark}>\u2726</Text>
++        <Text style={styles.authLogoMark}>✦</Text>
+         <ActivityIndicator size="large" color={colors.accent} />
+         <Text style={styles.authLoadingText}>Loading NorthShift...</Text>
+       </View>
+@@ -352,7 +352,7 @@ export default function App() {
+     return (
+       <SafeAreaView style={styles.authContainer}>
+         <View style={styles.authCard}>
+-          <Text style={styles.authLogoMark}>\u2726</Text>
++          <Text style={styles.authLogoMark}>✦</Text>
+           <Text style={styles.authTitle}>NorthShift</Text>
+           <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
+ 
+@@ -405,18 +405,18 @@ export default function App() {
+     <SafeAreaView style={styles.empContainer}>
+       <View style={styles.empHeader}>
+         <View>
+-          <Text style={styles.empBrand}>\u2726 NorthShift</Text>
++          <Text style={styles.empBrand}>✦ NorthShift</Text>
+           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
+         </View>
+         <View style={styles.empHeaderRight}>
+           <Link href="/EmployeeChatScreen" asChild>
+             <TouchableOpacity style={styles.empAssistantButton}>
+-              <Text style={styles.empAssistantButtonText}>\u2726 Assistant</Text>
++              <Text style={styles.empAssistantButtonText}>✦ Assistant</Text>
+             </TouchableOpacity>
+           </Link>
+           <Link href="/manager" asChild>
+             <TouchableOpacity style={styles.empNavButton}>
+-              <Text style={styles.empNavButtonText}>Manager \u2192</Text>
++              <Text style={styles.empNavButtonText}>Manager →</Text>
+             </TouchableOpacity>
+           </Link>
+           <Link href="/profile" asChild>
+@@ -455,7 +455,7 @@ export default function App() {
+             <View style={styles.empStatusCard}>
+               <View style={[styles.empStatusPill, activeSession && !activeBreak ? styles.empStatusPillActive : null]}>
+                 <Text style={styles.empStatusPillText}>
+-                  {activeSession ? (activeBreak ? `ON BREAK \u00b7 ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
++                  {activeSession ? (activeBreak ? `ON BREAK · ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
+                 </Text>
+               </View>
+               <Text style={styles.empTimer}>
+diff --git a/mobile/app/manager.js b/mobile/app/manager.js
+index 4f3d60a..378f651 100644
+--- a/mobile/app/manager.js
++++ b/mobile/app/manager.js
+@@ -241,7 +241,7 @@ export default function ManagerDashboard() {
+             <Text style={styles.deniedTitle}>Access Denied</Text>
+             <Text style={styles.deniedText}>You must be logged in with a Manager account to view this portal.</Text>
+             <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
+-              <Text style={styles.primaryButtonText}>\u2190 Return to Employee Portal</Text>
++              <Text style={styles.primaryButtonText}>← Return to Employee Portal</Text>
+             </TouchableOpacity>
+           </View>
+         </View>
+@@ -253,8 +253,8 @@ export default function ManagerDashboard() {
+     <SafeAreaView style={styles.container}>
+       <View style={styles.header}>
+         <View>
+-          <Text style={styles.title}>\u2726 NorthShift</Text>
+-          {businessName ? <Text style={styles.subtitle}>{businessName} \u00b7 Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal \u00b7 Time Audits & Exceptions</Text>}
++          <Text style={styles.title}>✦ NorthShift</Text>
++          {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
+         </View>
+         <View style={{ flexDirection: 'row', gap: 8 }}>
+           <Link href="/profile" asChild>
+@@ -311,7 +311,7 @@ export default function ManagerDashboard() {
+         {/* NEW AI TAB */}
+         <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.activeFilterTab, { backgroundColor: filter === 'AI' ? '#007AFF' : '#e8f0fe' }]} onPress={() => setFilter('AI')}>
+           <Text style={[styles.filterText, filter === 'AI' && styles.activeFilterText, { color: filter === 'AI' ? '#fff' : '#007AFF' }]}>
+-            \u2726 AI Assistant
++            ✦ AI Assistant
+           </Text>
+         </TouchableOpacity>
+ 
+@@ -335,7 +335,7 @@ export default function ManagerDashboard() {
+             </>
+           )}
+           <TouchableOpacity style={styles.refreshButton} onPress={fetchAllManagerData}>
+-            <Text style={styles.refreshButtonText}>\u21BB</Text>
++            <Text style={styles.refreshButtonText}>↻</Text>
+           </TouchableOpacity>
+         </View>
+       </View>
+@@ -396,10 +396,10 @@ export default function ManagerDashboard() {
+                       {isPending && (
+                         <View style={styles.approvalButtons}>
+                           <TouchableOpacity style={styles.approveButton} onPress={() => handleUpdateException(exc.id, 'approved')}>
+-                            <Text style={styles.approveButtonText}>\u2713 Approve Exception</Text>
++                            <Text style={styles.approveButtonText}>✓ Approve Exception</Text>
+                           </TouchableOpacity>
+                           <TouchableOpacity style={styles.rejectButton} onPress={() => handleUpdateException(exc.id, 'rejected')}>
+-                            <Text style={styles.rejectButtonText}>\u2715 Reject</Text>
++                            <Text style={styles.rejectButtonText}>✕ Reject</Text>
+                           </TouchableOpacity>
+                         </View>
+                       )}

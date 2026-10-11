@@ -341,7 +341,7 @@ export default function App() {
   if (loading) {
     return (
       <View style={styles.authLoadingContainer}>
-        <Text style={styles.authLogoMark}>\u2726</Text>
+        <Text style={styles.authLogoMark}>✦</Text>
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={styles.authLoadingText}>Loading NorthShift...</Text>
       </View>
@@ -352,7 +352,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.authContainer}>
         <View style={styles.authCard}>
-          <Text style={styles.authLogoMark}>\u2726</Text>
+          <Text style={styles.authLogoMark}>✦</Text>
           <Text style={styles.authTitle}>NorthShift</Text>
           <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
 
@@ -405,18 +405,18 @@ export default function App() {
     <SafeAreaView style={styles.empContainer}>
       <View style={styles.empHeader}>
         <View>
-          <Text style={styles.empBrand}>\u2726 NorthShift</Text>
+          <Text style={styles.empBrand}>✦ NorthShift</Text>
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
         </View>
         <View style={styles.empHeaderRight}>
           <Link href="/EmployeeChatScreen" asChild>
             <TouchableOpacity style={styles.empAssistantButton}>
-              <Text style={styles.empAssistantButtonText}>\u2726 Assistant</Text>
+              <Text style={styles.empAssistantButtonText}>✦ Assistant</Text>
             </TouchableOpacity>
           </Link>
           <Link href="/manager" asChild>
             <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Manager \u2192</Text>
+              <Text style={styles.empNavButtonText}>Manager →</Text>
             </TouchableOpacity>
           </Link>
           <Link href="/profile" asChild>
@@ -455,7 +455,7 @@ export default function App() {
             <View style={styles.empStatusCard}>
               <View style={[styles.empStatusPill, activeSession && !activeBreak ? styles.empStatusPillActive : null]}>
                 <Text style={styles.empStatusPillText}>
-                  {activeSession ? (activeBreak ? `ON BREAK \u00b7 ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
+                  {activeSession ? (activeBreak ? `ON BREAK · ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
                 </Text>
               </View>
               <Text style={styles.empTimer}>
