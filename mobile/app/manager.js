@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, spacing, radius, type, elevation, fontFamily } from '../lib/theme';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -234,7 +234,7 @@ export default function ManagerDashboard() {
   if (loading) {
     return (
       <View style={styles.centerContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
+        <ActivityIndicator size="large" color={colors.accent} />
         <Text style={styles.loadingText}>Verifying Manager Permissions...</Text>
       </View>
     );
@@ -316,8 +316,8 @@ export default function ManagerDashboard() {
         </TouchableOpacity>
 
         {/* NEW AI TAB */}
-        <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.activeFilterTab, { backgroundColor: filter === 'AI' ? '#007AFF' : '#e8f0fe' }]} onPress={() => setFilter('AI')}>
-          <Text style={[styles.filterText, filter === 'AI' && styles.activeFilterText, { color: filter === 'AI' ? '#fff' : '#007AFF' }]}>
+        <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.aiTabActive]} onPress={() => setFilter('AI')}>
+          <Text style={[styles.filterText, filter === 'AI' ? styles.aiTabTextActive : styles.aiTabText]}>
             ✦ AI Assistant
           </Text>
         </TouchableOpacity>
@@ -380,7 +380,10 @@ export default function ManagerDashboard() {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {filter === 'EXCEPTIONS' ? (
             exceptions.length === 0 ? (
-              <View style={styles.emptyCard}><Text style={styles.emptyText}>No out-of-range exception requests found.</Text></View>
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>All clear</Text>
+                <Text style={styles.emptyText}>No out-of-range exception requests. When an employee clocks in outside a worksite, it'll land here for your review.</Text>
+              </View>
             ) : (
               exceptions.map((exc) => {
                 const employeeName = exc.profiles?.full_name || `${exc.profiles?.first_name || ''} ${exc.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
@@ -417,7 +420,14 @@ export default function ManagerDashboard() {
             )
           ) : (
             (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).length === 0 ? (
-              <View style={styles.emptyCard}><Text style={styles.emptyText}>No time logs found matching this filter.</Text></View>
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>{filter === 'ANOMALIES' ? 'No anomalies' : 'No time logs yet'}</Text>
+                <Text style={styles.emptyText}>
+                  {filter === 'ANOMALIES'
+                    ? 'Nothing flagged by the AI. Shifts that look unusual will show up here automatically.'
+                    : 'Once your team starts clocking in, their shifts will appear here.'}
+                </Text>
+              </View>
             ) : (
               (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).map((log) => {
                 const isAnomaly = log.ai_anomaly_flag && log.ai_anomaly_flag.includes('⚠️️');
@@ -450,61 +460,65 @@ export default function ManagerDashboard() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background, padding: spacing.lg },
-  loadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
+  loadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular },
   deniedCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.lg, alignItems: 'center', maxWidth: 400, width: '100%', ...elevation.card },
-  deniedTitle: { fontSize: 20, fontWeight: 'bold', color: colors.danger, marginBottom: spacing.sm },
-  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
+  deniedTitle: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.danger, marginBottom: spacing.sm },
+  deniedText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
   primaryButton: { backgroundColor: colors.accent, width: '100%', padding: spacing.md, borderRadius: radius.md, alignItems: 'center', ...elevation.accentGlow },
-  primaryButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 14 },
-  buttonText: { color: '#ffffff', fontWeight: 'bold', fontSize: 13 },
-  approveButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 13 },
-  rejectButtonText: { color: colors.danger, fontWeight: '700', fontSize: 13 },
+  primaryButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 14 },
+  buttonText: { color: '#ffffff', fontFamily: fontFamily.bold, fontSize: 13 },
+  approveButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 13 },
+  rejectButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 13 },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  title: { fontSize: 20, fontWeight: '700', color: colors.textPrimary },
-  subtitle: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  title: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
-  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   adminCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, marginHorizontal: spacing.lg, marginTop: spacing.md, ...elevation.card },
-  adminCardTitle: { fontSize: 15, fontWeight: '700', color: colors.textPrimary },
-  adminCardText: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  adminCardTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  adminCardText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   adminCardButton: { backgroundColor: colors.accent, borderRadius: radius.sm, paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
-  adminCardButtonText: { color: '#0A0E1A', fontWeight: '700', fontSize: 13 },
+  adminCardButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 13 },
   filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
-  filterText: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
+  aiTabActive: { backgroundColor: colors.accent, borderColor: colors.accent },
+  aiTabText: { color: colors.accent },
+  aiTabTextActive: { color: '#0A0E1A' },
+  filterText: { fontSize: 13, color: colors.textSecondary, fontFamily: fontFamily.semibold },
   activeFilterText: { color: colors.accent },
   exportSection: { flexDirection: 'row', alignItems: 'center', marginLeft: 'auto', gap: 10, flexWrap: 'wrap' },
   formatSelector: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: radius.sm, padding: 2, borderWidth: 1, borderColor: colors.surfaceBorder },
   formatTab: { paddingVertical: 6, paddingHorizontal: 10, borderRadius: 4 },
   activeFormatTab: { backgroundColor: colors.accent },
-  formatText: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
+  formatText: { fontSize: 12, color: colors.textSecondary, fontFamily: fontFamily.semibold },
   activeFormatText: { color: '#0A0E1A' },
   exportButton: { backgroundColor: colors.accent, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
-  exportButtonText: { fontSize: 13, color: '#0A0E1A', fontWeight: '700' },
+  exportButtonText: { fontSize: 13, color: '#0A0E1A', fontFamily: fontFamily.bold },
   refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   refreshButtonText: { fontSize: 13, color: colors.textSecondary },
   scrollContent: { padding: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center' },
   emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
-  emptyText: { color: colors.textSecondary, fontSize: 14 },
+  emptyTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },
+  emptyText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular, textAlign: 'center', lineHeight: 20 },
   logCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md, ...elevation.card },
   anomalyCard: { borderColor: colors.warning, borderLeftWidth: 3 },
   pendingCard: { borderColor: colors.warning },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm, paddingBottom: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  employeeName: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
-  statusBadge: { fontSize: 12, fontWeight: '600', paddingVertical: 4, paddingHorizontal: 10, borderRadius: radius.pill, overflow: 'hidden' },
+  employeeName: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  statusBadge: { fontSize: 12, fontFamily: fontFamily.semibold, paddingVertical: 4, paddingHorizontal: 10, borderRadius: radius.pill, overflow: 'hidden' },
   badgeNormal: { backgroundColor: 'rgba(52,211,153,0.14)', color: colors.success },
   badgeDanger: { backgroundColor: 'rgba(248,113,113,0.14)', color: colors.danger },
   badgeWarning: { backgroundColor: colors.warningSoft, color: colors.warning },
   cardBody: { gap: 6 },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  label: { fontSize: 13, color: colors.textSecondary },
-  value: { fontSize: 13, color: colors.textPrimary, fontWeight: '500' },
-  worksiteValue: { fontSize: 13, color: colors.accent, fontWeight: '700' },
-  valueBold: { fontSize: 13, color: colors.textPrimary, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  label: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  value: { fontSize: 13, fontFamily: fontFamily.medium, color: colors.textPrimary },
+  worksiteValue: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.accent },
+  valueBold: { fontSize: 13, fontFamily: fontFamily.bold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   noteBox: { backgroundColor: colors.warningSoft, padding: spacing.md, borderRadius: radius.sm, marginTop: 4, borderWidth: 1, borderColor: colors.warning },
-  noteLabel: { fontSize: 11, fontWeight: '700', color: colors.warning, marginBottom: 2 },
-  noteText: { fontSize: 13, color: colors.textPrimary, fontStyle: 'italic' },
+  noteLabel: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: 2 },
+  noteText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textPrimary, fontStyle: 'italic' },
   approvalButtons: { flexDirection: 'row', gap: 10, marginTop: spacing.md },
   approveButton: { flex: 1, backgroundColor: colors.accent, padding: 12, borderRadius: radius.sm, alignItems: 'center' },
   rejectButton: { backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, padding: 12, borderRadius: radius.sm, alignItems: 'center', paddingHorizontal: 16 },
@@ -515,11 +529,11 @@ const styles = StyleSheet.create({
   messageBubble: { maxWidth: '80%', padding: 12, borderRadius: radius.md, marginBottom: 10 },
   userBubble: { alignSelf: 'flex-end', backgroundColor: colors.accent },
   botBubble: { alignSelf: 'flex-start', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
-  messageText: { fontSize: 15, lineHeight: 22 },
+  messageText: { fontSize: 15, fontFamily: fontFamily.regular, lineHeight: 22 },
   userText: { color: '#0A0E1A' },
   botText: { color: colors.textPrimary },
   inputContainer: { flexDirection: 'row', padding: spacing.md, backgroundColor: colors.backgroundSecondary, borderTopWidth: 1, borderColor: colors.surfaceBorder },
-  chatInput: { flex: 1, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 15, fontSize: 15, height: 42 },
+  chatInput: { flex: 1, borderWidth: 1, borderColor: colors.inputBorder, backgroundColor: colors.inputBackground, color: colors.textPrimary, borderRadius: 20, paddingHorizontal: 15, fontSize: 15, fontFamily: fontFamily.regular, height: 42 },
   sendButton: { marginLeft: 10, backgroundColor: colors.accent, borderRadius: 20, paddingHorizontal: 20, justifyContent: 'center', alignItems: 'center' },
-  sendButtonText: { color: '#0A0E1A', fontWeight: '700' }
+  sendButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold }
 });
