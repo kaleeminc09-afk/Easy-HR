@@ -40,6 +40,16 @@ export const spacing = {
   xxl: 48,
 };
 
+// Inter — loaded once in app/_layout.tsx via @expo-google-fonts/inter.
+// Use these instead of fontWeight-only styling so the typeface is consistent.
+export const fontFamily = {
+  regular: 'Inter_400Regular',
+  medium: 'Inter_500Medium',
+  semibold: 'Inter_600SemiBold',
+  bold: 'Inter_700Bold',
+  extrabold: 'Inter_800ExtraBold',
+};
+
 export const radius = {
   sm: 8,
   md: 12,
@@ -74,18 +84,20 @@ export const elevation = {
 };
 
 export const type = {
-  hero: { fontSize: 44, fontWeight: '700' as const, letterSpacing: -0.5 },
-  title: { fontSize: 24, fontWeight: '700' as const },
-  heading: { fontSize: 18, fontWeight: '600' as const },
-  body: { fontSize: 16, fontWeight: '400' as const },
-  caption: { fontSize: 13, fontWeight: '400' as const },
+  hero: { fontSize: 44, fontFamily: fontFamily.bold, letterSpacing: -0.5 },
+  title: { fontSize: 24, fontFamily: fontFamily.bold },
+  heading: { fontSize: 18, fontFamily: fontFamily.semibold },
+  body: { fontSize: 16, fontFamily: fontFamily.regular },
+  caption: { fontSize: 13, fontFamily: fontFamily.regular },
   label: {
     fontSize: 11,
-    fontWeight: '600' as const,
+    fontFamily: fontFamily.semibold,
     letterSpacing: 1.2,
     textTransform: 'uppercase' as const,
   },
-  timer: { fontSize: 52, fontWeight: '700' as const, fontVariant: ['tabular-nums'] as const },
+  // Hero wall clock — big, tabular numerals so digits never jitter.
+  heroClock: { fontSize: 64, fontFamily: fontFamily.bold, fontVariant: ['tabular-nums'] as const, letterSpacing: -1 },
+  timer: { fontSize: 52, fontFamily: fontFamily.bold, fontVariant: ['tabular-nums'] as const },
 };
 
 export const theme = { colors, spacing, radius, elevation, type };

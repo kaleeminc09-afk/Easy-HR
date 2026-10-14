@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Link } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, spacing, radius, type, elevation, fontFamily } from '../lib/theme';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -368,6 +369,26 @@ export default function App() {
     ' · ' +
     d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 
+  // --- Phase A0: hero clock, greeting, press animation ---
+  const formatHeroTime = (d) =>
+    d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const formatHeroDate = (d) =>
+    d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const greeting = () => {
+    const h = now.getHours();
+    if (h < 12) return 'Good morning';
+    if (h < 17) return 'Good afternoon';
+    return 'Good evening';
+  };
+
+  // Subtle press-in animation for the big clock button ("nothing crazy")
+  const btnScale = useSharedValue(1);
+  const animatedBtnStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: btnScale.value }],
+  }));
+  const pressIn = () => { btnScale.value = withSpring(0.94, { damping: 15, stiffness: 400 }); };
+  const pressOut = () => { btnScale.value = withSpring(1, { damping: 15, stiffness: 400 }); };
+
   if (loading) {
     return (
       <View style={styles.authLoadingContainer}>
@@ -437,7 +458,6 @@ export default function App() {
         <View>
           <Text style={styles.empBrand}>✦ NorthShift</Text>
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
-          <Text style={styles.empClock}>{formatClock(now)}</Text>
         </View>
         <View style={styles.empHeaderRight}>
           <Link href="/EmployeeChatScreen" asChild>
@@ -459,6 +479,11 @@ export default function App() {
       </View>
 
       <ScrollView contentContainerStyle={styles.empContent}>
+        {/* Hero live clock — the heart of a time-clock app */}
+        <View style={styles.heroClockWrap}>
+          <Text style={styles.heroTime}>{formatHeroTime(now)}</Text>
+          <Text style={styles.heroDate}>{formatHeroDate(now)}</Text>
+        </View>
         {outOfRangeData ? (
           <View style={styles.empExceptionBox}>
             <Text style={styles.empExceptionTitle}>Out of Range</Text>
@@ -484,19 +509,37 @@ export default function App() {
         ) : (
           <>
             <View style={styles.empStatusCard}>
-              <View style={[styles.empStatusPill, activeSession && !activeBreak ? styles.empStatusPillActive : null]}>
-                <Text style={styles.empStatusPillText}>
-                  {activeSession ? (activeBreak ? `ON BREAK · ${activeBreak.break_type}` : 'ACTIVE SHIFT') : 'OFFLINE'}
+              <View style={styles.empStatusRow}>
+                <View style={[
+                  styles.empStatusDot,
+                  activeSession ? (activeBreak ? styles.empStatusDotBreak : styles.empStatusDotActive) : styles.empStatusDotOff,
+                ]} />
+                <Text style={styles.empStatusText}>
+                  {activeSession ? (activeBreak ? `On break · ${activeBreak.break_type}` : 'On shift') : 'Off the clock'}
                 </Text>
               </View>
-              <Text style={styles.empTimer}>
-                {activeBreak
-                  ? formatTimeCounter(breakSeconds)
-                  : (activeSession ? formatTimeCounter(activeSessionSeconds) : '--:--:--')}
-              </Text>
-              {activeBreak && activeSession ? (
-                <Text style={styles.empShiftSub}>Shift: {formatTimeCounter(activeSessionSeconds)}</Text>
-              ) : null}
+              {activeSession ? (
+                <>
+                  <Text style={styles.empTimer}>
+                    {activeBreak ? formatTimeCounter(breakSeconds) : formatTimeCounter(activeSessionSeconds)}
+                  </Text>
+                  <Text style={styles.empTimerLabel}>
+                    {activeBreak ? 'break elapsed' : 'shift elapsed'}
+                  </Text>
+                  {activeBreak ? (
+                    <Text style={styles.empShiftSub}>Shift: {formatTimeCounter(activeSessionSeconds)}</Text>
+                  ) : null}
+                </>
+              ) : (
+                <>
+                  <Text style={styles.empGreeting}>{greeting()}.</Text>
+                  <Text style={styles.empOfflineSub}>
+                    {parseFloat(todayHours) > 0
+                      ? `You've logged ${todayHours}h today — nice work.`
+                      : 'No hours logged yet today. Tap below when your shift starts.'}
+                  </Text>
+                </>
+              )}
               <View style={styles.empHoursRow}>
                 <Text style={styles.empHoursLabel}>Today&apos;s hours</Text>
                 <Text style={styles.empHoursValue}>{todayHours} / 8h</Text>
@@ -508,9 +551,17 @@ export default function App() {
 
             {activeSession ? (
               activeBreak ? (
-                <TouchableOpacity style={styles.empCircleButton} onPress={handleEndBreak}>
-                  <Text style={styles.empCircleButtonText}>END{'\n'}BREAK</Text>
-                </TouchableOpacity>
+                <Animated.View style={animatedBtnStyle}>
+                  <TouchableOpacity
+                    style={styles.empCircleButton}
+                    onPress={handleEndBreak}
+                    onPressIn={pressIn}
+                    onPressOut={pressOut}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.empCircleButtonText}>END{'\n'}BREAK</Text>
+                  </TouchableOpacity>
+                </Animated.View>
               ) : (
                 <>
                   <View style={styles.empBreakRow}>
@@ -524,19 +575,32 @@ export default function App() {
                       <Text style={styles.empChipText}>Rest Break</Text>
                     </TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={styles.empCircleButton} onPress={handleClockOut}>
-                    <Text style={styles.empCircleButtonText}>CLOCK{'\n'}OUT</Text>
-                  </TouchableOpacity>
+                  <Animated.View style={animatedBtnStyle}>
+                    <TouchableOpacity
+                      style={styles.empCircleButton}
+                      onPress={handleClockOut}
+                      onPressIn={pressIn}
+                      onPressOut={pressOut}
+                      activeOpacity={0.9}
+                    >
+                      <Text style={styles.empCircleButtonText}>CLOCK{'\n'}OUT</Text>
+                    </TouchableOpacity>
+                  </Animated.View>
                 </>
               )
             ) : (
-              <TouchableOpacity
-                style={[styles.empCircleButton, locationChecking && styles.empCircleButtonDisabled]}
-                onPress={handleClockIn}
-                disabled={locationChecking}
-              >
-                {locationChecking ? <ActivityIndicator color="#0A0E1A" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
-              </TouchableOpacity>
+              <Animated.View style={animatedBtnStyle}>
+                <TouchableOpacity
+                  style={[styles.empCircleButton, locationChecking && styles.empCircleButtonDisabled]}
+                  onPress={handleClockIn}
+                  onPressIn={pressIn}
+                  onPressOut={pressOut}
+                  activeOpacity={0.9}
+                  disabled={locationChecking}
+                >
+                  {locationChecking ? <ActivityIndicator color="#0A0E1A" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
+                </TouchableOpacity>
+              </Animated.View>
             )}
 
             {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
@@ -604,57 +668,67 @@ const styles = StyleSheet.create({
   // --- NorthShift auth theme (login reskin; employee/manager screens keep legacy styles until their pass) ---
   authContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', padding: spacing.lg },
   authLoadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
-  authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14 },
+  authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular },
   authCard: { width: '100%', maxWidth: 400, alignSelf: 'center' },
   authLogoMark: { fontSize: 54, color: colors.accent, textAlign: 'center', marginBottom: spacing.sm },
   authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },
   authSubtitle: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xl },
   authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
-  authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
-  authError: { color: colors.danger, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
-  authMessage: { color: colors.textSecondary, fontSize: 13, textAlign: 'center', marginBottom: spacing.sm },
+  authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, fontFamily: fontFamily.regular, color: colors.textPrimary, marginBottom: spacing.md },
+  authError: { color: colors.danger, fontSize: 13, fontFamily: fontFamily.regular, textAlign: 'center', marginBottom: spacing.sm },
+  authMessage: { color: colors.textSecondary, fontSize: 13, fontFamily: fontFamily.regular, textAlign: 'center', marginBottom: spacing.sm },
   authPrimaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md + 2, alignItems: 'center', marginTop: spacing.sm, ...elevation.accentGlow },
-  authPrimaryButtonText: { color: '#0A0E1A', fontSize: 16, fontWeight: '700' },
+  authPrimaryButtonText: { color: '#0A0E1A', fontSize: 16, fontFamily: fontFamily.bold },
   authDivider: { flexDirection: 'row', alignItems: 'center', marginVertical: spacing.lg },
   authDividerLine: { flex: 1, height: 1, backgroundColor: colors.surfaceBorder },
-  authDividerText: { color: colors.textMuted, marginHorizontal: spacing.md, fontSize: 13 },
+  authDividerText: { color: colors.textMuted, marginHorizontal: spacing.md, fontSize: 13, fontFamily: fontFamily.regular },
   authBiometricButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
-  authBiometricButtonText: { color: colors.accent, fontSize: 15, fontWeight: '600' },
+  authBiometricButtonText: { color: colors.accent, fontSize: 15, fontFamily: fontFamily.semibold },
   authSecondaryButton: { marginTop: spacing.lg, alignItems: 'center', padding: spacing.sm },
-  authSecondaryButtonText: { color: colors.textSecondary, fontSize: 14 },
+  authSecondaryButtonText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular },
 
   // --- NorthShift employee theme (time tracker home) ---
   empContainer: { flex: 1, backgroundColor: colors.background },
   empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  empBrand: { fontSize: 18, fontWeight: '700', color: colors.textPrimary },
-  empEmail: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  empBrand: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  empEmail: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
-  empAssistantButtonText: { color: colors.accent, fontWeight: '600', fontSize: 12 },
+  empAssistantButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12 },
   empNavButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
-  empNavButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 12 },
+  empNavButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 12 },
   empLogoutButton: { paddingVertical: 8, paddingHorizontal: 8 },
-  empLogoutButtonText: { color: colors.textMuted, fontWeight: '600', fontSize: 12 },
+  empLogoutButtonText: { color: colors.textMuted, fontFamily: fontFamily.semibold, fontSize: 12 },
   empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
+  // Hero live clock
+  heroClockWrap: { alignItems: 'center', marginTop: spacing.md, marginBottom: spacing.lg },
+  heroTime: { ...type.heroClock, color: colors.textPrimary },
+  heroDate: { fontSize: 14, fontFamily: fontFamily.medium, color: colors.textSecondary, marginTop: 4 },
   empStatusCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, alignItems: 'center', ...elevation.card },
-  empStatusPill: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 6, paddingHorizontal: 14, marginBottom: spacing.md },
-  empStatusPillActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
-  empStatusPillText: { ...type.label, color: colors.accent },
-  empClock: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
-  empShiftSub: { fontSize: 12, color: colors.textSecondary, marginTop: 4 },
-  empTimer: { ...type.timer, color: colors.textPrimary, marginBottom: spacing.sm },
+  // Clean status dot + label (replaces textured pill)
+  empStatusRow: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
+  empStatusDot: { width: 10, height: 10, borderRadius: 5, marginRight: 8 },
+  empStatusDotActive: { backgroundColor: colors.success },
+  empStatusDotBreak: { backgroundColor: colors.warning },
+  empStatusDotOff: { backgroundColor: colors.textMuted },
+  empStatusText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary, letterSpacing: 0.3 },
+  empTimer: { ...type.timer, color: colors.textPrimary },
+  empTimerLabel: { fontSize: 12, fontFamily: fontFamily.medium, color: colors.textMuted, marginTop: 2, marginBottom: spacing.sm, textTransform: 'uppercase', letterSpacing: 1 },
+  empGreeting: { fontSize: 26, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },
+  empOfflineSub: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md, lineHeight: 20 },
+  empShiftSub: { fontSize: 13, fontFamily: fontFamily.medium, color: colors.textSecondary, marginTop: 4, fontVariant: ['tabular-nums'] },
   empHoursRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: spacing.sm },
-  empHoursLabel: { fontSize: 13, color: colors.textSecondary },
-  empHoursValue: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, fontVariant: ['tabular-nums'] },
+  empHoursLabel: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  empHoursValue: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textPrimary, fontVariant: ['tabular-nums'] },
   empProgressTrack: { width: '100%', height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
   empProgressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 4 },
   empCircleButton: { width: 168, height: 168, borderRadius: 84, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center', marginTop: spacing.xl, ...elevation.accentGlow },
   empCircleButtonDisabled: { opacity: 0.6 },
-  empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
+  empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontFamily: fontFamily.extrabold, textAlign: 'center', letterSpacing: 1 },
   empBreakRow: { flexDirection: 'row', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
   empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
-  empChipText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
-  empMessage: { marginTop: spacing.lg, fontSize: 13, color: colors.textSecondary, textAlign: 'center', maxWidth: 400 },
+  empChipText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
+  empMessage: { marginTop: spacing.lg, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', maxWidth: 400, lineHeight: 20 },
   empExceptionBox: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   empExceptionTitle: { fontSize: 17, fontWeight: '700', color: colors.warning, marginBottom: spacing.sm, textAlign: 'center' },
   empExceptionText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },

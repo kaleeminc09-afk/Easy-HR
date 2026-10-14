@@ -48,6 +48,20 @@ const managerTools = [
   {
     type: "function",
     function: {
+      name: "clock_out_employee",
+      description: "Clocks out an employee, ending their active shift right now (also ends any open break). Use when the manager says 'clock out Ahmed' or 'clock them out' — resolve 'them' from the conversation history.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "Employee's full or first name." },
+        },
+        required: ["employee_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "assign_task",
       description: "Assigns a task to an employee. Use when the manager says things like 'assign fridge restock to Ahmed' or 'ask Sara to count inventory by Friday'.",
       parameters: {
@@ -157,6 +171,9 @@ CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
 - Resolve pronouns ("them", "him", "her", "they") and bare names against people mentioned earlier in this conversation. If the user just asked about working employees and then says "clock them out", "them" means those employees — do not ask who they mean.
 - If a follow-up message is just a name, treat it as the answer to your last question and continue the task.
+
+CLOCK OUT:
+- "clock out Ahmed" or "clock them out" (resolve "them" from history) → clock_out_employee. Confirm who was clocked out in one natural sentence.
 
 TASK DELEGATION:
 - You can assign tasks ("assign fridge restock to Ahmed due Friday"), list them ("show pending tasks", "what is Ahmed working on"), and update them ("mark the fridge task done").
@@ -299,6 +316,37 @@ Deno.serve(async (req) => {
               clock_out: item.clock_out,
               flag: item.ai_anomaly_flag
             }));
+          }
+        } else if (fn === "clock_out_employee") {
+          const { data: profs, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, full_name")
+            .ilike("full_name", `%${args.employee_name}%`)
+            .limit(5);
+
+          if (pErr) {
+            output = { error: pErr.message };
+          } else {
+            const match = matchByName(profs || [], (p: any) => p.full_name || "", args.employee_name);
+            if (match.kind === "none") {
+              output = { error: `No employee found matching "${args.employee_name}". Ask the manager for the exact name.` };
+            } else if (match.kind === "many") {
+              output = { error: `Multiple employees match "${args.employee_name}": ${match.values.map((p: any) => p.full_name).join(", ")}. Ask the manager which one.` };
+            } else {
+              const { data: shifts } = await supabase.from("time_logs")
+                .select("id").eq("user_id", match.value.id).is("clock_out", null)
+                .order("clock_in", { ascending: false }).limit(1);
+              if (!shifts || shifts.length === 0) {
+                output = { error: `${match.value.full_name} has no active shift to clock out from.` };
+              } else {
+                const nowTs = new Date().toISOString();
+                await supabase.from("time_breaks").update({ end_time: nowTs }).eq("time_log_id", shifts[0].id).is("end_time", null);
+                const { error: coErr } = await supabase.from("time_logs").update({ clock_out: nowTs }).eq("id", shifts[0].id);
+                output = coErr
+                  ? { error: coErr.message }
+                  : { success: true, clocked_out: match.value.full_name, at: nowTs };
+              }
+            }
           }
         } else if (fn === "assign_task") {
           const { data: profs, error: pErr } = await supabase
