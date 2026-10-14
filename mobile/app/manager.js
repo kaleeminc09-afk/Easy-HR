@@ -110,6 +110,27 @@ export default function ManagerDashboard() {
     }
   };
 
+  // Review an AI anomaly: approve keeps the shift, deny disputes it.
+  // Either way the ⚠️ clears so it leaves the anomalies tab, and the
+  // review decision stays visible in the log history.
+  const handleReviewAnomaly = async (logId, decision) => {
+    const log = logs.find((l) => l.id === logId);
+    if (!log) return;
+    const original = (log.ai_anomaly_flag || '').replace(/⚠️\s*/g, '').trim();
+    const newFlag = decision === 'approved'
+      ? `✓ Approved by manager — ${original}`
+      : `✕ Rejected by manager — ${original}`;
+    const { error } = await supabase
+      .from('time_logs')
+      .update({ ai_anomaly_flag: newFlag })
+      .eq('id', logId);
+    if (error) {
+      console.error('Error reviewing anomaly:', error.message);
+    } else {
+      fetchAllManagerData();
+    }
+  };
+
   const formatDateTime = (isoString) => {
     if (!isoString) return 'Active Shift';
     const date = new Date(isoString);
@@ -430,7 +451,7 @@ export default function ManagerDashboard() {
               </View>
             ) : (
               (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).map((log) => {
-                const isAnomaly = log.ai_anomaly_flag && log.ai_anomaly_flag.includes('⚠️️');
+                const isAnomaly = log.ai_anomaly_flag?.includes('⚠️');
                 const employeeName = log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
                 const worksiteName = log.worksites?.name || 'Unassigned / Remote';
                 
@@ -445,6 +466,16 @@ export default function ManagerDashboard() {
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+                      {isAnomaly && (
+                        <View style={styles.approvalButtons}>
+                          <TouchableOpacity style={styles.approveButton} onPress={() => handleReviewAnomaly(log.id, 'approved')}>
+                            <Text style={styles.approveButtonText}>✓ Approve</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity style={styles.rejectButton} onPress={() => handleReviewAnomaly(log.id, 'rejected')}>
+                            <Text style={styles.rejectButtonText}>✕ Deny</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
                     </View>
                   </View>
                 );
