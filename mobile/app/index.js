@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView, Image } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Link } from 'expo-router';
 import * as Location from 'expo-location';
@@ -392,7 +392,7 @@ export default function App() {
   if (loading) {
     return (
       <View style={styles.authLoadingContainer}>
-        <Text style={styles.authLogoMark}>✦</Text>
+        <Image source={require('../assets/images/icon.png')} style={styles.authLogo} />
         <ActivityIndicator size="large" color={colors.accent} />
         <Text style={styles.authLoadingText}>Loading NorthShift...</Text>
       </View>
@@ -403,7 +403,7 @@ export default function App() {
     return (
       <SafeAreaView style={styles.authContainer}>
         <View style={styles.authCard}>
-          <Text style={styles.authLogoMark}>✦</Text>
+          <Image source={require('../assets/images/icon.png')} style={styles.authLogo} />
           <Text style={styles.authTitle}>NorthShift</Text>
           <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
 
@@ -456,7 +456,10 @@ export default function App() {
     <SafeAreaView style={styles.empContainer}>
       <View style={styles.empHeader}>
         <View>
-          <Text style={styles.empBrand}>✦ NorthShift</Text>
+          <View style={styles.empBrandRow}>
+            <Image source={require('../assets/images/icon.png')} style={styles.empBrandLogo} />
+            <Text style={styles.empBrand}>NorthShift</Text>
+          </View>
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
         </View>
         <View style={styles.empHeaderRight}>
@@ -618,7 +621,9 @@ const styles = StyleSheet.create({
   authLoadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
   authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular },
   authCard: { width: '100%', maxWidth: 400, alignSelf: 'center' },
-  authLogoMark: { fontSize: 54, color: colors.accent, textAlign: 'center', marginBottom: spacing.sm },
+  authLogo: { width: 76, height: 76, borderRadius: 20, alignSelf: 'center', marginBottom: spacing.sm },
+  empBrandRow: { flexDirection: 'row', alignItems: 'center' },
+  empBrandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },
   authSubtitle: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xl },
   authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },

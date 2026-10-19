@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -287,7 +287,10 @@ export default function ManagerDashboard() {
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <View>
-          <Text style={styles.title}>✦ NorthShift</Text>
+          <View style={styles.brandRow}>
+            <Image source={require('../assets/images/icon.png')} style={styles.brandLogo} />
+            <Text style={styles.title}>NorthShift</Text>
+          </View>
           {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -527,6 +530,8 @@ const styles = StyleSheet.create({
   rejectButtonText: { ...buttons.compactText, color: colors.danger },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   title: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  brandRow: { flexDirection: 'row', alignItems: 'center' },
+  brandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
