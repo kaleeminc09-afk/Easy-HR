@@ -468,6 +468,11 @@ export default function App() {
               <Text style={styles.empAssistantButtonText}>✦ Assistant</Text>
             </TouchableOpacity>
           </Link>
+          <Link href="/team" asChild>
+            <TouchableOpacity style={styles.empNavButton}>
+              <Text style={styles.empNavButtonText}>Team</Text>
+            </TouchableOpacity>
+          </Link>
           <Link href="/manager" asChild>
             <TouchableOpacity style={styles.empNavButton}>
               <Text style={styles.empNavButtonText}>Manager →</Text>

@@ -294,6 +294,11 @@ export default function ManagerDashboard() {
           {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Link href="/team" asChild>
+            <TouchableOpacity style={styles.navButton}>
+              <Text style={styles.navButtonText}>Team</Text>
+            </TouchableOpacity>
+          </Link>
           <Link href="/profile" asChild>
             <TouchableOpacity style={styles.navButton}>
               <Text style={styles.navButtonText}>Profile</Text>
