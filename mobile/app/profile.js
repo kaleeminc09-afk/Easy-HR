@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -160,30 +160,30 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+  headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
-  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   content: { padding: spacing.lg, alignItems: 'center' },
   card: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center', ...elevation.card },
   avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
-  avatarText: { fontSize: 28, fontWeight: '700', color: colors.accent },
-  email: { fontSize: 15, color: colors.textPrimary, fontWeight: '600' },
+  avatarText: { fontSize: 28, fontFamily: fontFamily.bold, color: colors.accent },
+  email: { fontSize: 15, color: colors.textPrimary, fontFamily: fontFamily.semibold },
   roleBadge: { marginTop: spacing.sm, marginBottom: spacing.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   roleBadgeText: { ...type.label, color: colors.accent },
   bizBox: { alignItems: 'center', marginBottom: spacing.lg },
-  bizName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-  bizAcct: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  bizName: { fontSize: 15, fontFamily: fontFamily.semibold, color: colors.textPrimary },
+  bizAcct: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs, alignSelf: 'flex-start' },
-  input: { width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
-  message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
+  input: { fontFamily: fontFamily.regular, width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
+  message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
   primaryButton: { width: '100%', backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.sm },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
+  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
   signOutButton: { marginTop: spacing.md, padding: spacing.sm, alignItems: 'center' },
-  signOutButtonText: { color: colors.textSecondary, fontSize: 14, fontWeight: '600' },
+  signOutButtonText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.semibold },
   dangerZone: { width: '100%', marginTop: spacing.xl, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.surfaceBorder, alignItems: 'center' },
-  dangerTitle: { fontSize: 14, fontWeight: '700', color: colors.danger, marginBottom: spacing.xs },
-  dangerText: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
+  dangerTitle: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.danger, marginBottom: spacing.xs },
+  dangerText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
   deleteButton: { width: '100%', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
   deleteButtonArmed: { backgroundColor: colors.danger },
-  deleteButtonText: { color: colors.danger, fontSize: 14, fontWeight: '700' },
+  deleteButtonText: { color: colors.danger, fontSize: 14, fontFamily: fontFamily.bold },
 });

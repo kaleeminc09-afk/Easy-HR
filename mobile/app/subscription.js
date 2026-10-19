@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
 
 // First month free on every plan — no permanent free tier.
 const PLANS = {
@@ -87,7 +87,7 @@ export default function SubscriptionScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.deniedContainer}>
-          <Text style={styles.deniedEmoji}>🔒</Text>
+          <View style={styles.deniedBadge}><Text style={styles.deniedBadgeText}>!</Text></View>
           <Text style={styles.deniedTitle}>Admins only</Text>
           <Text style={styles.deniedText}>Subscription details are visible to administrators.</Text>
           <Link href="/manager" asChild>
@@ -207,40 +207,41 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+  headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
-  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   content: { padding: spacing.lg, gap: spacing.md },
   planCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
   planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
-  planName: { fontSize: 22, fontWeight: '700', color: colors.textPrimary },
-  planPrice: { fontSize: 15, color: colors.accent, fontWeight: '600', marginTop: 2 },
+  planName: { fontSize: 22, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  planPrice: { fontSize: 15, color: colors.accent, fontFamily: fontFamily.semibold, marginTop: 2 },
   statusBadge: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   statusText: { ...type.label, color: colors.accent },
   trialBanner: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
-  trialText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600', textAlign: 'center' },
+  trialText: { fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.semibold, textAlign: 'center' },
   sectionLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
-  trialNote: { fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
+  trialNote: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
   usageRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.xs },
-  usageText: { fontSize: 13, color: colors.textPrimary, fontWeight: '600' },
+  usageText: { fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.semibold },
   progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
   progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
-  renewText: { fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
-  feature: { fontSize: 14, color: colors.textPrimary, marginTop: spacing.xs },
+  renewText: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
+  feature: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textPrimary, marginTop: spacing.xs },
   primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.xl },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
+  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
   allPlansCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
   planRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   planRowActive: { borderBottomWidth: 0 },
-  planRowName: { fontSize: 14, fontWeight: '600', color: colors.textPrimary },
-  planRowMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  planRowName: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary },
+  planRowMeta: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   currentTag: { ...type.label, color: colors.accent },
   fieldLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.xs },
-  input: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary },
-  accountNumber: { fontSize: 16, fontWeight: '700', color: colors.accent, letterSpacing: 1 },
-  bizMessage: { fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
+  input: { fontFamily: fontFamily.regular, backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary },
+  accountNumber: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.accent, letterSpacing: 1 },
+  bizMessage: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  deniedEmoji: { fontSize: 48, marginBottom: spacing.md },
-  deniedTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
-  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
+  deniedBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
+  deniedBadgeText: { fontSize: 28, fontFamily: fontFamily.bold, color: colors.accent },
+  deniedTitle: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.sm },
+  deniedText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
 });

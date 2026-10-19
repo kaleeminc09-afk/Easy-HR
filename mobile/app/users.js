@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
 
 export default function UsersScreen() {
   const router = useRouter();
@@ -75,7 +75,7 @@ export default function UsersScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.deniedContainer}>
-          <Text style={styles.deniedEmoji}>🔒</Text>
+          <View style={styles.deniedBadge}><Text style={styles.deniedBadgeText}>!</Text></View>
           <Text style={styles.deniedTitle}>Admins only</Text>
           <Text style={styles.deniedText}>You need an administrator account to manage users.</Text>
           <Link href="/manager" asChild>
@@ -176,26 +176,26 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
   loadingContainer: { flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  headerTitle: { fontSize: 17, fontWeight: '700', color: colors.textPrimary },
+  headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
-  navButtonText: { color: colors.textPrimary, fontWeight: '600', fontSize: 13 },
+  navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   content: { padding: spacing.lg, gap: spacing.md },
-  message: { fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
   usageCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
-  usageText: { fontSize: 13, fontWeight: '600', color: colors.textPrimary, marginBottom: spacing.xs },
+  usageText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textPrimary, marginBottom: spacing.xs },
   progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
   progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
   limitCard: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg },
-  limitTitle: { fontSize: 15, fontWeight: '700', color: colors.warning, marginBottom: spacing.xs },
-  limitText: { fontSize: 13, color: colors.textPrimary, marginBottom: spacing.md },
+  limitTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: spacing.xs },
+  limitText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary, marginBottom: spacing.md },
   limitButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
-  limitButtonText: { color: '#0A0E1A', fontSize: 14, fontWeight: '700' },
+  limitButtonText: { color: '#0A0E1A', fontSize: 14, fontFamily: fontFamily.bold },
   userCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
-  avatarText: { fontSize: 18, fontWeight: '700', color: colors.accent },
-  userName: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
-  userMeta: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  avatarText: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.accent },
+  userName: { fontSize: 15, fontFamily: fontFamily.semibold, color: colors.textPrimary },
+  userMeta: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   roleBadge: { borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 10, borderWidth: 1 },
   roleAdmin: { backgroundColor: 'rgba(192,132,245,0.12)', borderColor: 'rgba(192,132,245,0.35)' },
   roleManager: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
@@ -203,12 +203,13 @@ const styles = StyleSheet.create({
   roleText: { ...type.label, color: colors.textPrimary },
   actions: { marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end' },
   actionButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.sm, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
-  actionButtonText: { color: colors.accent, fontWeight: '700', fontSize: 13 },
-  emptyText: { color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
+  actionButtonText: { color: colors.accent, fontFamily: fontFamily.bold, fontSize: 13 },
+  emptyText: { fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
-  deniedEmoji: { fontSize: 48, marginBottom: spacing.md },
-  deniedTitle: { fontSize: 20, fontWeight: '700', color: colors.textPrimary, marginBottom: spacing.sm },
-  deniedText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
+  deniedBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
+  deniedBadgeText: { fontSize: 28, fontFamily: fontFamily.bold, color: colors.accent },
+  deniedTitle: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.sm },
+  deniedText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
   primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, alignItems: 'center' },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontWeight: '700' },
+  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
 });
