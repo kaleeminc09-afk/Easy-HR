@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 // Plans mirror the Subscription screen. First month free, month-to-month.
 const PLANS = {
@@ -169,8 +169,8 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.accent },
   finePrint: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: spacing.md, lineHeight: 18 },
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.md },
-  primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.xl },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
+  primaryButton: { ...buttons.primary, marginTop: spacing.xl },
+  primaryButtonText: { ...buttons.primaryText },
   secureNote: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.md },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   deniedBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },

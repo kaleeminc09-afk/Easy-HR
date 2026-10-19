@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 // First month free on every plan — no permanent free tier.
 const PLANS = {
@@ -227,8 +227,8 @@ const styles = StyleSheet.create({
   progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
   renewText: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
   feature: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textPrimary, marginTop: spacing.xs },
-  primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.xl },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
+  primaryButton: { ...buttons.primary, marginTop: spacing.xl },
+  primaryButtonText: { ...buttons.primaryText },
   allPlansCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
   planRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   planRowActive: { borderBottomWidth: 0 },

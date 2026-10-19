@@ -100,5 +100,90 @@ export const type = {
   timer: { fontSize: 52, fontFamily: fontFamily.bold, fontVariant: ['tabular-nums'] as const },
 };
 
-export const theme = { colors, spacing, radius, elevation, type };
+
+// Button system — the approved shapes, app-wide. Full-width 56px primary
+// actions, 56px outlined secondary, compact 44px row/card actions.
+// Nothing below 44px touch targets. Primary carries the accent glow;
+// it is the single main action on its screen, so the rule holds.
+export const buttons = {
+  primary: {
+    width: '100%',
+    minHeight: 56,
+    borderRadius: radius.md,
+    backgroundColor: colors.accent,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+    ...elevation.accentGlow,
+  },
+  primaryText: {
+    color: colors.background,
+    fontSize: 16,
+    fontFamily: fontFamily.semibold,
+  },
+  secondary: {
+    width: '100%',
+    minHeight: 56,
+    borderRadius: radius.md,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  secondaryText: {
+    color: colors.accent,
+    fontSize: 16,
+    fontFamily: fontFamily.semibold,
+  },
+  danger: {
+    width: '100%',
+    minHeight: 56,
+    borderRadius: radius.md,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.danger,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  dangerText: {
+    color: colors.danger,
+    fontSize: 16,
+    fontFamily: fontFamily.semibold,
+  },
+  dangerArmedText: {
+    color: colors.background,
+    fontSize: 16,
+    fontFamily: fontFamily.semibold,
+  },
+  compact: {
+    minHeight: 44,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  compactText: {
+    color: colors.background,
+    fontSize: 13,
+    fontFamily: fontFamily.bold,
+  },
+  compactOutline: {
+    minHeight: 44,
+    borderRadius: radius.sm,
+    backgroundColor: colors.accentSoft,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    paddingHorizontal: spacing.md,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  compactOutlineText: {
+    color: colors.accent,
+    fontSize: 13,
+    fontFamily: fontFamily.bold,
+  },
+};
+
+export const theme = { colors, spacing, radius, elevation, type, fontFamily, buttons };
 export default theme;

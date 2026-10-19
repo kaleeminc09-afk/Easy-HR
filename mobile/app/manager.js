@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, SafeAreaView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, spacing, radius, type, elevation, fontFamily } from '../lib/theme';
+import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -521,11 +521,10 @@ const styles = StyleSheet.create({
   deniedCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.lg, alignItems: 'center', maxWidth: 400, width: '100%', ...elevation.card },
   deniedTitle: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.danger, marginBottom: spacing.sm },
   deniedText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.lg },
-  primaryButton: { backgroundColor: colors.accent, width: '100%', padding: spacing.md, borderRadius: radius.md, alignItems: 'center', ...elevation.accentGlow },
-  primaryButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 14 },
-  buttonText: { color: '#ffffff', fontFamily: fontFamily.bold, fontSize: 13 },
-  approveButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 13 },
-  rejectButtonText: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 13 },
+  primaryButton: { ...buttons.primary },
+  primaryButtonText: { ...buttons.primaryText },
+  approveButtonText: { ...buttons.compactText },
+  rejectButtonText: { ...buttons.compactText, color: colors.danger },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   title: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
@@ -534,8 +533,8 @@ const styles = StyleSheet.create({
   adminCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, marginHorizontal: spacing.lg, marginTop: spacing.md, ...elevation.card },
   adminCardTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
   adminCardText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
-  adminCardButton: { backgroundColor: colors.accent, borderRadius: radius.sm, paddingVertical: 12, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
-  adminCardButtonText: { color: '#0A0E1A', fontFamily: fontFamily.bold, fontSize: 13 },
+  adminCardButton: { ...buttons.compact },
+  adminCardButtonText: { ...buttons.compactText },
   filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
@@ -577,8 +576,8 @@ const styles = StyleSheet.create({
   noteLabel: { fontSize: 12, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: 2 },
   noteText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textPrimary, fontStyle: 'italic' },
   approvalButtons: { flexDirection: 'row', gap: 10, marginTop: spacing.md },
-  approveButton: { flex: 1, backgroundColor: colors.accent, padding: 12, borderRadius: radius.sm, alignItems: 'center' },
-  rejectButton: { flex: 1, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger, padding: 12, borderRadius: radius.sm, alignItems: 'center', paddingHorizontal: 16 },
+  approveButton: { ...buttons.compact, flex: 1 },
+  rejectButton: { ...buttons.compact, flex: 1, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger },
   reviewNoteWrap: { marginTop: spacing.md, gap: 8 },
   reviewNoteInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.sm, padding: spacing.sm, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textPrimary },
 

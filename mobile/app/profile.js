@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -147,7 +147,7 @@ export default function ProfileScreen() {
             >
               {deleting
                 ? <ActivityIndicator color="#fff" />
-                : <Text style={styles.deleteButtonText}>{confirmingDelete ? 'Tap again to confirm delete' : 'Delete My Account'}</Text>}
+                : <Text style={confirmingDelete ? styles.deleteButtonArmedText : styles.deleteButtonText}>{confirmingDelete ? 'Tap again to confirm delete' : 'Delete My Account'}</Text>}
             </TouchableOpacity>
           </View>
         </View>
@@ -176,14 +176,15 @@ const styles = StyleSheet.create({
   label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs, alignSelf: 'flex-start' },
   input: { fontFamily: fontFamily.regular, width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
-  primaryButton: { width: '100%', backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center', marginTop: spacing.sm },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
+  primaryButton: { ...buttons.primary, marginTop: spacing.sm },
+  primaryButtonText: { ...buttons.primaryText },
   signOutButton: { marginTop: spacing.md, padding: spacing.sm, alignItems: 'center' },
   signOutButtonText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.semibold },
   dangerZone: { width: '100%', marginTop: spacing.xl, paddingTop: spacing.lg, borderTopWidth: 1, borderTopColor: colors.surfaceBorder, alignItems: 'center' },
   dangerTitle: { fontSize: 14, fontFamily: fontFamily.bold, color: colors.danger, marginBottom: spacing.xs },
   dangerText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
-  deleteButton: { width: '100%', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
+  deleteButton: { ...buttons.danger },
   deleteButtonArmed: { backgroundColor: colors.danger },
-  deleteButtonText: { color: colors.danger, fontSize: 14, fontFamily: fontFamily.bold },
+  deleteButtonText: { ...buttons.dangerText },
+  deleteButtonArmedText: { ...buttons.dangerArmedText },
 });

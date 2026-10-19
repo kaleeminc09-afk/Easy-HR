@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { colors, fontFamily, spacing, radius, type, elevation } from '../lib/theme';
+import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 export default function UsersScreen() {
   const router = useRouter();
@@ -188,8 +188,8 @@ const styles = StyleSheet.create({
   limitCard: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg },
   limitTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: spacing.xs },
   limitText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary, marginBottom: spacing.md },
-  limitButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, alignItems: 'center' },
-  limitButtonText: { color: '#0A0E1A', fontSize: 14, fontFamily: fontFamily.bold },
+  limitButton: { ...buttons.primary },
+  limitButtonText: { ...buttons.primaryText },
   userCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   userInfo: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   avatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
@@ -202,14 +202,14 @@ const styles = StyleSheet.create({
   roleEmployee: { backgroundColor: colors.surface, borderColor: colors.surfaceBorder },
   roleText: { ...type.label, color: colors.textPrimary },
   actions: { marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end' },
-  actionButton: { borderWidth: 1, borderColor: colors.accentBorder, backgroundColor: colors.accentSoft, borderRadius: radius.sm, paddingVertical: 10, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
-  actionButtonText: { color: colors.accent, fontFamily: fontFamily.bold, fontSize: 13 },
+  actionButton: { ...buttons.compactOutline },
+  actionButtonText: { ...buttons.compactOutlineText },
   emptyText: { fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   deniedBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
   deniedBadgeText: { fontSize: 28, fontFamily: fontFamily.bold, color: colors.accent },
   deniedTitle: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.sm },
   deniedText: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.xl },
-  primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: spacing.md, paddingHorizontal: spacing.xl, alignItems: 'center' },
-  primaryButtonText: { color: '#0A0E1A', fontSize: 15, fontFamily: fontFamily.bold },
+  primaryButton: { ...buttons.primary, paddingHorizontal: spacing.xl },
+  primaryButtonText: { ...buttons.primaryText },
 });
