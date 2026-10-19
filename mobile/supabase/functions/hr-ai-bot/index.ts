@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -43,6 +43,14 @@ const managerTools = [
         },
         required: ["filter"],
       },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_team_status",
+      description: "Lists who is currently clocked in (online) and who is on break right now. Use when anyone asks who's working, who's online, who's on break, or for a team status snapshot.",
+      parameters: { type: "object", properties: {}, required: [] },
     },
   },
   {
@@ -122,6 +130,14 @@ const employeeTools = [
   {
     type: "function",
     function: {
+      name: "get_team_status",
+      description: "Lists who is currently clocked in (online) and who is on break right now. Use when anyone asks who's working, who's online, who's on break, or for a team status snapshot.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "submit_exception_request",
       description: "Files a geo-fence exception request for the employee. Only call once you know the employee's reason. The employee's current GPS is in your context — pass it through.",
       parameters: {
@@ -149,7 +165,7 @@ const employeeTools = [
   }
 ];
 
-const managerSystemPrompt = `You are the Easy HR AI Manager Assistant.
+const managerSystemPrompt = `You are the NorthShift AI Manager Assistant.
 
 CRITICAL FORMATTING RULES:
 1. NEVER display raw UUIDs (e.g., 98c9a23e...) to the user. Keep IDs hidden in your memory.
@@ -175,6 +191,9 @@ CONVERSATION MEMORY:
 CLOCK OUT:
 - "clock out Ahmed" or "clock them out" (resolve "them" from history) → clock_out_employee. Confirm who was clocked out in one natural sentence.
 
+TEAM STATUS:
+- "who's working", "who's online", "who's on break" → get_team_status. Answer as one short list, no extra commentary.
+
 TASK DELEGATION:
 - You can assign tasks ("assign fridge restock to Ahmed due Friday"), list them ("show pending tasks", "what is Ahmed working on"), and update them ("mark the fridge task done").
 - When assigning, if the employee name is ambiguous or you cannot find them, ask the manager to clarify before creating the task.
@@ -184,7 +203,7 @@ function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
     ? `Employee's current GPS: ${location.latitude}, ${location.longitude} (captured by the app).`
     : `Employee's GPS was not captured — if they need an exception, ask them to enable location and try again.`;
-  return `You are the Easy HR Employee Assistant, a friendly helper for staff members.
+  return `You are the NorthShift Employee Assistant, a friendly helper for staff members.
 
 ${locLine}
 
@@ -201,6 +220,7 @@ TONE — TALK LIKE A PERSON:
 
 CAPABILITIES:
 - Shift/hours questions: use get_my_shifts.
+- Team status: if they ask who's online, who's working, or who's on break, use get_team_status.
 - Geo-fence exception: if they need one, make sure you have their reason first (ask if missing), then call submit_exception_request with the reason. Their GPS is already in your context.
 - Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
 
@@ -316,6 +336,36 @@ Deno.serve(async (req) => {
               clock_out: item.clock_out,
               flag: item.ai_anomaly_flag
             }));
+          }
+        } else if (fn === "get_team_status") {
+          const { data: shifts, error: sErr } = await supabase
+            .from("time_logs")
+            .select("id, user_id, clock_in, profiles!time_logs_user_id_fkey(full_name)")
+            .is("clock_out", null);
+          if (sErr) {
+            output = { error: sErr.message };
+          } else {
+            const { data: brks } = await supabase
+              .from("time_breaks")
+              .select("time_log_id")
+              .is("end_time", null);
+            const status = getTeamStatus(
+              (shifts || []).map((s: any) => ({
+                log_id: s.id,
+                user_id: s.user_id,
+                full_name: s.profiles?.full_name || "Unknown",
+                clock_in: s.clock_in,
+              })),
+              new Set((brks || []).map((b: any) => b.time_log_id)),
+            );
+            output = status.online.length === 0 && status.on_break.length === 0
+              ? { message: "Nobody is clocked in right now." }
+              : {
+                  online_count: status.online.length,
+                  on_break_count: status.on_break.length,
+                  online: status.online,
+                  on_break: status.on_break,
+                };
           }
         } else if (fn === "clock_out_employee") {
           const { data: profs, error: pErr } = await supabase

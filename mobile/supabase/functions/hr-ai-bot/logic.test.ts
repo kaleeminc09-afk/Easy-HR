@@ -7,6 +7,7 @@ import {
   matchByName,
   findNearestWorksite,
   anomalyFlagForShift,
+  getTeamStatus,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -130,5 +131,46 @@ describe("anomalyFlagForShift", () => {
 
   test("exactly 12h is NOT flagged", () => {
     expect(anomalyFlagForShift("2026-10-10T06:00:00Z", "2026-10-10T18:00:00Z")).toBe("Normal Shift");
+  });
+});
+describe("getTeamStatus", () => {
+  const now = new Date(2026, 9, 10, 18, 0, 0).toISOString();
+  const shifts = [
+    { log_id: "l1", user_id: "u1", full_name: "Ahmed Khan", clock_in: new Date(2026, 9, 10, 9, 0, 0).toISOString() },
+    { log_id: "l2", user_id: "u2", full_name: "Sara Malik", clock_in: new Date(2026, 9, 10, 10, 0, 0).toISOString() },
+    { log_id: "l3", user_id: "u3", full_name: "John Doe", clock_in: new Date(2026, 9, 10, 8, 30, 0).toISOString() },
+  ];
+
+  test("empty shift list means nobody working", () => {
+    const st = getTeamStatus([], new Set());
+    expect(st.online).toHaveLength(0);
+    expect(st.on_break).toHaveLength(0);
+  });
+
+  test("splits online vs on-break correctly", () => {
+    const st = getTeamStatus(shifts, new Set(["l2"]));
+    expect(st.online.map((m) => m.name)).toEqual(["Ahmed Khan", "John Doe"]);
+    expect(st.on_break.map((m) => m.name)).toEqual(["Sara Malik"]);
+    expect(st.on_break[0].since).toBe(shifts[1].clock_in);
+  });
+
+  test("accepts a plain array of break log ids too", () => {
+    const st = getTeamStatus(shifts, ["l1", "l3"]);
+    expect(st.online.map((m) => m.name)).toEqual(["Sara Malik"]);
+    expect(st.on_break).toHaveLength(2);
+  });
+
+  test("break row with no matching open shift is ignored", () => {
+    const st = getTeamStatus(shifts.slice(0, 1), new Set(["ghost-log-id"]));
+    expect(st.online).toHaveLength(1);
+    expect(st.on_break).toHaveLength(0);
+  });
+
+  test("blank name falls back to Unknown", () => {
+    const st = getTeamStatus(
+      [{ log_id: "l9", user_id: "u9", full_name: "   ", clock_in: now }],
+      new Set(),
+    );
+    expect(st.online[0].name).toBe("Unknown");
   });
 });

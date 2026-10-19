@@ -89,3 +89,43 @@ export function anomalyFlagForShift(clockInIso: string, clockOutIso: string): st
   if (hrs < 0.05) return "⚠️ Flagged: Unusually Short Shift (< 3 Mins)";
   return "Normal Shift";
 }
+export interface ActiveShift {
+  log_id: string;
+  user_id: string;
+  full_name: string;
+  clock_in: string;
+}
+
+export interface TeamMember {
+  name: string;
+  since: string;
+}
+
+export interface TeamStatus {
+  online: TeamMember[];
+  on_break: TeamMember[];
+}
+
+/**
+ * Who is currently working, from open shifts + open breaks.
+ * Pure and deterministic: the edge function feeds it DB rows, the bot
+ * narrates the result. A break row with no matching open shift is ignored
+ * (stale data can never put a ghost on break).
+ */
+export function getTeamStatus(
+  openShifts: ActiveShift[],
+  openBreakLogIds: Set<string> | string[],
+): TeamStatus {
+  const onBreak = new Set(openBreakLogIds);
+  const online: TeamMember[] = [];
+  const on_break: TeamMember[] = [];
+  for (const s of openShifts) {
+    const member: TeamMember = {
+      name: (s.full_name || "").trim() || "Unknown",
+      since: s.clock_in,
+    };
+    if (onBreak.has(s.log_id)) on_break.push(member);
+    else online.push(member);
+  }
+  return { online, on_break };
+}
