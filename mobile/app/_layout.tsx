@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Slot, SplashScreen } from 'expo-router';
+import { Stack, SplashScreen } from 'expo-router';
 import {
   useFonts,
   Inter_400Regular,
@@ -8,8 +8,21 @@ import {
   Inter_700Bold,
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
+import { colors } from '../lib/theme';
 
 SplashScreen.preventAutoHideAsync();
+
+// Midnight Executive motion — one shared transition for every screen.
+// slide_from_right = the native push feel; 220ms keeps it snappy, not floaty.
+// contentStyle kills the white flash visible behind dark screens mid-transition.
+// headerShown: false because every screen renders its own custom header.
+const screenOptions = {
+  headerShown: false,
+  animation: 'slide_from_right',
+  animationDuration: 220,
+  gestureEnabled: true,
+  contentStyle: { backgroundColor: colors.background },
+} as const;
 
 export default function RootLayout() {
   const [loaded] = useFonts({
@@ -25,5 +38,5 @@ export default function RootLayout() {
   }, [loaded]);
 
   if (!loaded) return null;
-  return <Slot />;
+  return <Stack screenOptions={screenOptions} />;
 }
