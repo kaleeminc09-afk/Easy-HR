@@ -21,7 +21,7 @@
       "package": "com.easyhr.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#0A0E1A"
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -46,7 +46,7 @@
           "image": "./assets/images/splash.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff"
+          "backgroundColor": "#0A0E1A"
         }
       ]
     ],
