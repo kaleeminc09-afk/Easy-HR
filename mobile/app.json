@@ -8,7 +8,8 @@
     "scheme": "easyhr",
     "userInterfaceStyle": "automatic",
     "updates": {
-      "fallbackToCacheTimeout": 0
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/8c5a3cf6-2f5e-4ce2-95e3-d183405d5e50"
     },
     "assetBundlePatterns": [
       "**/*"
