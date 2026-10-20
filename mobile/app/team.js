@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, SafeAreaView, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, RefreshControl } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useFocusEffect } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, fontFamily, buttons } from '../lib/theme';

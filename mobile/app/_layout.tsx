@@ -9,6 +9,7 @@ import {
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
 import { colors } from '../lib/theme';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -38,5 +39,9 @@ export default function RootLayout() {
   }, [loaded]);
 
   if (!loaded) return null;
-  return <Stack screenOptions={screenOptions} />;
+  return (
+    <SafeAreaProvider>
+      <Stack screenOptions={screenOptions} />
+    </SafeAreaProvider>
+  );
 }
