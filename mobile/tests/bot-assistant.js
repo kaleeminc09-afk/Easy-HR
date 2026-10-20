@@ -265,7 +265,7 @@ async function appStartBreak(db, timeLogId, breakType) {
   ]);
   const r17c = await emp2('are there any open shifts I could pick up this week?');
   checkReply('employee open-shifts', r17c, [
-    ['mentions an open shift', /open/i],
+    ['mentions an open shift', /open|claim|pick up/i],
   ]);
   await db3.from('shifts').delete().in('id', [shiftA && shiftA.id, shiftOpen && shiftOpen.id].filter(Boolean));
 

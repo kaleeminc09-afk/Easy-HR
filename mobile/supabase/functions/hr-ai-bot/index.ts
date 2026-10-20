@@ -285,6 +285,7 @@ TASK DELEGATION:
 SCHEDULE:
 - Rota questions ("who's scheduled Saturday", "shifts this week") → get_schedule; pick the range from the wording (today / this_week / next_week).
 - Open shifts and pending claims → get_open_shifts. You cannot approve or deny claims in chat yet — point the manager to the Schedule screen for approvals.
+- Shift results include a ready-made "when" label in the team's local time — use it word-for-word for the date and times instead of converting timestamps yourself.
 
 OVERTIME & COMPLIANCE:
 - "who's close to overtime" → get_overtime_status. "any break violations" → get_break_violations.
@@ -319,6 +320,7 @@ CAPABILITIES:
 - Geo-fence exception: if they need one, make sure you have their reason first (ask if missing), then call submit_exception_request with the reason. Their GPS is already in your context.
 - Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
 - Schedule questions ("my shifts this week", "am I working Saturday") → get_schedule. Open shifts they could pick up → get_open_shifts; claiming happens in the Schedule tab, tell them to tap Claim there.
+- Shift results include a ready-made "when" label in local time — use it word-for-word for the date and times instead of converting timestamps yourself.
 - Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
 
 CONVERSATION MEMORY:
@@ -326,11 +328,27 @@ CONVERSATION MEMORY:
 - Resolve pronouns and short follow-ups ("yes", "him", a bare name) against what was just discussed instead of asking the user to repeat themselves.`;
 }
 
+// "Tue, Oct 20, 3:00 PM - 7:00 PM" in the caller's timezone.
+function fmtWhen(startIso: string, endIso: string, tz: string): string {
+  try {
+    const dayFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short", month: "short", day: "numeric" });
+    const timeFmt = new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "numeric", minute: "2-digit" });
+    const s = new Date(startIso);
+    const e = new Date(endIso);
+    const sameDay = dayFmt.format(s) === dayFmt.format(e);
+    return sameDay
+      ? `${dayFmt.format(s)}, ${timeFmt.format(s)} - ${timeFmt.format(e)}`
+      : `${dayFmt.format(s)}, ${timeFmt.format(s)} - ${dayFmt.format(e)}, ${timeFmt.format(e)}`;
+  } catch {
+    return `${startIso} - ${endIso}`;
+  }
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
 
   try {
-    const { prompt, managerId, userId, role, location, history } = await req.json();
+    const { prompt, managerId, userId, role, location, history, timeZone } = await req.json();
 
     // Sanitize client-supplied history: user/assistant roles only, text only, last 20.
     const cleanHistory = Array.isArray(history)
@@ -363,6 +381,13 @@ Deno.serve(async (req) => {
     const dbRole = myProfileRow?.role || "employee";
     // Managers and admins both get the manager toolset.
     const effectiveRole = dbRole === "employee" ? "employee" : "manager";
+    // Caller's timezone for human-readable shift labels (the server runs
+    // in UTC, so raw timestamps would read back with the wrong times).
+    let callerTz = "America/Toronto";
+    if (typeof timeZone === "string" && timeZone) {
+      try { new Intl.DateTimeFormat("en-US", { timeZone }); callerTz = timeZone; } catch { /* keep default */ }
+    }
+
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
 
@@ -683,6 +708,7 @@ Deno.serve(async (req) => {
             if (!output.error) {
               const mapped = list.map((s: any) => ({
                 employee: s.user_id ? (nameMap.get(s.user_id) || "Unknown") : "OPEN SHIFT",
+                when: fmtWhen(s.start_time, s.end_time, callerTz),
                 worksite: s.worksite_id ? (siteMap.get(s.worksite_id) || "Unknown site") : "No worksite",
                 start: s.start_time,
                 end: s.end_time,
@@ -709,6 +735,7 @@ Deno.serve(async (req) => {
             const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
             const siteMap = new Map((sites || []).map((w: any) => [w.id, w.name]));
             const shape = (s: any) => ({
+              when: fmtWhen(s.start_time, s.end_time, callerTz),
               worksite: s.worksite_id ? (siteMap.get(s.worksite_id) || "Unknown site") : "No worksite",
               start: s.start_time,
               end: s.end_time,

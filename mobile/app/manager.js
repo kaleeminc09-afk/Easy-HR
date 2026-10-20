@@ -250,6 +250,7 @@ export default function ManagerDashboard() {
         body: JSON.stringify({
           prompt: text,
           managerId: currentUser?.id || 'mgr_123',
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           history,
         }),
       });

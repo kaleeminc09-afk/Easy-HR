@@ -67,6 +67,7 @@ export default function EmployeeChatScreen() {
           userId: session.user.id,
           role: 'employee',
           location: coords,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
           history,
         }),
       });
