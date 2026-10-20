@@ -14,6 +14,9 @@ import {
   findMealBreakViolations,
   buildAuditCsv,
   type AuditBreak,
+  shiftsOverlap,
+  validateShiftInput,
+  shiftDurationHours,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
 } from "./logic";
@@ -380,5 +383,31 @@ describe("audit CSV export", () => {
       { ...base, full_name: "Rao, Asha", clock_in: iso(0), clock_out: iso(2) },
     ], NOW);
     expect(csv.split("\n")[1]).toContain('"Rao, Asha"');
+  });
+});
+
+describe("shift scheduling helpers", () => {
+  const S = (h: number, m = 0) => new Date(2026, 9, 19, h, m, 0).toISOString();
+  const N = (h: number, m = 0) => new Date(2026, 9, 20, h, m, 0).toISOString();
+
+  test("overlapping shifts are detected", () => {
+    expect(shiftsOverlap({ start_time: S(9), end_time: S(17) }, { start_time: S(16), end_time: S(20) })).toBe(true);
+    expect(shiftsOverlap({ start_time: S(9), end_time: S(17) }, { start_time: S(10), end_time: S(12) })).toBe(true);
+  });
+
+  test("touching endpoints do not overlap; separate shifts do not overlap", () => {
+    expect(shiftsOverlap({ start_time: S(9), end_time: S(17) }, { start_time: S(17), end_time: S(21) })).toBe(false);
+    expect(shiftsOverlap({ start_time: S(9), end_time: S(12) }, { start_time: S(13), end_time: S(17) })).toBe(false);
+  });
+
+  test("validation: end before start and >24h are rejected, overnight is fine", () => {
+    expect(validateShiftInput(S(17), S(9))).toContain("after start time");
+    expect(validateShiftInput(S(9), N(10))).toContain("24 hours");
+    expect(validateShiftInput(S(22), N(6))).toBeNull();
+    expect(validateShiftInput("junk", S(9))).toContain("valid date");
+  });
+
+  test("duration hours", () => {
+    expect(shiftDurationHours({ start_time: S(9), end_time: S(17, 30) })).toBe(8.5);
   });
 });

@@ -420,3 +420,34 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
   }
   return lines.join("\n");
 }
+
+// ---- Shift scheduling ----
+
+export interface ShiftLike {
+  start_time: string;
+  end_time: string;
+}
+
+/** True when two shifts overlap in time. Touching endpoints (one ends
+ *  exactly when the other starts) do NOT overlap. */
+export function shiftsOverlap(a: ShiftLike, b: ShiftLike): boolean {
+  const as = new Date(a.start_time).getTime();
+  const ae = new Date(a.end_time).getTime();
+  const bs = new Date(b.start_time).getTime();
+  const be = new Date(b.end_time).getTime();
+  return as < be && bs < ae;
+}
+
+/** Returns a plain-language problem, or null when the shift times are valid. */
+export function validateShiftInput(startIso: string, endIso: string): string | null {
+  const s = new Date(startIso).getTime();
+  const e = new Date(endIso).getTime();
+  if (Number.isNaN(s) || Number.isNaN(e)) return "Enter a valid date and start/end times.";
+  if (e <= s) return "End time must be after start time. For an overnight shift, turn on 'Ends next day'.";
+  if (e - s > 24 * 3600 * 1000) return "A shift cannot be longer than 24 hours.";
+  return null;
+}
+
+export function shiftDurationHours(s: ShiftLike): number {
+  return +(((new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 3600000).toFixed(2));
+}
