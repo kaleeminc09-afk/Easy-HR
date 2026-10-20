@@ -16,6 +16,9 @@ export default function App() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [profileIncomplete, setProfileIncomplete] = useState(false);
   const [authError, setAuthError] = useState('');
 
   // Time Tracker State
@@ -51,7 +54,8 @@ export default function App() {
   useEffect(() => {
     if (!session) { setBusinessName(''); return; }
     (async () => {
-      const { data } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
+      const { data } = await supabase.from('profiles').select('business_id, phone, emergency_contact_1_phone').eq('id', session.user.id).single();
+      if (data) setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone);
       if (data && data.business_id) {
         const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', data.business_id).single();
         if (biz) setBusinessName(biz.business_name || '');
@@ -95,13 +99,30 @@ export default function App() {
   const handleSignUp = async () => {
     setAuthLoading(true);
     setAuthError('');
-    const { error } = await supabase.auth.signUp({
+    const fn = firstName.trim();
+    const ln = lastName.trim();
+    const composedName = `${fn} ${ln}`.trim();
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { full_name: email.split('@')[0], role: 'employee' } }
+      options: { data: { full_name: composedName || email.split('@')[0], first_name: fn, last_name: ln, role: 'employee' } }
     });
-    if (error) setAuthError(error.message);
-    else setStatusMessage('Account created! You can now sign in.');
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      // If a session came back immediately, write the names to the profile
+      // row directly so they are correct even if metadata is not copied.
+      if (data && data.session && data.user && (fn || ln)) {
+        try {
+          await supabase.from('profiles').update({
+            first_name: fn || null,
+            last_name: ln || null,
+            full_name: composedName,
+          }).eq('id', data.user.id);
+        } catch (e) { /* profile name can be fixed on the Profile screen */ }
+      }
+      setStatusMessage('Account created! You can now sign in.');
+    }
     setAuthLoading(false);
   };
 
@@ -408,6 +429,24 @@ export default function App() {
           <Text style={styles.authTitle}>NorthShift</Text>
           <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
 
+          <Text style={styles.authLabel}>First name (new accounts)</Text>
+          <TextInput
+            style={styles.authInput}
+            placeholder="First name"
+            placeholderTextColor={colors.inputPlaceholder}
+            value={firstName}
+            onChangeText={setFirstName}
+            autoCapitalize="words"
+          />
+          <Text style={styles.authLabel}>Last name (new accounts)</Text>
+          <TextInput
+            style={styles.authInput}
+            placeholder="Last name"
+            placeholderTextColor={colors.inputPlaceholder}
+            value={lastName}
+            onChangeText={setLastName}
+            autoCapitalize="words"
+          />
           <Text style={styles.authLabel}>Email</Text>
           <TextInput
             style={styles.authInput}
@@ -488,6 +527,15 @@ export default function App() {
       </View>
 
       <ScrollView contentContainerStyle={styles.empContent}>
+        {profileIncomplete && (
+          <Link href="/profile" asChild>
+            <TouchableOpacity style={styles.profileNudge}>
+              <Text style={styles.profileNudgeTitle}>Complete your profile</Text>
+              <Text style={styles.profileNudgeText}>Add your phone number and an emergency contact so your manager can reach the right person fast.</Text>
+              <Text style={styles.profileNudgeLink}>Go to Profile →</Text>
+            </TouchableOpacity>
+          </Link>
+        )}
         {/* Hero live clock — the heart of a time-clock app */}
         <View style={styles.heroClockWrap}>
           <Text style={styles.heroTime}>{formatHeroTime(now)}</Text>
@@ -665,6 +713,10 @@ const styles = StyleSheet.create({
   empNavButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   empNavButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 12 },
   empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
+  profileNudge: { width: '100%', maxWidth: 420, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
+  profileNudgeTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: spacing.xs },
+  profileNudgeText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary, marginBottom: spacing.sm },
+  profileNudgeLink: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 13 },
   // Hero live clock
   heroClockWrap: { alignItems: 'center', marginTop: spacing.md, marginBottom: spacing.lg },
   heroTime: { ...type.heroClock, color: colors.textPrimary },

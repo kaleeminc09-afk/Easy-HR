@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -16,6 +16,10 @@ export default function UsersScreen() {
   const [employeeLimit, setEmployeeLimit] = useState(null);
   const [businessName, setBusinessName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
+  const [worksites, setWorksites] = useState([]);
+  const [editingId, setEditingId] = useState(null);
+  const [savingEmp, setSavingEmp] = useState(false);
+  const [empForm, setEmpForm] = useState({ job_title: '', department: '', employee_number: '', start_date: '', employment_type: '', primary_worksite_id: '' });
 
   useEffect(() => { init(); }, []);
 
@@ -32,6 +36,8 @@ export default function UsersScreen() {
     }
     const { data: sub } = await supabase.from('subscriptions').select('employee_limit').eq('owner_id', session.user.id).maybeSingle();
     if (sub) setEmployeeLimit(sub.employee_limit);
+    const { data: wsData } = await supabase.from('worksites').select('id, name').order('name', { ascending: true });
+    if (wsData) setWorksites(wsData);
     await loadUsers();
     setLoading(false);
   };
@@ -39,7 +45,7 @@ export default function UsersScreen() {
   const loadUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, role, created_at')
+      .select('id, full_name, role, created_at, job_title, department, start_date, employment_type, primary_worksite_id, employee_number')
       .order('created_at', { ascending: true });
     if (!error) setUsers(data || []);
   };
@@ -56,6 +62,45 @@ export default function UsersScreen() {
       await loadUsers();
     }
     setBusyId(null);
+  };
+
+  const openEditor = (user) => {
+    setMessage('');
+    if (editingId === user.id) { setEditingId(null); return; }
+    setEmpForm({
+      job_title: user.job_title || '',
+      department: user.department || '',
+      employee_number: user.employee_number || '',
+      start_date: user.start_date || '',
+      employment_type: user.employment_type || '',
+      primary_worksite_id: user.primary_worksite_id || '',
+    });
+    setEditingId(user.id);
+  };
+
+  const saveEmployment = async (userId) => {
+    if (empForm.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(empForm.start_date.trim())) {
+      setMessage('Start date must be YYYY-MM-DD.');
+      return;
+    }
+    setSavingEmp(true);
+    setMessage('');
+    const { error } = await supabase.from('profiles').update({
+      job_title: empForm.job_title.trim() || null,
+      department: empForm.department.trim() || null,
+      employee_number: empForm.employee_number.trim() || null,
+      start_date: empForm.start_date.trim() || null,
+      employment_type: empForm.employment_type || null,
+      primary_worksite_id: empForm.primary_worksite_id || null,
+    }).eq('id', userId);
+    if (error) {
+      setMessage('Could not save employment details: ' + error.message);
+    } else {
+      setMessage('Employment details saved.');
+      setEditingId(null);
+      await loadUsers();
+    }
+    setSavingEmp(false);
   };
 
   const roleStyle = (role) => {
@@ -163,6 +208,43 @@ export default function UsersScreen() {
                 )}
               </View>
             )}
+            <TouchableOpacity style={styles.empToggle} onPress={() => openEditor(u)}>
+              <Text style={styles.empToggleText}>{editingId === u.id ? 'Close Employment Details' : 'Employment Details'}</Text>
+            </TouchableOpacity>
+            {editingId === u.id && (
+              <View style={styles.empForm}>
+                <Text style={styles.empLabel}>Job title</Text>
+                <TextInput style={styles.empInput} value={empForm.job_title} onChangeText={(v) => setEmpForm({ ...empForm, job_title: v })} placeholder="e.g. Shift Supervisor" placeholderTextColor={colors.inputPlaceholder} />
+                <Text style={styles.empLabel}>Department</Text>
+                <TextInput style={styles.empInput} value={empForm.department} onChangeText={(v) => setEmpForm({ ...empForm, department: v })} placeholder="e.g. Kitchen" placeholderTextColor={colors.inputPlaceholder} />
+                <Text style={styles.empLabel}>Employee #</Text>
+                <TextInput style={styles.empInput} value={empForm.employee_number} onChangeText={(v) => setEmpForm({ ...empForm, employee_number: v })} placeholder="e.g. 1042" placeholderTextColor={colors.inputPlaceholder} />
+                <Text style={styles.empLabel}>Start date</Text>
+                <TextInput style={styles.empInput} value={empForm.start_date} onChangeText={(v) => setEmpForm({ ...empForm, start_date: v })} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+                <Text style={styles.empLabel}>Employment type</Text>
+                <View style={styles.chipRow}>
+                  {['Full-time', 'Part-time', 'Casual', 'Contract'].map((t) => (
+                    <TouchableOpacity key={t} style={[styles.chip, empForm.employment_type === t && styles.chipActive]} onPress={() => setEmpForm({ ...empForm, employment_type: empForm.employment_type === t ? '' : t })}>
+                      <Text style={[styles.chipText, empForm.employment_type === t && styles.chipTextActive]}>{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={styles.empLabel}>Primary worksite</Text>
+                <View style={styles.chipRow}>
+                  <TouchableOpacity style={[styles.chip, !empForm.primary_worksite_id && styles.chipActive]} onPress={() => setEmpForm({ ...empForm, primary_worksite_id: '' })}>
+                    <Text style={[styles.chipText, !empForm.primary_worksite_id && styles.chipTextActive]}>None</Text>
+                  </TouchableOpacity>
+                  {worksites.map((w) => (
+                    <TouchableOpacity key={w.id} style={[styles.chip, empForm.primary_worksite_id === w.id && styles.chipActive]} onPress={() => setEmpForm({ ...empForm, primary_worksite_id: w.id })}>
+                      <Text style={[styles.chipText, empForm.primary_worksite_id === w.id && styles.chipTextActive]}>{w.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <TouchableOpacity style={styles.empSave} onPress={() => saveEmployment(u.id)} disabled={savingEmp}>
+                  {savingEmp ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.empSaveText}>Save Employment Details</Text>}
+                </TouchableOpacity>
+              </View>
+            )}
           </View>
         ))}
         {users.length === 0 && (
@@ -205,6 +287,18 @@ const styles = StyleSheet.create({
   actions: { marginTop: spacing.md, flexDirection: 'row', justifyContent: 'flex-end' },
   actionButton: { ...buttons.compactOutline },
   actionButtonText: { ...buttons.compactOutlineText },
+  empToggle: { marginTop: spacing.md, alignSelf: 'flex-start' },
+  empToggleText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 13 },
+  empForm: { marginTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.surfaceBorder, paddingTop: spacing.md },
+  empLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
+  empInput: { fontFamily: fontFamily.regular, backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 15, color: colors.textPrimary, marginBottom: spacing.md },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+  chip: { borderWidth: 1, borderColor: colors.surfaceBorder, backgroundColor: colors.surface, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 14 },
+  chipActive: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
+  chipText: { fontFamily: fontFamily.semibold, fontSize: 13, color: colors.textSecondary },
+  chipTextActive: { color: colors.accent },
+  empSave: { ...buttons.primary },
+  empSaveText: { ...buttons.primaryText },
   emptyText: { fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xl },
   deniedContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
   deniedBadge: { width: 64, height: 64, borderRadius: 32, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
