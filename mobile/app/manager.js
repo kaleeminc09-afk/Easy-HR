@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, OT_THRESHOLD_HOURS } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -20,6 +20,7 @@ export default function ManagerDashboard() {
   
   const [logs, setLogs] = useState([]);
   const [exceptions, setExceptions] = useState([]);
+  const [breaks, setBreaks] = useState([]);
   const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
   const [payrollFormat, setPayrollFormat] = useState('STANDARD'); 
 
@@ -83,6 +84,11 @@ export default function ManagerDashboard() {
 
     if (logsError) console.error('Logs Error:', logsError.message);
     if (logsData) setLogs(logsData);
+
+    const { data: breaksData } = await supabase
+      .from('time_breaks')
+      .select('id, time_log_id, start_time, end_time');
+    if (breaksData) setBreaks(breaksData);
 
     const { data: excData, error: excError } = await supabase
       .from('time_exceptions')
@@ -271,6 +277,23 @@ export default function ManagerDashboard() {
   );
   const otWatch = overtimeRows.filter(r => r.status !== 'ok');
 
+  const fourteenDaysAgo = Date.now() - 14 * 24 * 3600 * 1000;
+  const complianceFlags = findMealBreakViolations(
+    logs
+      .filter(l => l.user_id && new Date(l.clock_in).getTime() >= fourteenDaysAgo)
+      .map(l => ({
+        log_id: l.id,
+        user_id: l.user_id,
+        full_name: l.profiles?.full_name,
+        clock_in: l.clock_in,
+        clock_out: l.clock_out,
+        breaks: breaks
+          .filter(b => b.time_log_id === l.id)
+          .map(b => ({ start_time: b.start_time, end_time: b.end_time })),
+      })),
+    Date.now()
+  );
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -371,6 +394,28 @@ export default function ManagerDashboard() {
             </Text>
           </View>
         ))}
+      </View>
+
+      <View style={styles.otCard}>
+        <Text style={styles.otTitle}>Break Compliance · Last 14 Days</Text>
+        {complianceFlags.length === 0 ? (
+          <Text style={styles.otClear}>All clear — every recent shift had its 30-minute meal break.</Text>
+        ) : (
+          <>
+            {complianceFlags.slice(0, 5).map(f => (
+              <View key={f.log_id} style={styles.bcRow}>
+                <View style={styles.otRowTop}>
+                  <Text style={styles.otName}>{f.name}</Text>
+                  <Text style={styles.bcDate}>{new Date(f.clock_in).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</Text>
+                </View>
+                <Text style={styles.bcMsg}>{f.message}</Text>
+              </View>
+            ))}
+            {complianceFlags.length > 5 && (
+              <Text style={styles.bcMore}>+ {complianceFlags.length - 5} more flagged shifts</Text>
+            )}
+          </>
+        )}
       </View>
 
       <View style={styles.filterBar}>
@@ -586,6 +631,10 @@ const styles = StyleSheet.create({
   otBarTrack: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceBorder, overflow: 'hidden', marginBottom: spacing.xs },
   otBarFill: { height: 8, borderRadius: 4 },
   otNote: { fontFamily: fontFamily.semibold, fontSize: 12 },
+  bcRow: { marginBottom: spacing.md },
+  bcDate: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13 },
+  bcMsg: { color: colors.danger, fontFamily: fontFamily.regular, fontSize: 13 },
+  bcMore: { color: colors.textSecondary, fontFamily: fontFamily.semibold, fontSize: 12 },
   brandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },

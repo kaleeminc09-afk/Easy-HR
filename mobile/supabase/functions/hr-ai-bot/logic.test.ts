@@ -10,6 +10,8 @@ import {
   getTeamStatus,
   computeWeeklyOvertime,
   weekStartMs,
+  checkMealBreakCompliance,
+  findMealBreakViolations,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
 } from "./logic";
@@ -248,5 +250,74 @@ describe("weekly overtime (Ontario ESA 44h)", () => {
     expect(computeWeeklyOvertime([], NOW)).toEqual([]);
     const rows = computeWeeklyOvertime([shift("u9", "  ", at(19, 9), at(19, 10))], NOW);
     expect(rows[0].name).toBe("Unknown");
+  });
+});
+
+describe("meal-break compliance (Ontario ESA)", () => {
+  const T0 = new Date(2026, 9, 19, 9, 0, 0); // Mon 09:00 local
+  const iso = (h: number, m = 0) => new Date(T0.getTime() + (h * 60 + m) * 60000).toISOString();
+  const NOW = T0.getTime() + 12 * 3600000;
+  const brk = (sh: number, sm: number, eh: number, em = 0) =>
+    ({ start_time: iso(sh, sm), end_time: iso(eh, em) });
+
+  test("short shift with no break is compliant", () => {
+    expect(checkMealBreakCompliance({ clock_in: iso(0), clock_out: iso(4) }, [], NOW)).toBeNull();
+  });
+
+  test("exactly 5 hours with no break is compliant, 5h01 is not", () => {
+    expect(checkMealBreakCompliance({ clock_in: iso(0), clock_out: iso(5) }, [], NOW)).toBeNull();
+    const v = checkMealBreakCompliance({ clock_in: iso(0), clock_out: iso(5, 1) }, [], NOW);
+    expect(v).not.toBeNull();
+    expect(v!.longest_work_minutes).toBe(301);
+  });
+
+  test("6h shift, no break: violation reports the full stretch", () => {
+    const v = checkMealBreakCompliance({ clock_in: iso(0), clock_out: iso(6) }, [], NOW);
+    expect(v!.longest_work_minutes).toBe(360);
+    expect(v!.message).toContain("6h 00m");
+  });
+
+  test("30-minute break at 3h makes a 6h shift compliant", () => {
+    expect(checkMealBreakCompliance(
+      { clock_in: iso(0), clock_out: iso(6) }, [brk(3, 0, 3, 30)], NOW)).toBeNull();
+  });
+
+  test("a single 15-minute break is not enough", () => {
+    const v = checkMealBreakCompliance(
+      { clock_in: iso(0), clock_out: iso(6) }, [brk(3, 0, 3, 15)], NOW);
+    expect(v).not.toBeNull();
+  });
+
+  test("two 15-minute breaks totalling 30 satisfy the rule (split provision)", () => {
+    expect(checkMealBreakCompliance(
+      { clock_in: iso(0), clock_out: iso(6) },
+      [brk(2, 0, 2, 15), brk(4, 0, 4, 15)], NOW)).toBeNull();
+  });
+
+  test("a satisfied break resets the clock for the next span", () => {
+    // 4h50 work, 30m break, 4h50 work, end: both spans under 5h
+    expect(checkMealBreakCompliance(
+      { clock_in: iso(0), clock_out: iso(10, 10) },
+      [brk(4, 50, 5, 20)], NOW)).toBeNull();
+    // ...but 5h10 in the second span is a violation
+    const v = checkMealBreakCompliance(
+      { clock_in: iso(0), clock_out: iso(10, 30) },
+      [brk(4, 50, 5, 20)], NOW);
+    expect(v).not.toBeNull();
+  });
+
+  test("open shift is measured up to now", () => {
+    const v = checkMealBreakCompliance({ clock_in: iso(0), clock_out: null }, [], T0.getTime() + 6 * 3600000);
+    expect(v).not.toBeNull();
+  });
+
+  test("findMealBreakViolations maps names and sorts newest first", () => {
+    const flags = findMealBreakViolations([
+      { log_id: "a", user_id: "u1", full_name: "Asha", clock_in: iso(0), clock_out: iso(6), breaks: [] },
+      { log_id: "b", user_id: "u2", full_name: "Ben", clock_in: iso(1), clock_out: iso(3), breaks: [] },
+      { log_id: "c", user_id: "u3", full_name: " ", clock_in: iso(2), clock_out: iso(9), breaks: [] },
+    ], NOW);
+    expect(flags.map(f => f.log_id)).toEqual(["c", "a"]);
+    expect(flags[0].name).toBe("Unknown");
   });
 });

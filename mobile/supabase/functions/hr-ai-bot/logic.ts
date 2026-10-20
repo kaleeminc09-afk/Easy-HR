@@ -192,3 +192,123 @@ export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): Ov
   }
   return rows.sort((a, b) => b.hours - a.hours);
 }
+
+// ---- Ontario ESA meal-break compliance ----
+// An employee must not work more than 5 consecutive hours without a
+// 30-minute eating period. The 30 minutes may be split into two periods
+// totalling 30 within the same 5-hour span (both are modelled here).
+
+export const MEAL_BREAK_MAX_WORK_MINUTES = 300; // 5 hours
+export const MEAL_BREAK_REQUIRED_MINUTES = 30;
+
+export interface BreakInterval {
+  start_time: string;
+  end_time: string | null;
+}
+
+export interface ShiftWindow {
+  clock_in: string;
+  clock_out: string | null;
+}
+
+export interface MealBreakViolation {
+  longest_work_minutes: number;
+  message: string;
+}
+
+function mealBreakViolation(longestWorkMin: number): MealBreakViolation {
+  const h = Math.floor(longestWorkMin / 60);
+  const m = Math.round(longestWorkMin % 60);
+  return {
+    longest_work_minutes: Math.round(longestWorkMin),
+    message: `Worked ${h}h ${String(m).padStart(2, "0")}m without a 30-minute meal break (Ontario ESA)`,
+  };
+}
+
+/**
+ * Checks one shift against the ESA meal-break rule.
+ * Walks the shift chronologically: work minutes accumulate; break minutes
+ * accumulate as credit; reaching 30 credit minutes satisfies the span and
+ * resets the clock. Crossing 300 work minutes with <30 credit is a violation.
+ * Open breaks/shifts are measured up to nowMs. Returns null when compliant.
+ */
+export function checkMealBreakCompliance(
+  shift: ShiftWindow,
+  breaks: BreakInterval[],
+  nowMs: number,
+): MealBreakViolation | null {
+  const start = new Date(shift.clock_in).getTime();
+  if (Number.isNaN(start)) return null;
+  const end = shift.clock_out ? new Date(shift.clock_out).getTime() : nowMs;
+  if (end <= start) return null;
+
+  const ivs = breaks
+    .map((b) => {
+      const s = Math.max(start, new Date(b.start_time).getTime());
+      const e = Math.min(end, b.end_time ? new Date(b.end_time).getTime() : end);
+      return { s, e };
+    })
+    .filter((iv) => iv.e > iv.s)
+    .sort((a, b) => a.s - b.s);
+
+  let workMin = 0;
+  let creditMin = 0;
+  let cursor = start;
+
+  for (const iv of ivs) {
+    if (iv.s > cursor) {
+      workMin += (iv.s - cursor) / 60000;
+      if (workMin > MEAL_BREAK_MAX_WORK_MINUTES && creditMin < MEAL_BREAK_REQUIRED_MINUTES) {
+        return mealBreakViolation(workMin);
+      }
+    }
+    creditMin += (iv.e - iv.s) / 60000;
+    if (creditMin >= MEAL_BREAK_REQUIRED_MINUTES) {
+      workMin = 0;
+      creditMin = 0;
+    }
+    cursor = Math.max(cursor, iv.e);
+  }
+  if (end > cursor) {
+    workMin += (end - cursor) / 60000;
+    if (workMin > MEAL_BREAK_MAX_WORK_MINUTES && creditMin < MEAL_BREAK_REQUIRED_MINUTES) {
+      return mealBreakViolation(workMin);
+    }
+  }
+  return null;
+}
+
+export interface ShiftWithBreaks extends ShiftWindow {
+  log_id: string;
+  user_id: string;
+  full_name?: string | null;
+  breaks: BreakInterval[];
+}
+
+export interface ComplianceFlag {
+  log_id: string;
+  user_id: string;
+  name: string;
+  clock_in: string;
+  longest_work_minutes: number;
+  message: string;
+}
+
+/** Flags every non-compliant shift, newest first. */
+export function findMealBreakViolations(shifts: ShiftWithBreaks[], nowMs: number): ComplianceFlag[] {
+  const flags: ComplianceFlag[] = [];
+  for (const s of shifts) {
+    const v = checkMealBreakCompliance(s, s.breaks, nowMs);
+    if (v) {
+      flags.push({
+        log_id: s.log_id,
+        user_id: s.user_id,
+        name: (s.full_name || "").trim() || "Unknown",
+        clock_in: s.clock_in,
+        longest_work_minutes: v.longest_work_minutes,
+        message: v.message,
+      });
+    }
+  }
+  return flags.sort((a, b) => (a.clock_in < b.clock_in ? 1 : -1));
+}
