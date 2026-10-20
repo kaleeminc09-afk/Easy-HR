@@ -55,7 +55,8 @@
         {
           "cameraPermission": "Allow NorthShift to use your camera to scan the worksite QR code when you clock in or out."
         }
-      ]
+      ],
+      "expo-sharing"
     ],
     "experiments": {
       "typedRoutes": true

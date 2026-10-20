@@ -12,6 +12,8 @@ import {
   weekStartMs,
   checkMealBreakCompliance,
   findMealBreakViolations,
+  buildAuditCsv,
+  type AuditBreak,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
 } from "./logic";
@@ -319,5 +321,64 @@ describe("meal-break compliance (Ontario ESA)", () => {
     ], NOW);
     expect(flags.map(f => f.log_id)).toEqual(["c", "a"]);
     expect(flags[0].name).toBe("Unknown");
+  });
+});
+
+describe("audit CSV export", () => {
+  const T0 = new Date(2026, 9, 19, 9, 0, 0); // Mon Oct 19 2026, 09:00 local
+  const iso = (h: number, m = 0) => new Date(T0.getTime() + (h * 60 + m) * 60000).toISOString();
+  const NOW = T0.getTime() + 72 * 3600000;
+  const base = {
+    log_id: "x", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca",
+    worksite_name: "Depot", anomaly_flag: "Normal Shift", breaks: [] as AuditBreak[],
+  };
+
+  test("header + one row per completed shift; open shifts excluded", () => {
+    const csv = buildAuditCsv([
+      { ...base, clock_in: iso(0), clock_out: iso(8) },
+      { ...base, log_id: "y", clock_in: iso(24), clock_out: null },
+    ], NOW);
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain("Employee,Email,Worksite");
+    expect(lines[1]).toContain("Asha Rao,asha@x.ca,Depot,2026-10-19,09:00,17:00,8.00,0,8.00,None,Normal Shift,No,8.00,0.00");
+  });
+
+  test("unpaid lunch is deducted from paid hours, paid breaks are not", () => {
+    const csv = buildAuditCsv([
+      { ...base, clock_in: iso(0), clock_out: iso(9), breaks: [
+        { break_type: "Unpaid Lunch", start_time: iso(4), end_time: iso(4, 30) },
+        { break_type: "Paid Rest Break", start_time: iso(6), end_time: iso(6, 15) },
+      ] },
+    ], NOW);
+    const row = csv.split("\n")[1];
+    expect(row).toContain(",9.00,30,8.50,");
+    expect(row).toContain("Unpaid Lunch 30m; Paid Rest Break 15m");
+  });
+
+  test("weekly overtime totals ride on every row of that person-week", () => {
+    const csv = buildAuditCsv([
+      { ...base, log_id: "a", clock_in: iso(0), clock_out: iso(24) },        // Mon 24h
+      { ...base, log_id: "b", clock_in: iso(24), clock_out: iso(46) },       // Tue 22h -> 46 total
+      { ...base, log_id: "c", clock_in: iso(168), clock_out: iso(176) },     // next week 8h
+    ], NOW);
+    const lines = csv.split("\n");
+    expect(lines[1]).toContain(",46.00,2.00");
+    expect(lines[2]).toContain(",46.00,2.00");
+    expect(lines[3]).toContain(",8.00,0.00");
+  });
+
+  test("meal-break violation marks the row non-compliant", () => {
+    const csv = buildAuditCsv([
+      { ...base, clock_in: iso(0), clock_out: iso(6) }, // 6h, no break
+    ], NOW);
+    expect(csv.split("\n")[1]).toContain(",No,");
+  });
+
+  test("commas in names are quoted", () => {
+    const csv = buildAuditCsv([
+      { ...base, full_name: "Rao, Asha", clock_in: iso(0), clock_out: iso(2) },
+    ], NOW);
+    expect(csv.split("\n")[1]).toContain('"Rao, Asha"');
   });
 });

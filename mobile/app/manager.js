@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -21,6 +21,8 @@ export default function ManagerDashboard() {
   const [logs, setLogs] = useState([]);
   const [exceptions, setExceptions] = useState([]);
   const [breaks, setBreaks] = useState([]);
+  const [exportDays, setExportDays] = useState(14);
+  const [exportMsg, setExportMsg] = useState('');
   const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
   const [payrollFormat, setPayrollFormat] = useState('STANDARD'); 
 
@@ -87,7 +89,7 @@ export default function ManagerDashboard() {
 
     const { data: breaksData } = await supabase
       .from('time_breaks')
-      .select('id, time_log_id, start_time, end_time');
+      .select('id, time_log_id, break_type, start_time, end_time');
     if (breaksData) setBreaks(breaksData);
 
     const { data: excData, error: excError } = await supabase
@@ -277,6 +279,58 @@ export default function ManagerDashboard() {
   );
   const otWatch = overtimeRows.filter(r => r.status !== 'ok');
 
+  const handleExport = async () => {
+    try {
+      setExportMsg('Building export...');
+      const sinceMs = Date.now() - exportDays * 24 * 3600 * 1000;
+      const rows = logs
+        .filter(l => l.user_id && l.clock_out && new Date(l.clock_in).getTime() >= sinceMs)
+        .map(l => ({
+          log_id: l.id,
+          user_id: l.user_id,
+          full_name: l.profiles?.full_name,
+          email: l.profiles?.email,
+          worksite_name: l.worksites?.name,
+          clock_in: l.clock_in,
+          clock_out: l.clock_out,
+          anomaly_flag: l.ai_anomaly_flag,
+          breaks: breaks
+            .filter(b => b.time_log_id === l.id)
+            .map(b => ({ break_type: b.break_type, start_time: b.start_time, end_time: b.end_time })),
+        }));
+      if (rows.length === 0) {
+        setExportMsg('No completed shifts in that range.');
+        return;
+      }
+      const csv = buildAuditCsv(rows, Date.now());
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const filename = `northshift-audit-${stamp}.csv`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        setExportMsg(`Exported ${rows.length} shifts.`);
+      } else {
+        const { File, Paths } = require('expo-file-system');
+        const Sharing = require('expo-sharing');
+        const file = new File(Paths.cache, filename);
+        file.write(csv);
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, { mimeType: 'text/csv', dialogTitle: 'NorthShift audit export' });
+          setExportMsg(`Exported ${rows.length} shifts.`);
+        } else {
+          setExportMsg('Sharing is not available on this device.');
+        }
+      }
+    } catch (e) {
+      setExportMsg('Export failed: ' + (e.message || 'unknown error'));
+    }
+  };
+
   const fourteenDaysAgo = Date.now() - 14 * 24 * 3600 * 1000;
   const complianceFlags = findMealBreakViolations(
     logs
@@ -416,6 +470,22 @@ export default function ManagerDashboard() {
             )}
           </>
         )}
+      </View>
+
+      <View style={styles.otCard}>
+        <Text style={styles.otTitle}>Audit Export</Text>
+        <Text style={styles.otClear}>One CSV with every completed shift, break, overtime total and compliance flag — ready for payroll or an ESA audit.</Text>
+        <View style={styles.exportChips}>
+          {[7, 14, 30].map(d => (
+            <TouchableOpacity key={d} style={[styles.filterTab, exportDays === d && styles.activeFilterTab]} onPress={() => setExportDays(d)}>
+              <Text style={[styles.filterText, exportDays === d && styles.activeFilterText]}>{d} days</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <TouchableOpacity style={styles.exportBtn} onPress={handleExport}>
+          <Text style={styles.exportBtnText}>Export Last {exportDays} Days</Text>
+        </TouchableOpacity>
+        {exportMsg ? <Text style={styles.exportMsg}>{exportMsg}</Text> : null}
       </View>
 
       <View style={styles.filterBar}>
@@ -635,6 +705,10 @@ const styles = StyleSheet.create({
   bcDate: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13 },
   bcMsg: { color: colors.danger, fontFamily: fontFamily.regular, fontSize: 13 },
   bcMore: { color: colors.textSecondary, fontFamily: fontFamily.semibold, fontSize: 12 },
+  exportChips: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.md },
+  exportBtn: { ...buttons.primary, marginTop: spacing.md },
+  exportBtnText: { ...buttons.primaryText },
+  exportMsg: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, marginTop: spacing.sm },
   brandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },

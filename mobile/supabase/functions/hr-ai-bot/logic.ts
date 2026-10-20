@@ -312,3 +312,111 @@ export function findMealBreakViolations(shifts: ShiftWithBreaks[], nowMs: number
   }
   return flags.sort((a, b) => (a.clock_in < b.clock_in ? 1 : -1));
 }
+
+// ---- Audit-ready CSV export ----
+// One row per completed shift: the record an ESA auditor or payroll run
+// needs. Paid hours = gross shift hours minus unpaid (lunch) break time.
+// Weekly totals/overtime use the same Mon-Sun week + 44h rule as the
+// overtime watch; meal-break compliance uses the ESA check above.
+
+export interface AuditBreak {
+  break_type: string;
+  start_time: string;
+  end_time: string | null;
+}
+
+export interface AuditShift {
+  log_id: string;
+  user_id: string;
+  full_name?: string | null;
+  email?: string | null;
+  worksite_name?: string | null;
+  clock_in: string;
+  clock_out: string | null;
+  anomaly_flag?: string | null;
+  breaks: AuditBreak[];
+}
+
+function csvCell(v: string): string {
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+function fmtDate(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+function fmtTime(iso: string): string {
+  const d = new Date(iso);
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+
+export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
+  const closed = shifts.filter((s) => s.clock_out);
+
+  // Person-week gross totals (Mon-Sun local), the overtime base.
+  const weekTotals = new Map<string, number>();
+  for (const s of closed) {
+    const key = `${s.user_id}|${weekStartMs(new Date(s.clock_in).getTime())}`;
+    const hrs = (new Date(s.clock_out as string).getTime() - new Date(s.clock_in).getTime()) / 3600000;
+    weekTotals.set(key, (weekTotals.get(key) || 0) + hrs);
+  }
+
+  const header = [
+    "Employee", "Email", "Worksite", "Date", "Clock In", "Clock Out",
+    "Shift Hours", "Unpaid Break (min)", "Paid Hours", "Breaks",
+    "Anomaly Flag", "Meal Break Compliant", "Week Total Hours",
+    "Overtime Hours (Week)",
+  ];
+  const lines: string[] = [header.join(",")];
+
+  const nameOf = (s: AuditShift) => (s.full_name || "").trim() || "Unknown";
+  const sorted = [...closed].sort((a, b) => {
+    const n = nameOf(a).localeCompare(nameOf(b));
+    return n !== 0 ? n : a.clock_in.localeCompare(b.clock_in);
+  });
+
+  for (const s of sorted) {
+    const inMs = new Date(s.clock_in).getTime();
+    const outMs = new Date(s.clock_out as string).getTime();
+    const grossMin = (outMs - inMs) / 60000;
+
+    let unpaidMin = 0;
+    const breakParts: string[] = [];
+    for (const b of [...s.breaks].sort((x, y) => x.start_time.localeCompare(y.start_time))) {
+      const bs = Math.max(inMs, new Date(b.start_time).getTime());
+      const be = Math.min(outMs, b.end_time ? new Date(b.end_time).getTime() : outMs);
+      const mins = Math.max(0, Math.round((be - bs) / 60000));
+      if (b.break_type === "Unpaid Lunch") unpaidMin += mins;
+      breakParts.push(`${b.break_type} ${mins}m`);
+    }
+
+    const weekKey = `${s.user_id}|${weekStartMs(inMs)}`;
+    const weekTotal = weekTotals.get(weekKey) || 0;
+    const weekOt = Math.max(0, weekTotal - OT_THRESHOLD_HOURS);
+    const compliant = checkMealBreakCompliance(s, s.breaks, nowMs) ? "No" : "Yes";
+
+    const row = [
+      nameOf(s),
+      (s.email || "").trim(),
+      (s.worksite_name || "").trim(),
+      fmtDate(s.clock_in),
+      fmtTime(s.clock_in),
+      fmtTime(s.clock_out as string),
+      (grossMin / 60).toFixed(2),
+      String(unpaidMin),
+      ((grossMin - unpaidMin) / 60).toFixed(2),
+      breakParts.length > 0 ? breakParts.join("; ") : "None",
+      (s.anomaly_flag || "").trim(),
+      compliant,
+      weekTotal.toFixed(2),
+      weekOt.toFixed(2),
+    ];
+    lines.push(row.map(csvCell).join(","));
+  }
+  return lines.join("\n");
+}
