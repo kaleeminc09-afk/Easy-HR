@@ -8,6 +8,10 @@ import {
   findNearestWorksite,
   anomalyFlagForShift,
   getTeamStatus,
+  computeWeeklyOvertime,
+  weekStartMs,
+  OT_THRESHOLD_HOURS,
+  OT_ALERT_HOURS,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -172,5 +176,77 @@ describe("getTeamStatus", () => {
       new Set(),
     );
     expect(st.online[0].name).toBe("Unknown");
+  });
+});
+
+describe("weekly overtime (Ontario ESA 44h)", () => {
+  // Wed Oct 21, 2026, noon local. Week = Mon Oct 19 - Sun Oct 25.
+  const NOW = new Date(2026, 9, 21, 12, 0, 0).getTime();
+  const at = (day: number, h: number) => new Date(2026, 9, day, h, 0, 0).toISOString();
+  const shift = (user_id: string, name: string, ci: string, co: string | null) =>
+    ({ user_id, full_name: name, clock_in: ci, clock_out: co });
+
+  test("Ontario ESA constants", () => {
+    expect(OT_THRESHOLD_HOURS).toBe(44);
+    expect(OT_ALERT_HOURS).toBe(40);
+  });
+
+  test("weekStartMs lands on Monday 00:00 local", () => {
+    expect(weekStartMs(NOW)).toBe(new Date(2026, 9, 19, 0, 0, 0).getTime());
+    // Sunday belongs to the week that started the previous Monday
+    expect(weekStartMs(new Date(2026, 9, 25, 23, 0, 0).getTime()))
+      .toBe(new Date(2026, 9, 19, 0, 0, 0).getTime());
+    // Next Monday starts a new week
+    expect(weekStartMs(new Date(2026, 9, 26, 0, 0, 0).getTime()))
+      .toBe(new Date(2026, 9, 26, 0, 0, 0).getTime());
+  });
+
+  test("sums the week per person and ignores last week", () => {
+    const rows = computeWeeklyOvertime([
+      shift("u1", "Asha", at(19, 9), at(19, 17)),  // 8h Mon
+      shift("u1", "Asha", at(20, 9), at(20, 17)),  // 8h Tue
+      shift("u1", "Asha", at(12, 9), at(12, 17)),  // last week - ignored
+      shift("u2", "Ben", at(19, 9), at(19, 13)),   // 4h
+    ], NOW);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toMatchObject({ user_id: "u1", hours: 16, status: "ok" });
+    expect(rows[1]).toMatchObject({ user_id: "u2", hours: 4, status: "ok" });
+  });
+
+  test("open shift counts up to now", () => {
+    const rows = computeWeeklyOvertime([
+      shift("u1", "Asha", at(21, 8), null), // Wed 08:00 -> noon = 4h
+    ], NOW);
+    expect(rows[0].hours).toBe(4);
+  });
+
+  test("alert at 40h, overtime at 44h with overage", () => {
+    const rows = computeWeeklyOvertime([
+      shift("u1", "Asha", at(19, 6), at(19, 18)), // 12
+      shift("u1", "Asha", at(20, 6), at(20, 18)), // 12
+      shift("u1", "Asha", at(21, 0), at(21, 12)), // 12 -> 36 ok
+      shift("u2", "Ben", at(19, 0), at(20, 20)),  // 44 exactly -> overtime, 0 over
+      shift("u3", "Cid", at(19, 6), at(19, 18)),
+      shift("u3", "Cid", at(20, 6), at(20, 18)),
+      shift("u3", "Cid", at(21, 0), at(21, 4)),    // 28... plus below
+      shift("u3", "Cid", at(19, 18), at(20, 6)),  // 12 -> total 40 -> approaching
+    ], NOW);
+    const byId = Object.fromEntries(rows.map(r => [r.user_id, r]));
+    expect(byId.u1.status).toBe("ok");
+    expect(byId.u2).toMatchObject({ hours: 44, status: "overtime", overtime_hours: 0 });
+    expect(byId.u3).toMatchObject({ hours: 40, status: "approaching" });
+  });
+
+  test("overtime_hours reports hours past 44", () => {
+    const rows = computeWeeklyOvertime([
+      shift("u1", "Asha", at(19, 0), at(20, 22)), // 46h
+    ], NOW);
+    expect(rows[0]).toMatchObject({ hours: 46, overtime_hours: 2, status: "overtime" });
+  });
+
+  test("blank name becomes Unknown, empty input is empty output", () => {
+    expect(computeWeeklyOvertime([], NOW)).toEqual([]);
+    const rows = computeWeeklyOvertime([shift("u9", "  ", at(19, 9), at(19, 10))], NOW);
+    expect(rows[0].name).toBe("Unknown");
   });
 });

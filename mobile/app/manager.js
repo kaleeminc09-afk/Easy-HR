@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
+import { computeWeeklyOvertime, OT_THRESHOLD_HOURS } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -74,7 +75,7 @@ export default function ManagerDashboard() {
     const { data: logsData, error: logsError } = await supabase
       .from('time_logs')
       .select(`
-        id, clock_in, clock_out, ai_anomaly_flag,
+        id, user_id, clock_in, clock_out, ai_anomaly_flag,
         profiles ( full_name, email, first_name, last_name ),
         worksites ( name )
       `)
@@ -259,6 +260,17 @@ export default function ManagerDashboard() {
 
   const pendingExceptionsCount = exceptions.filter(e => e.status === 'pending').length;
 
+  const overtimeRows = computeWeeklyOvertime(
+    logs.filter(l => l.user_id).map(l => ({
+      user_id: l.user_id,
+      full_name: l.profiles?.full_name,
+      clock_in: l.clock_in,
+      clock_out: l.clock_out,
+    })),
+    Date.now()
+  );
+  const otWatch = overtimeRows.filter(r => r.status !== 'ok');
+
   if (loading) {
     return (
       <View style={styles.centerContainer}>
@@ -338,6 +350,28 @@ export default function ManagerDashboard() {
           </View>
         </View>
       )}
+
+      <View style={styles.otCard}>
+        <Text style={styles.otTitle}>Overtime Watch · This Week</Text>
+        {otWatch.length === 0 ? (
+          <Text style={styles.otClear}>All clear — nobody is close to the {OT_THRESHOLD_HOURS}h overtime line this week.</Text>
+        ) : otWatch.map(r => (
+          <View key={r.user_id} style={styles.otRow}>
+            <View style={styles.otRowTop}>
+              <Text style={styles.otName}>{r.name}</Text>
+              <Text style={styles.otHours}>{r.hours.toFixed(1)}h</Text>
+            </View>
+            <View style={styles.otBarTrack}>
+              <View style={[styles.otBarFill, { width: `${Math.min(100, (r.hours / OT_THRESHOLD_HOURS) * 100)}%`, backgroundColor: r.status === 'overtime' ? colors.danger : colors.warning }]} />
+            </View>
+            <Text style={[styles.otNote, { color: r.status === 'overtime' ? colors.danger : colors.warning }]}>
+              {r.status === 'overtime'
+                ? `In overtime — ${r.overtime_hours.toFixed(1)}h past the ${OT_THRESHOLD_HOURS}h line`
+                : `Approaching overtime — ${(OT_THRESHOLD_HOURS - r.hours).toFixed(1)}h to the ${OT_THRESHOLD_HOURS}h line`}
+            </Text>
+          </View>
+        ))}
+      </View>
 
       <View style={styles.filterBar}>
         <TouchableOpacity style={[styles.filterTab, filter === 'ALL' && styles.activeFilterTab]} onPress={() => setFilter('ALL')}>
@@ -542,6 +576,16 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   title: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary },
   brandRow: { flexDirection: 'row', alignItems: 'center' },
+  otCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginHorizontal: spacing.lg, marginBottom: spacing.md },
+  otTitle: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 15, marginBottom: spacing.sm },
+  otClear: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13 },
+  otRow: { marginBottom: spacing.md },
+  otRowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.xs },
+  otName: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 14 },
+  otHours: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 14 },
+  otBarTrack: { height: 8, borderRadius: 4, backgroundColor: colors.surfaceBorder, overflow: 'hidden', marginBottom: spacing.xs },
+  otBarFill: { height: 8, borderRadius: 4 },
+  otNote: { fontFamily: fontFamily.semibold, fontSize: 12 },
   brandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },

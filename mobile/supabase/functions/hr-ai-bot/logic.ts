@@ -129,3 +129,66 @@ export function getTeamStatus(
   }
   return { online, on_break };
 }
+
+// ---- Weekly overtime (Ontario ESA: overtime after 44 hours in a work week) ----
+
+export const OT_THRESHOLD_HOURS = 44;
+export const OT_ALERT_HOURS = 40;
+
+export interface WeeklyShiftLog {
+  user_id: string;
+  full_name?: string | null;
+  clock_in: string;
+  clock_out: string | null;
+}
+
+export type OvertimeStatus = "ok" | "approaching" | "overtime";
+
+export interface OvertimeRow {
+  user_id: string;
+  name: string;
+  hours: number;
+  overtime_hours: number;
+  status: OvertimeStatus;
+}
+
+/** Monday 00:00 local time of the week containing nowMs. */
+export function weekStartMs(nowMs: number): number {
+  const d = new Date(nowMs);
+  d.setHours(0, 0, 0, 0);
+  const dow = (d.getDay() + 6) % 7; // Mon=0 ... Sun=6
+  d.setDate(d.getDate() - dow);
+  return d.getTime();
+}
+
+/**
+ * Hours per person for the current work week (Mon-Sun, local).
+ * Shifts are bucketed by their clock-in time; open shifts count up to nowMs.
+ * Same gross-hours convention as computeTodayHours (breaks not deducted).
+ */
+export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): OvertimeRow[] {
+  const start = weekStartMs(nowMs);
+  const end = start + 7 * 24 * 3600 * 1000;
+  const totals = new Map<string, { name: string; ms: number }>();
+  for (const log of logs) {
+    const s = new Date(log.clock_in).getTime();
+    if (Number.isNaN(s) || s < start || s >= end) continue;
+    const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
+    if (e <= s) continue;
+    const cur = totals.get(log.user_id) || {
+      name: (log.full_name || "").trim() || "Unknown",
+      ms: 0,
+    };
+    cur.ms += e - s;
+    totals.set(log.user_id, cur);
+  }
+  const rows: OvertimeRow[] = [];
+  for (const [user_id, t] of totals) {
+    const hours = +(t.ms / 3600000).toFixed(2);
+    const overtime_hours = +Math.max(0, hours - OT_THRESHOLD_HOURS).toFixed(2);
+    const status: OvertimeStatus =
+      hours >= OT_THRESHOLD_HOURS ? "overtime" : hours >= OT_ALERT_HOURS ? "approaching" : "ok";
+    rows.push({ user_id, name: t.name, hours, overtime_hours, status });
+  }
+  return rows.sort((a, b) => b.hours - a.hours);
+}
