@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -114,6 +114,59 @@ const managerTools = [
         required: [],
       },
     },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_schedule",
+      description: "Lists scheduled shifts (the rota) for today, this week, or next week. Use for 'who's scheduled', 'what shifts are on Saturday', 'the rota this week'. Optionally filter to one employee.",
+      parameters: {
+        type: "object",
+        properties: {
+          range: { type: "string", enum: ["today", "this_week", "next_week"] },
+          employee_name: { type: "string", description: "Limit to one employee." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_open_shifts",
+      description: "Lists open (unassigned) shifts and, for managers, shifts with a pending claim. Use for 'any open shifts', 'shifts nobody has taken', 'pending claims'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_overtime_status",
+      description: "Shows every team member's hours this week (Mon-Sun) with Ontario overtime status: approaching at 40h, in overtime past 44h. Use for 'who's close to overtime', 'overtime this week'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_break_violations",
+      description: "Lists shifts from the last 14 days that broke the Ontario meal-break rule (more than 5 hours worked without a 30-minute eating period). Use for 'any break violations', 'meal break compliance'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_employee_profile",
+      description: "Looks up an employee's profile: job title, department, start date, employment type, employee number, primary worksite, phone, and emergency contacts. Use for 'what's Asha's job title', 'who is the emergency contact for Ben'. Never includes home address or date of birth.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "Employee's full or first name." },
+        },
+        required: ["employee_name"],
+      },
+    },
   }
 ];
 
@@ -162,6 +215,36 @@ const employeeTools = [
         required: ["note"],
       },
     },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_schedule",
+      description: "Lists the employee's own scheduled shifts (the rota) for today, this week, or next week. Use for 'my shifts this week', 'am I working Saturday', 'when is my next shift'.",
+      parameters: {
+        type: "object",
+        properties: {
+          range: { type: "string", enum: ["today", "this_week", "next_week"] },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_open_shifts",
+      description: "Lists open (unassigned) shifts the employee could claim in the Schedule tab. Use for 'any open shifts', 'extra shifts I can pick up'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_my_profile",
+      description: "Shows the employee's own profile: job title, department, start date, employment type, primary worksite, phone, emergency contacts, and anything important that is missing. Use for 'my job title', 'who is my emergency contact', 'is my profile complete'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
   }
 ];
 
@@ -197,7 +280,19 @@ TEAM STATUS:
 TASK DELEGATION:
 - You can assign tasks ("assign fridge restock to Ahmed due Friday"), list them ("show pending tasks", "what is Ahmed working on"), and update them ("mark the fridge task done").
 - When assigning, if the employee name is ambiguous or you cannot find them, ask the manager to clarify before creating the task.
-- Confirm each delegation back in one short sentence: who, what, and due date if given.`;
+- Confirm each delegation back in one short sentence: who, what, and due date if given.
+
+SCHEDULE:
+- Rota questions ("who's scheduled Saturday", "shifts this week") → get_schedule; pick the range from the wording (today / this_week / next_week).
+- Open shifts and pending claims → get_open_shifts. You cannot approve or deny claims in chat yet — point the manager to the Schedule screen for approvals.
+
+OVERTIME & COMPLIANCE:
+- "who's close to overtime" → get_overtime_status. "any break violations" → get_break_violations.
+- Quote the returned numbers exactly — never estimate hours yourself. Ontario overtime starts past 44 hours in a week (Mon-Sun); the warning level is 40.
+
+PROFILES:
+- Job title, department, start date, phone, or emergency contact questions → get_employee_profile.
+- You never receive home addresses or dates of birth — if asked for those, say they are not available in chat.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
@@ -223,6 +318,8 @@ CAPABILITIES:
 - Team status: if they ask who's online, who's working, or who's on break, use get_team_status.
 - Geo-fence exception: if they need one, make sure you have their reason first (ask if missing), then call submit_exception_request with the reason. Their GPS is already in your context.
 - Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
+- Schedule questions ("my shifts this week", "am I working Saturday") → get_schedule. Open shifts they could pick up → get_open_shifts; claiming happens in the Schedule tab, tell them to tap Claim there.
+- Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -248,9 +345,24 @@ Deno.serve(async (req) => {
     const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    // Role resolution: explicit role wins, otherwise managerId => manager (backwards compatible)
-    const effectiveRole = role || (managerId ? "manager" : "employee");
-    const effectiveUserId = managerId || userId;
+    // ----- Verified identity -----
+    // Identity comes ONLY from the caller's Supabase session token.
+    // Body fields (userId / managerId / role) are ignored on purpose:
+    // they were client-claimed and anyone could spoof a manager.
+    const authHeader = req.headers.get("Authorization") || "";
+    const token = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!token) {
+      return new Response(JSON.stringify({ error: "Please sign in again - your session token is missing." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const { data: authData, error: authErr } = await supabase.auth.getUser(token);
+    if (authErr || !authData?.user) {
+      return new Response(JSON.stringify({ error: "Your session has expired. Please sign in again." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const effectiveUserId = authData.user.id;
+    const { data: myProfileRow } = await supabase.from("profiles").select("role").eq("id", effectiveUserId).single();
+    const dbRole = myProfileRow?.role || "employee";
+    // Managers and admins both get the manager toolset.
+    const effectiveRole = dbRole === "employee" ? "employee" : "manager";
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
 
@@ -314,7 +426,7 @@ Deno.serve(async (req) => {
             }));
           }
         } else if (fn === "bulk_update_exceptions") {
-          const { data, error } = await supabase.from("time_exceptions").update({ status: args.status, reviewed_by: managerId }).in("id", args.exception_ids).select();
+          const { data, error } = await supabase.from("time_exceptions").update({ status: args.status, reviewed_by: effectiveUserId }).in("id", args.exception_ids).select();
           output = error ? { error: error.message } : { success: true, updated_count: data?.length || 0 };
         } else if (fn === "get_time_logs") {
           const { data, error } = await supabase
@@ -418,7 +530,7 @@ Deno.serve(async (req) => {
                 title: args.title,
                 description: args.description || null,
                 assigned_to: match.value.id,
-                assigned_by: managerId,
+                assigned_by: effectiveUserId,
                 due_date: args.due_date || null,
                 status: "pending",
               }]);
@@ -534,7 +646,218 @@ Deno.serve(async (req) => {
             status: "logged",
           }]);
           output = error ? { error: error.message } : { success: true, message: "Blocker logged for manager review." };
+        } else if (fn === "get_schedule") {
+          const nowMs = Date.now();
+          let fromMs = weekStartMs(nowMs);
+          let toMs = fromMs + 7 * 24 * 3600 * 1000;
+          if (args.range === "today") {
+            const d = new Date(nowMs); d.setHours(0, 0, 0, 0);
+            fromMs = d.getTime(); toMs = fromMs + 24 * 3600 * 1000;
+          } else if (args.range === "next_week") {
+            fromMs = weekStartMs(nowMs) + 7 * 24 * 3600 * 1000;
+            toMs = fromMs + 7 * 24 * 3600 * 1000;
+          }
+          const { data: rows, error } = await supabase
+            .from("shifts")
+            .select("id, user_id, worksite_id, start_time, end_time, status, claimed_by, notes")
+            .gte("start_time", new Date(fromMs).toISOString())
+            .lt("start_time", new Date(toMs).toISOString())
+            .order("start_time", { ascending: true })
+            .limit(60);
+          if (error) {
+            output = { error: error.message };
+          } else {
+            const { data: profs } = await supabase.from("profiles").select("id, full_name");
+            const { data: sites } = await supabase.from("worksites").select("id, name");
+            const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
+            const siteMap = new Map((sites || []).map((w: any) => [w.id, w.name]));
+            let list = rows || [];
+            if (effectiveRole !== "manager") {
+              list = list.filter((s: any) => s.user_id === effectiveUserId || s.claimed_by === effectiveUserId);
+            } else if (args.employee_name) {
+              const m = matchByName(profs || [], (p: any) => p.full_name || "", args.employee_name);
+              if (m.kind === "none") { output = { error: `No employee found matching "${args.employee_name}".` }; list = []; }
+              else if (m.kind === "many") { output = { error: `Multiple employees match "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Ask which one.` }; list = []; }
+              else list = list.filter((s: any) => s.user_id === m.value.id);
+            }
+            if (!output.error) {
+              const mapped = list.map((s: any) => ({
+                employee: s.user_id ? (nameMap.get(s.user_id) || "Unknown") : "OPEN SHIFT",
+                worksite: s.worksite_id ? (siteMap.get(s.worksite_id) || "Unknown site") : "No worksite",
+                start: s.start_time,
+                end: s.end_time,
+                status: s.status,
+                notes: s.notes || undefined,
+              }));
+              output = mapped.length === 0 ? { message: "No shifts scheduled in that range." } : { shifts: mapped };
+            }
+          }
+        } else if (fn === "get_open_shifts") {
+          const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+          const { data: rows, error } = await supabase
+            .from("shifts")
+            .select("id, worksite_id, start_time, end_time, status, claimed_by, notes")
+            .in("status", ["open", "claim_pending"])
+            .gte("start_time", dayStart.toISOString())
+            .order("start_time", { ascending: true })
+            .limit(25);
+          if (error) {
+            output = { error: error.message };
+          } else {
+            const { data: profs } = await supabase.from("profiles").select("id, full_name");
+            const { data: sites } = await supabase.from("worksites").select("id, name");
+            const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
+            const siteMap = new Map((sites || []).map((w: any) => [w.id, w.name]));
+            const shape = (s: any) => ({
+              worksite: s.worksite_id ? (siteMap.get(s.worksite_id) || "Unknown site") : "No worksite",
+              start: s.start_time,
+              end: s.end_time,
+              notes: s.notes || undefined,
+            });
+            const open = (rows || []).filter((s: any) => s.status === "open").map(shape);
+            output = { open_shifts: open };
+            if (effectiveRole === "manager") {
+              output.pending_claims = (rows || [])
+                .filter((s: any) => s.status === "claim_pending")
+                .map((s: any) => ({ ...shape(s), claimed_by: s.claimed_by ? (nameMap.get(s.claimed_by) || "Unknown") : "Unknown" }));
+            }
+            if (open.length === 0 && (!output.pending_claims || output.pending_claims.length === 0)) {
+              output = { message: "No open shifts right now." };
+            }
+          }
+        } else if (fn === "get_overtime_status") {
+          const startIso = new Date(weekStartMs(Date.now())).toISOString();
+          const { data, error } = await supabase
+            .from("time_logs")
+            .select("user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .gte("clock_in", startIso);
+          if (error) {
+            output = { error: error.message };
+          } else {
+            const otRows = computeWeeklyOvertime((data || []).map((l: any) => ({
+              user_id: l.user_id,
+              full_name: l.profiles?.full_name,
+              clock_in: l.clock_in,
+              clock_out: l.clock_out,
+            })), Date.now());
+            output = otRows.length === 0
+              ? { message: "Nobody has logged hours yet this week." }
+              : {
+                  overtime_threshold_hours: 44,
+                  alert_hours: 40,
+                  team: otRows.map((r: any) => ({ employee: r.name, hours: r.hours, status: r.status, overtime_hours: r.overtime_hours })),
+                };
+          }
+        } else if (fn === "get_break_violations") {
+          const sinceIso = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
+          const { data: logs, error } = await supabase
+            .from("time_logs")
+            .select("id, user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .gte("clock_in", sinceIso);
+          if (error) {
+            output = { error: error.message };
+          } else {
+            const ids = (logs || []).map((l: any) => l.id);
+            let brks: any[] = [];
+            if (ids.length > 0) {
+              const { data: b } = await supabase.from("time_breaks").select("time_log_id, start_time, end_time").in("time_log_id", ids);
+              brks = b || [];
+            }
+            const flags = findMealBreakViolations((logs || []).map((l: any) => ({
+              log_id: l.id,
+              user_id: l.user_id,
+              full_name: l.profiles?.full_name,
+              clock_in: l.clock_in,
+              clock_out: l.clock_out,
+              breaks: brks.filter((b: any) => b.time_log_id === l.id).map((b: any) => ({ start_time: b.start_time, end_time: b.end_time })),
+            })), Date.now());
+            output = flags.length === 0
+              ? { message: "No meal-break violations in the last 14 days - every shift had its 30-minute break." }
+              : { total_violations: flags.length, violations: flags.slice(0, 10).map((f: any) => ({ employee: f.name, shift_started: f.clock_in, detail: f.message })) };
+          }
+        } else if (fn === "get_employee_profile") {
+          const { data: profs, error: pErr } = await supabase
+            .from("profiles")
+            .select("id, full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id, emergency_contact_1_name, emergency_contact_1_relationship, emergency_contact_1_phone, emergency_contact_2_name, emergency_contact_2_relationship, emergency_contact_2_phone")
+            .ilike("full_name", `%${args.employee_name}%`)
+            .limit(5);
+          if (pErr) {
+            output = { error: pErr.message };
+          } else {
+            const match = matchByName(profs || [], (p: any) => p.full_name || "", args.employee_name);
+            if (match.kind === "none") {
+              output = { error: `No employee found matching "${args.employee_name}". Ask for the exact name.` };
+            } else if (match.kind === "many") {
+              output = { error: `Multiple employees match "${args.employee_name}": ${match.values.map((p: any) => p.full_name).join(", ")}. Ask which one.` };
+            } else {
+              const p: any = match.value;
+              let siteName: string | undefined;
+              if (p.primary_worksite_id) {
+                const { data: ws } = await supabase.from("worksites").select("name").eq("id", p.primary_worksite_id).maybeSingle();
+                siteName = ws?.name;
+              }
+              const contacts = [1, 2]
+                .map((i: number) => ({
+                  name: p[`emergency_contact_${i}_name`] || undefined,
+                  relationship: p[`emergency_contact_${i}_relationship`] || undefined,
+                  phone: p[`emergency_contact_${i}_phone`] || undefined,
+                }))
+                .filter((c: any) => c.name || c.phone);
+              output = {
+                name: p.full_name,
+                role: p.role,
+                job_title: p.job_title || undefined,
+                department: p.department || undefined,
+                start_date: p.start_date || undefined,
+                employment_type: p.employment_type || undefined,
+                employee_number: p.employee_number || undefined,
+                primary_worksite: siteName,
+                phone: p.phone || undefined,
+                emergency_contacts: contacts,
+              };
+            }
+          }
+        } else if (fn === "get_my_profile") {
+          const { data: p, error } = await supabase
+            .from("profiles")
+            .select("full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id, emergency_contact_1_name, emergency_contact_1_relationship, emergency_contact_1_phone, emergency_contact_2_name, emergency_contact_2_relationship, emergency_contact_2_phone")
+            .eq("id", effectiveUserId)
+            .single();
+          if (error || !p) {
+            output = { error: "Could not load your profile." };
+          } else {
+            const row: any = p;
+            let siteName: string | undefined;
+            if (row.primary_worksite_id) {
+              const { data: ws } = await supabase.from("worksites").select("name").eq("id", row.primary_worksite_id).maybeSingle();
+              siteName = ws?.name;
+            }
+            const contacts = [1, 2]
+              .map((i: number) => ({
+                name: row[`emergency_contact_${i}_name`] || undefined,
+                relationship: row[`emergency_contact_${i}_relationship`] || undefined,
+                phone: row[`emergency_contact_${i}_phone`] || undefined,
+              }))
+              .filter((c: any) => c.name || c.phone);
+            const missing: string[] = [];
+            if (!row.phone) missing.push("phone number");
+            if (!row.emergency_contact_1_phone) missing.push("an emergency contact");
+            output = {
+              name: row.full_name,
+              role: row.role,
+              job_title: row.job_title || undefined,
+              department: row.department || undefined,
+              start_date: row.start_date || undefined,
+              employment_type: row.employment_type || undefined,
+              employee_number: row.employee_number || undefined,
+              primary_worksite: siteName,
+              phone: row.phone || undefined,
+              emergency_contacts: contacts,
+              missing_from_profile: missing,
+            };
+          }
         }
+
 
         messages.push({
           tool_call_id: toolCall.id,

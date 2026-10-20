@@ -59,7 +59,7 @@ export default function EmployeeChatScreen() {
       const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${session.access_token}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

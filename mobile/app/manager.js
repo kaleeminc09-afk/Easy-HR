@@ -240,10 +240,11 @@ export default function ManagerDashboard() {
     }));
 
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Authorization': `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({

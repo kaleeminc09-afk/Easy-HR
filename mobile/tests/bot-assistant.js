@@ -48,6 +48,10 @@ if (!BOT_PASSWORD) {
 
 const BOT1 = { email: env.BOT_EMAIL || 'bot-test@northshift.test', name: 'Test Bot' };
 const BOT2 = { email: env.BOT2_EMAIL || 'bot-test-2@northshift.test', name: 'Test Bot Two' };
+const BOT3 = { email: env.BOT3_EMAIL || 'bot-manager@northshift.test', name: 'Test Manager' };
+// Session tokens per user — since 2026-10-20 the brain takes identity
+// ONLY from the caller's token, so every call must carry one.
+const TOKENS = {};
 
 // ---------- harness ----------
 let passed = 0;
@@ -69,11 +73,11 @@ function makeClient() {
   return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 }
 
-async function aiChat(body, retries = 5) {
+async function aiChat(body, token, retries = 5) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+      headers: { 'Authorization': `Bearer ${token || SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
     const data = await res.json();
@@ -91,13 +95,14 @@ async function aiChat(body, retries = 5) {
 
 async function ensureUser(db, { email, name }) {
   const { data: signIn } = await db.auth.signInWithPassword({ email, password: BOT_PASSWORD });
-  if (signIn?.session) return signIn.session.user.id;
+  if (signIn?.session) { TOKENS[signIn.session.user.id] = signIn.session.access_token; return signIn.session.user.id; }
   const { data: signUp, error } = await db.auth.signUp({
     email, password: BOT_PASSWORD,
     options: { data: { full_name: name, role: 'employee' } },
   });
   if (error) throw new Error(`Auth failed for ${email}: ${error.message}`);
   if (!signUp.session) throw new Error(`No session for ${email} — turn OFF "Confirm email" in Supabase Auth settings (or confirm the user once), then re-run.`);
+  TOKENS[signUp.user.id] = signUp.session.access_token;
   await db.from('profiles').update({ full_name: name }).eq('id', signUp.user.id);
   return signUp.user.id;
 }
@@ -137,14 +142,25 @@ async function appStartBreak(db, timeLogId, breakType) {
 
   const db1 = makeClient();
   const db2 = makeClient();
+  const db3 = makeClient();
   const bot1 = await ensureUser(db1, BOT1);
   const bot2 = await ensureUser(db2, BOT2);
-  console.log(`Bot employees ready: ${BOT1.name}, ${BOT2.name}`);
+  const bot3 = await ensureUser(db3, BOT3);
+  // The brain derives roles from the profiles table now — promote the
+  // test manager in the DB (body claims are ignored by design).
+  await db3.from('profiles').update({ role: 'manager' }).eq('id', bot3);
+  const { data: mgrProfile } = await db3.from('profiles').select('role').eq('id', bot3).single();
+  if (!mgrProfile || mgrProfile.role !== 'manager') {
+    console.error('❌ Could not promote the test manager. Set the role of bot-manager@northshift.test to manager once (Supabase table editor or Manage Users), then re-run.');
+    process.exit(1);
+  }
+  console.log(`Bot employees ready: ${BOT1.name}, ${BOT2.name}; manager: ${BOT3.name}`);
   await cleanupUser(db1, bot1);
   await cleanupUser(db2, bot2);
 
-  const emp = (prompt, history = []) => aiChat({ prompt, userId: bot1, role: 'employee', history });
-  const mgr = (prompt, history = []) => aiChat({ prompt, managerId: bot1, role: 'manager', history });
+  const emp = (prompt, history = []) => aiChat({ prompt, userId: bot1, role: 'employee', history }, TOKENS[bot1]);
+  const emp2 = (prompt, history = []) => aiChat({ prompt, userId: bot2, role: 'employee', history }, TOKENS[bot2]);
+  const mgr = (prompt, history = []) => aiChat({ prompt, managerId: bot3, role: 'manager', history }, TOKENS[bot3]);
 
   // ── 11. THE 2026-10-19 gap: employee asks who's online ──
   section('11 · Employee asks "who\'s online"');
@@ -232,6 +248,60 @@ async function appStartBreak(db, timeLogId, breakType) {
   check('both roles agree on empty vs non-empty team',
     nobodyRe.test(r6e) === nobodyRe.test(r6m),
     `employee: "${r6e.slice(0, 70)}" | manager: "${r6m.slice(0, 70)}"`);
+
+  // ── 17. Schedule tools (Phase B) ──
+  section('17 · Schedule tools');
+  const todayAt = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d.toISOString(); };
+  const { data: shiftA } = await db3.from('shifts').insert([{ user_id: bot2, start_time: todayAt(10), end_time: todayAt(14), status: 'assigned', created_by: bot3 }]).select().single();
+  const { data: shiftOpen } = await db3.from('shifts').insert([{ user_id: null, start_time: todayAt(15), end_time: todayAt(19), status: 'open', created_by: bot3 }]).select().single();
+  check('schedule fixtures created', !!(shiftA && shiftOpen));
+  const r17a = await mgr('who is scheduled today?');
+  checkReply('manager schedule-today', r17a, [
+    ['names Test Bot Two', /test bot two/i],
+  ]);
+  const r17b = await emp2('do I have any shifts scheduled today?');
+  checkReply('employee my-schedule', r17b, [
+    ['mentions the shift', /shift|10:00|2:00/i],
+  ]);
+  const r17c = await emp2('are there any open shifts I could pick up this week?');
+  checkReply('employee open-shifts', r17c, [
+    ['mentions an open shift', /open/i],
+  ]);
+  await db3.from('shifts').delete().in('id', [shiftA && shiftA.id, shiftOpen && shiftOpen.id].filter(Boolean));
+
+  // ── 18. Overtime status (manager) ──
+  section('18 · Overtime status');
+  const r18 = await mgr('is anyone close to overtime this week?');
+  checkReply('manager overtime', r18, [
+    ['talks about overtime', /overtime/i],
+  ]);
+
+  // ── 19. Profile lookup (manager) ──
+  section('19 · Profile lookup');
+  await db3.from('profiles').update({ job_title: 'Warehouse Lead' }).eq('id', bot2);
+  const r19 = await mgr("what is Test Bot Two's job title?");
+  checkReply('manager profile-lookup', r19, [
+    ['says Warehouse Lead', /warehouse lead/i],
+  ]);
+
+  // ── 20. Impersonation: employee token + manager body claims ──
+  // The brain must take identity from the token (bot2 = employee), so the
+  // manager-only profile tool must not run even though the body begs.
+  section('20 · Impersonation attempt is ignored');
+  await db1.from('profiles').update({ phone: 'PROBE-PHONE-42' }).eq('id', bot1);
+  const r20 = await aiChat({ prompt: "what is Test Bot's phone number?", managerId: bot3, role: 'manager', history: [] }, TOKENS[bot2]);
+  check('fake-manager gets no phone number', !/PROBE-PHONE-42/.test(r20), r20.slice(0, 100));
+  await db1.from('profiles').update({ phone: null }).eq('id', bot1);
+
+  // ── 21. No user token → rejected ──
+  section('21 · Anon-key-only call is rejected');
+  const res21 = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: "who's online?", userId: bot1, role: 'employee' }),
+  });
+  const data21 = await res21.json().catch(() => ({}));
+  check('anon-key-only call is rejected', res21.status === 401 || !!data21.error, `status=${res21.status}`);
 
   console.log(`\n${passed} passed, ${failed} failed`);
   process.exit(failed > 0 ? 1 : 0);
