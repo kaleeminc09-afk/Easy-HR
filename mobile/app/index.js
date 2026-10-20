@@ -613,6 +613,12 @@ export default function App() {
             )}
 
             {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
+
+            <Link href="/scan" asChild>
+              <TouchableOpacity style={styles.empScanButton}>
+                <Text style={styles.empScanButtonText}>Scan QR to Clock In / Out</Text>
+              </TouchableOpacity>
+            </Link>
           </>
         )}
       </ScrollView>
@@ -628,6 +634,8 @@ const styles = StyleSheet.create({
   authLoadingText: { marginTop: spacing.md, color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular },
   authCard: { width: '100%', maxWidth: 400, alignSelf: 'center' },
   authLogo: { width: 76, height: 76, borderRadius: 20, alignSelf: 'center', marginBottom: spacing.sm },
+  empScanButton: { ...buttons.secondary, marginTop: spacing.md },
+  empScanButtonText: { ...buttons.secondaryText },
   empBrandRow: { flexDirection: 'row', alignItems: 'center' },
   empBrandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },

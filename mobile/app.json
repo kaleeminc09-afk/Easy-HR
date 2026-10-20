@@ -49,6 +49,12 @@
           "resizeMode": "contain",
           "backgroundColor": "#0A0E1A"
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow NorthShift to use your camera to scan the worksite QR code when you clock in or out."
+        }
       ]
     ],
     "experiments": {

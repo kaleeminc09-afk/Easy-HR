@@ -300,6 +300,11 @@ export default function ManagerDashboard() {
               <Text style={styles.navButtonText}>Team</Text>
             </TouchableOpacity>
           </Link>
+          <Link href="/qrcodes" asChild>
+            <TouchableOpacity style={styles.navButton}>
+              <Text style={styles.navButtonText}>QR Codes</Text>
+            </TouchableOpacity>
+          </Link>
           <Link href="/profile" asChild>
             <TouchableOpacity style={styles.navButton}>
               <Text style={styles.navButtonText}>Profile</Text>
