@@ -309,6 +309,7 @@ async function appStartBreak(db, timeLogId, breakType) {
     const p2 = (n) => String(n).padStart(2, '0');
     const dateStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
     const r = await mgr(`Schedule Bot Two for a shift on ${dateStr} from 09:00 to 13:00.`);
+    console.log('    [bot] ' + (r || '').slice(0, 220));
     checkReply('manager create shift', r, [
       ['reply arrived', /./],
       ['mentions Bot Two', /bot two/i],
@@ -329,10 +330,12 @@ async function appStartBreak(db, timeLogId, breakType) {
     }]).select('id').single();
     if (openErr) throw new Error('open fixture: ' + openErr.message);
     const rc = await emp('I want to claim the open shift today.');
+    console.log('    [bot] ' + (rc || '').slice(0, 220));
     checkReply('employee claim open shift', rc, [['says the claim went in', /claim|pending/i]]);
     let { data: after } = await db3.from('shifts').select('status, claimed_by').eq('id', openShift.id).single();
     check('claim recorded as pending for bot1', !!after && after.status === 'claim_pending' && after.claimed_by === bot1.id, JSON.stringify(after));
     const ra = await mgr('Approve the shift claim from Bot One.');
+    console.log('    [bot] ' + (ra || '').slice(0, 220));
     checkReply('manager approve claim', ra, [['confirms approval', /approv/i]]);
     ({ data: after } = await db3.from('shifts').select('status, user_id').eq('id', openShift.id).single());
     check('claim approved into an assigned shift', !!after && after.status === 'assigned' && after.user_id === bot1.id, JSON.stringify(after));
@@ -342,11 +345,13 @@ async function appStartBreak(db, timeLogId, breakType) {
   // 24. Employee requests time off; manager approves it.
   try {
     const r = await emp('Request vacation from 2026-11-02 to 2026-11-04.');
+    console.log('    [bot] ' + (r || '').slice(0, 220));
     checkReply('employee request time off', r, [['mentions vacation', /vacation/i], ['says it is pending', /pending/i]]);
-    const { data: reqs } = await db1.from('time_off_requests').select('id, status, type')
+    const { data: reqs, error: reqErr } = await db1.from('time_off_requests').select('id, status, type')
       .eq('user_id', bot1.id).eq('start_date', '2026-11-02');
-    check('time-off request stored as pending', !!(reqs && reqs.length && reqs[0].status === 'pending'), JSON.stringify(reqs));
+    check('time-off request stored as pending', !!(reqs && reqs.length && reqs[0].status === 'pending'), JSON.stringify(reqs) + (reqErr ? ' err: ' + reqErr.message : ''));
     const ra = await mgr("Approve Bot One's time off request.");
+    console.log('    [bot] ' + (ra || '').slice(0, 220));
     checkReply('manager approve time off', ra, [['confirms approval', /approv/i]]);
     const { data: reqs2 } = await db1.from('time_off_requests').select('status').eq('user_id', bot1.id).eq('start_date', '2026-11-02');
     check('time-off request approved in DB', !!(reqs2 && reqs2.length && reqs2[0].status === 'approved'), JSON.stringify(reqs2));

@@ -385,7 +385,8 @@ WRITE ACTIONS - you can change data, not just read it:
 - Approve or deny a shift claim → review_shift_claim with the claimant's name.
 - Approve or deny time off → review_time_off with the employee's name.
 - If a write tool returns an error or a list to choose from, relay it and ask - never invent a person, worksite, date, or time.
-- After any successful write, say plainly what changed: who, what, and when, using the tool's own result.`;
+- After any successful write, say plainly what changed: who, what, and when, using the tool's own result.
+- NEVER say a shift was created or a request approved/denied unless the write tool returned success. If it returned success: false, relay the error plainly and do not soften it.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
@@ -413,7 +414,8 @@ CAPABILITIES:
 - Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
 - Schedule questions ("my shifts this week", "am I working Saturday") → get_schedule. Open shifts they could pick up → get_open_shifts.
 - To claim an open shift for them → claim_open_shift with the date. A claim is pending until a manager approves it - say that, never say the shift is confirmed as theirs.
-- To request time off for them → request_time_off with the type and dates. If the tool says the dates clash with an existing request or exceed their vacation balance, relay the numbers and ask how they want to adjust.
+- To request time off for them → you MUST call request_time_off with the type and dates; the request exists only if the tool returns success. If the tool says the dates clash with an existing request or exceed their vacation balance, relay the numbers and ask how they want to adjust.
+- Never tell the employee a claim or request went through unless the tool returned success: true. If a tool returns success: false, say plainly that it did not work and why.
 - Shift results include a ready-made "when" label in local time — use it word-for-word for the date and times instead of converting timestamps yourself. When you list open shifts, introduce them as open shifts the employee can claim (for example: "There is 1 open shift you can claim:") - never show a bare list of times with no explanation.
 - Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
 
@@ -954,9 +956,10 @@ Deno.serve(async (req) => {
             let failure: string | null = null;
             if (!isOpen) {
               const { data: emps } = await supabase.from("profiles").select("id, full_name");
-              const m = matchByName(emps || [], empName);
-              if (!m) failure = `No team member matches "${empName}".`;
-              else { targetId = m.id; targetName = m.full_name; }
+              const m = matchByName(emps || [], (p: any) => p.full_name || "", empName);
+              if (m.kind === "none") failure = `No team member matches "${empName}".`;
+              else if (m.kind === "many") failure = `More than one team member matches "${empName}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.`;
+              else { targetId = m.value.id; targetName = m.value.full_name; }
             }
             const startMs = zonedTimeToUtc(args.date || "", args.start_time || "", callerTz);
             let endMs = zonedTimeToUtc(args.date || "", args.end_time || "", callerTz);
@@ -1009,10 +1012,11 @@ Deno.serve(async (req) => {
           } else {
             const decision = args.decision === "denied" ? "denied" : "approved";
             const { data: emps } = await supabase.from("profiles").select("id, full_name");
-            const target = matchByName(emps || [], (args.employee_name || "").trim());
-            if (!target) {
-              output = { success: false, error: `No team member matches "${args.employee_name}".` };
+            const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
+            if (m.kind !== "one") {
+              output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
             } else {
+              const target = m.value;
               const { data: claims } = await supabase.from("shifts")
                 .select("id, claimed_by, start_time, end_time")
                 .eq("status", "claim_pending")
@@ -1044,10 +1048,11 @@ Deno.serve(async (req) => {
           } else {
             const decision = args.decision === "denied" ? "denied" : "approved";
             const { data: emps } = await supabase.from("profiles").select("id, full_name");
-            const target = matchByName(emps || [], (args.employee_name || "").trim());
-            if (!target) {
-              output = { success: false, error: `No team member matches "${args.employee_name}".` };
+            const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
+            if (m.kind !== "one") {
+              output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
             } else {
+              const target = m.value;
               const { data: reqs } = await supabase.from("time_off_requests")
                 .select("id, type, start_date, end_date, half_day")
                 .eq("status", "pending")
