@@ -451,3 +451,71 @@ export function validateShiftInput(startIso: string, endIso: string): string | n
 export function shiftDurationHours(s: ShiftLike): number {
   return +(((new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 3600000).toFixed(2));
 }
+
+// ---- Time off ----
+// Dates are YYYY-MM-DD strings, parsed as UTC midnights so weekday math
+// never drifts with the local timezone.
+
+export interface TimeOffLike {
+  type: string;
+  start_date: string;
+  end_date: string;
+  half_day?: boolean;
+  status: string;
+}
+
+function dateOnlyMs(s: string): number {
+  const [y, m, d] = s.split("-").map(Number);
+  return Date.UTC(y, (m || 1) - 1, d || 1);
+}
+
+/** Business days (Mon-Fri) in an inclusive date range; a half-day
+ *  single-day request counts 0.5. Returns 0 for invalid/reversed ranges. */
+export function countBusinessDays(startDate: string, endDate: string, halfDay = false): number {
+  const s = dateOnlyMs(startDate);
+  const e = dateOnlyMs(endDate);
+  if (Number.isNaN(s) || Number.isNaN(e) || e < s) return 0;
+  if (halfDay && startDate === endDate) {
+    const dow = new Date(s).getUTCDay();
+    return dow === 0 || dow === 6 ? 0 : 0.5;
+  }
+  let count = 0;
+  const d = new Date(s);
+  while (d.getTime() <= e) {
+    const dow = d.getUTCDay();
+    if (dow !== 0 && dow !== 6) count++;
+    d.setUTCDate(d.getUTCDate() + 1);
+  }
+  return count;
+}
+
+/** Inclusive date-range overlap (sharing a day counts as overlapping). */
+export function dateRangesOverlap(
+  a: { start_date: string; end_date: string },
+  b: { start_date: string; end_date: string },
+): boolean {
+  return a.start_date <= b.end_date && b.start_date <= a.end_date;
+}
+
+/** Approved vacation business days attributed to a calendar year
+ *  (by the request's start date). */
+export function vacationDaysUsed(requests: TimeOffLike[], year: number): number {
+  let used = 0;
+  for (const r of requests) {
+    if (r.status !== "approved" || r.type !== "Vacation") continue;
+    if (new Date(dateOnlyMs(r.start_date)).getUTCFullYear() !== year) continue;
+    used += countBusinessDays(r.start_date, r.end_date, !!r.half_day);
+  }
+  return +used.toFixed(1);
+}
+
+export interface VacationBalance {
+  entitlement: number;
+  used: number;
+  remaining: number;
+}
+
+export function vacationBalance(entitlement: number, requests: TimeOffLike[], year: number): VacationBalance {
+  const used = vacationDaysUsed(requests, year);
+  return { entitlement, used, remaining: +(entitlement - used).toFixed(1) };
+}

@@ -19,7 +19,7 @@ export default function UsersScreen() {
   const [worksites, setWorksites] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [savingEmp, setSavingEmp] = useState(false);
-  const [empForm, setEmpForm] = useState({ job_title: '', department: '', employee_number: '', start_date: '', employment_type: '', primary_worksite_id: '' });
+  const [empForm, setEmpForm] = useState({ job_title: '', department: '', employee_number: '', start_date: '', employment_type: '', primary_worksite_id: '', vacation_days_entitlement: '10' });
 
   useEffect(() => { init(); }, []);
 
@@ -45,7 +45,7 @@ export default function UsersScreen() {
   const loadUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('id, full_name, role, created_at, job_title, department, start_date, employment_type, primary_worksite_id, employee_number')
+      .select('id, full_name, role, created_at, job_title, department, start_date, employment_type, primary_worksite_id, employee_number, vacation_days_entitlement')
       .order('created_at', { ascending: true });
     if (!error) setUsers(data || []);
   };
@@ -74,6 +74,7 @@ export default function UsersScreen() {
       start_date: user.start_date || '',
       employment_type: user.employment_type || '',
       primary_worksite_id: user.primary_worksite_id || '',
+      vacation_days_entitlement: user.vacation_days_entitlement != null ? String(user.vacation_days_entitlement) : '10',
     });
     setEditingId(user.id);
   };
@@ -81,6 +82,11 @@ export default function UsersScreen() {
   const saveEmployment = async (userId) => {
     if (empForm.start_date && !/^\d{4}-\d{2}-\d{2}$/.test(empForm.start_date.trim())) {
       setMessage('Start date must be YYYY-MM-DD.');
+      return;
+    }
+    const ent = parseFloat(empForm.vacation_days_entitlement);
+    if (Number.isNaN(ent) || ent < 0) {
+      setMessage('Vacation entitlement must be a number, 0 or more.');
       return;
     }
     setSavingEmp(true);
@@ -92,6 +98,7 @@ export default function UsersScreen() {
       start_date: empForm.start_date.trim() || null,
       employment_type: empForm.employment_type || null,
       primary_worksite_id: empForm.primary_worksite_id || null,
+      vacation_days_entitlement: ent,
     }).eq('id', userId);
     if (error) {
       setMessage('Could not save employment details: ' + error.message);
@@ -219,6 +226,8 @@ export default function UsersScreen() {
                 <TextInput style={styles.empInput} value={empForm.department} onChangeText={(v) => setEmpForm({ ...empForm, department: v })} placeholder="e.g. Kitchen" placeholderTextColor={colors.inputPlaceholder} />
                 <Text style={styles.empLabel}>Employee #</Text>
                 <TextInput style={styles.empInput} value={empForm.employee_number} onChangeText={(v) => setEmpForm({ ...empForm, employee_number: v })} placeholder="e.g. 1042" placeholderTextColor={colors.inputPlaceholder} />
+                <Text style={styles.empLabel}>Vacation entitlement (days per year)</Text>
+                <TextInput style={styles.empInput} value={empForm.vacation_days_entitlement} onChangeText={(v) => setEmpForm({ ...empForm, vacation_days_entitlement: v })} placeholder="10" placeholderTextColor={colors.inputPlaceholder} keyboardType="decimal-pad" />
                 <Text style={styles.empLabel}>Start date</Text>
                 <TextInput style={styles.empInput} value={empForm.start_date} onChangeText={(v) => setEmpForm({ ...empForm, start_date: v })} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
                 <Text style={styles.empLabel}>Employment type</Text>

@@ -41,6 +41,7 @@ export default function ScheduleScreen() {
   const [businessId, setBusinessId] = useState(null);
   const [weekOffset, setWeekOffset] = useState(0);
   const [shifts, setShifts] = useState([]);
+  const [leaves, setLeaves] = useState([]);
   const [people, setPeople] = useState([]);
   const [worksites, setWorksites] = useState([]);
   const [message, setMessage] = useState('');
@@ -88,6 +89,17 @@ export default function ScheduleScreen() {
     if (error) { setSetupMissing(true); setShifts([]); return; }
     setSetupMissing(false);
     setShifts(data || []);
+    // Approved time off overlapping this week (tolerant: table may not
+    // exist yet if the time-off update has not been applied).
+    const p2 = (n) => String(n).padStart(2, '0');
+    const fmtD = (ms) => { const d = new Date(ms); return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`; };
+    const { data: lv } = await supabase
+      .from('time_off_requests')
+      .select('user_id, type, start_date, end_date')
+      .eq('status', 'approved')
+      .lte('start_date', fmtD(weekEnd - DAY_MS))
+      .gte('end_date', fmtD(weekStart));
+    setLeaves(lv || []);
   };
 
   const nameOf = (id) => {
@@ -323,6 +335,15 @@ export default function ScheduleScreen() {
                     <View style={styles.todayPill}><Text style={styles.todayPillText}>TODAY</Text></View>
                   )}
                 </View>
+                {(() => {
+                  const p2 = (n) => String(n).padStart(2, '0');
+                  const dd = new Date(d.dayMs);
+                  const dayStr = `${dd.getFullYear()}-${p2(dd.getMonth() + 1)}-${p2(dd.getDate())}`;
+                  const onLeave = leaves.filter((l) => l.start_date <= dayStr && l.end_date >= dayStr);
+                  return onLeave.length > 0 ? (
+                    <Text style={styles.leaveLine}>On leave: {onLeave.map((l) => `${nameOf(l.user_id)} (${l.type})`).join(', ')}</Text>
+                  ) : null;
+                })()}
                 {d.shifts.length === 0 ? (
                   <Text style={styles.dayEmpty}>No shifts</Text>
                 ) : d.shifts.map((s) => {
@@ -421,6 +442,7 @@ const styles = StyleSheet.create({
   todayPill: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 2, paddingHorizontal: 8 },
   todayPillText: { ...type.label, color: colors.accent },
   dayEmpty: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, paddingLeft: spacing.xs },
+  leaveLine: { fontFamily: fontFamily.semibold, fontSize: 13, color: colors.warning, paddingLeft: spacing.xs },
   shiftCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   shiftCardMine: { borderColor: colors.accentBorder },
   shiftTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.xs },

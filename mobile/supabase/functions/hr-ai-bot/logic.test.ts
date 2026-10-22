@@ -17,6 +17,10 @@ import {
   shiftsOverlap,
   validateShiftInput,
   shiftDurationHours,
+  countBusinessDays,
+  dateRangesOverlap,
+  vacationDaysUsed,
+  vacationBalance,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
 } from "./logic";
@@ -409,5 +413,39 @@ describe("shift scheduling helpers", () => {
 
   test("duration hours", () => {
     expect(shiftDurationHours({ start_time: S(9), end_time: S(17, 30) })).toBe(8.5);
+  });
+});
+
+describe("time-off helpers", () => {
+  // Oct 2026: Mon 19, Tue 20, Wed 21, Thu 22, Fri 23, Sat 24, Sun 25, Mon 26.
+  test("business days skip weekends", () => {
+    expect(countBusinessDays("2026-10-19", "2026-10-23")).toBe(5);
+    expect(countBusinessDays("2026-10-19", "2026-10-26")).toBe(6);
+    expect(countBusinessDays("2026-10-24", "2026-10-25")).toBe(0);
+    expect(countBusinessDays("2026-10-23", "2026-10-19")).toBe(0);
+  });
+
+  test("half day counts 0.5 on a weekday, 0 on a weekend", () => {
+    expect(countBusinessDays("2026-10-21", "2026-10-21", true)).toBe(0.5);
+    expect(countBusinessDays("2026-10-24", "2026-10-24", true)).toBe(0);
+    expect(countBusinessDays("2026-10-21", "2026-10-21")).toBe(1);
+  });
+
+  test("date ranges overlap inclusively", () => {
+    const a = { start_date: "2026-10-19", end_date: "2026-10-21" };
+    expect(dateRangesOverlap(a, { start_date: "2026-10-21", end_date: "2026-10-23" })).toBe(true);
+    expect(dateRangesOverlap(a, { start_date: "2026-10-22", end_date: "2026-10-23" })).toBe(false);
+  });
+
+  test("vacation balance counts approved vacation only, by year", () => {
+    const reqs = [
+      { type: "Vacation", start_date: "2026-10-19", end_date: "2026-10-21", status: "approved" },   // 3
+      { type: "Vacation", start_date: "2026-10-22", end_date: "2026-10-22", half_day: true, status: "approved" }, // 0.5
+      { type: "Vacation", start_date: "2026-11-02", end_date: "2026-11-06", status: "pending" },    // ignored
+      { type: "Sick", start_date: "2026-10-19", end_date: "2026-10-20", status: "approved" },       // ignored
+      { type: "Vacation", start_date: "2025-12-29", end_date: "2025-12-31", status: "approved" },   // other year
+    ];
+    expect(vacationDaysUsed(reqs, 2026)).toBe(3.5);
+    expect(vacationBalance(10, reqs, 2026)).toEqual({ entitlement: 10, used: 3.5, remaining: 6.5 });
   });
 });
