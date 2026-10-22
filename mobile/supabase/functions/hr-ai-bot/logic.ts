@@ -519,3 +519,97 @@ export function vacationBalance(entitlement: number, requests: TimeOffLike[], ye
   const used = vacationDaysUsed(requests, year);
   return { entitlement, used, remaining: +(entitlement - used).toFixed(1) };
 }
+
+// ---- Planned vs actual ----
+// A planned shift counts as worked when the employee has any clock-in on
+// the same local calendar day. Hours are gross (breaks not deducted),
+// matching the overtime and audit views.
+
+export interface PlannedShift {
+  user_id: string | null;
+  start_time: string;
+  end_time: string;
+}
+
+export interface PlannedVsActualRow {
+  userId: string;
+  plannedHours: number;
+  actualHours: number;
+  /** actual - planned (negative = under plan). */
+  varianceHours: number;
+  plannedCount: number;
+  workedCount: number;
+  /** Planned shifts fully in the past with no clock-in that day. */
+  missedCount: number;
+  /** Clock-ins on days with no planned shift. */
+  unscheduledCount: number;
+}
+
+function localDayKey(ms: number): string {
+  const d = new Date(ms);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+export function plannedVsActual(
+  shifts: PlannedShift[],
+  logs: WeeklyShiftLog[],
+  weekStart: number,
+  now: number,
+): PlannedVsActualRow[] {
+  const weekEnd = weekStart + 7 * 24 * 3600 * 1000;
+  const rows = new Map<string, PlannedVsActualRow>();
+  const ensure = (userId: string): PlannedVsActualRow => {
+    let r = rows.get(userId);
+    if (!r) {
+      r = { userId, plannedHours: 0, actualHours: 0, varianceHours: 0, plannedCount: 0, workedCount: 0, missedCount: 0, unscheduledCount: 0 };
+      rows.set(userId, r);
+    }
+    return r;
+  };
+
+  const logDaysByUser = new Map<string, Set<string>>();
+  for (const l of logs) {
+    const ci = Date.parse(l.clock_in);
+    if (Number.isNaN(ci)) continue;
+    if (!logDaysByUser.has(l.user_id)) logDaysByUser.set(l.user_id, new Set());
+    logDaysByUser.get(l.user_id)!.add(localDayKey(ci));
+  }
+  const plannedDaysByUser = new Map<string, Set<string>>();
+  for (const s of shifts) {
+    if (!s.user_id) continue;
+    const st = Date.parse(s.start_time);
+    if (Number.isNaN(st)) continue;
+    if (!plannedDaysByUser.has(s.user_id)) plannedDaysByUser.set(s.user_id, new Set());
+    plannedDaysByUser.get(s.user_id)!.add(localDayKey(st));
+  }
+
+  for (const s of shifts) {
+    if (!s.user_id) continue;
+    const st = Date.parse(s.start_time);
+    const en = Date.parse(s.end_time);
+    if (Number.isNaN(st) || Number.isNaN(en) || st < weekStart || st >= weekEnd) continue;
+    const row = ensure(s.user_id);
+    row.plannedCount++;
+    row.plannedHours += Math.max(0, (en - st) / 3600000);
+    const worked = logDaysByUser.get(s.user_id)?.has(localDayKey(st)) ?? false;
+    if (worked) row.workedCount++;
+    else if (en <= now) row.missedCount++;
+  }
+
+  for (const l of logs) {
+    const ci = Date.parse(l.clock_in);
+    if (Number.isNaN(ci) || ci < weekStart || ci >= weekEnd) continue;
+    const row = ensure(l.user_id);
+    const co = l.clock_out ? Date.parse(l.clock_out) : now;
+    if (!Number.isNaN(co)) row.actualHours += Math.max(0, (co - ci) / 3600000);
+    const scheduled = plannedDaysByUser.get(l.user_id)?.has(localDayKey(ci)) ?? false;
+    if (!scheduled) row.unscheduledCount++;
+  }
+
+  for (const r of rows.values()) {
+    r.plannedHours = +r.plannedHours.toFixed(2);
+    r.actualHours = +r.actualHours.toFixed(2);
+    r.varianceHours = +(r.actualHours - r.plannedHours).toFixed(2);
+  }
+  return [...rows.values()];
+}

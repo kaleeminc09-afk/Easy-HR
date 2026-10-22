@@ -396,6 +396,11 @@ export default function ManagerDashboard() {
               <Text style={styles.navButtonText}>Time Off</Text>
             </TouchableOpacity>
           </Link>
+          <Link href="/reports" asChild>
+            <TouchableOpacity style={styles.navButton}>
+              <Text style={styles.navButtonText}>Reports</Text>
+            </TouchableOpacity>
+          </Link>
           <Link href="/schedule" asChild>
             <TouchableOpacity style={styles.navButton}>
               <Text style={styles.navButtonText}>Schedule</Text>

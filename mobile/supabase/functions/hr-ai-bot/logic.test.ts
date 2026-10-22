@@ -19,6 +19,7 @@ import {
   shiftDurationHours,
   countBusinessDays,
   dateRangesOverlap,
+  plannedVsActual,
   vacationDaysUsed,
   vacationBalance,
   OT_THRESHOLD_HOURS,
@@ -447,5 +448,47 @@ describe("time-off helpers", () => {
     ];
     expect(vacationDaysUsed(reqs, 2026)).toBe(3.5);
     expect(vacationBalance(10, reqs, 2026)).toEqual({ entitlement: 10, used: 3.5, remaining: 6.5 });
+  });
+});
+
+describe("plannedVsActual", () => {
+  // Week of Mon Oct 19, 2026 (local). "Now" = Sat Oct 24 noon, so Wed's
+  // shift is fully in the past.
+  const weekStart = new Date(2026, 9, 19).getTime();
+  const now = new Date(2026, 9, 24, 12).getTime();
+  const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m).toISOString();
+
+  test("matches plan to actual by day; flags missed and unscheduled", () => {
+    const shifts = [
+      { user_id: "asha", start_time: at(19, 9), end_time: at(19, 17) },  // Mon, worked
+      { user_id: "asha", start_time: at(21, 9), end_time: at(21, 17) },  // Wed, missed
+      { user_id: null, start_time: at(20, 9), end_time: at(20, 17) },    // open shift, ignored
+    ];
+    const logs = [
+      { user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17) },   // 8h on plan
+      { user_id: "ben", clock_in: at(20, 10), clock_out: at(20, 14) },   // 4h, no plan
+      { user_id: "ben", clock_in: at(12, 10), clock_out: at(12, 14) },   // prior week, ignored
+    ];
+    const rows = plannedVsActual(shifts, logs, weekStart, now);
+    const asha = rows.find((r) => r.userId === "asha")!;
+    expect(asha.plannedHours).toBe(16);
+    expect(asha.actualHours).toBe(8);
+    expect(asha.varianceHours).toBe(-8);
+    expect(asha.plannedCount).toBe(2);
+    expect(asha.workedCount).toBe(1);
+    expect(asha.missedCount).toBe(1);
+    expect(asha.unscheduledCount).toBe(0);
+    const ben = rows.find((r) => r.userId === "ben")!;
+    expect(ben.plannedHours).toBe(0);
+    expect(ben.actualHours).toBe(4);
+    expect(ben.varianceHours).toBe(4);
+    expect(ben.unscheduledCount).toBe(1);
+  });
+
+  test("a future unworked shift is not counted as missed", () => {
+    const shifts = [{ user_id: "asha", start_time: at(23, 9), end_time: at(23, 17) }]; // Fri, ends after "now"? no: ends Fri 17:00 < Sat noon -> missed
+    const rows = plannedVsActual(shifts, [], weekStart, new Date(2026, 9, 21, 12).getTime()); // now = Wed noon, Fri shift upcoming
+    expect(rows[0].plannedCount).toBe(1);
+    expect(rows[0].missedCount).toBe(0);
   });
 });
