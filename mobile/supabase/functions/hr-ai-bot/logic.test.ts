@@ -24,6 +24,7 @@ import {
   vacationBalance,
   sanitizeFileName,
   buildStoragePath,
+  zonedTimeToUtc,
   formatFileSize,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
@@ -512,5 +513,18 @@ describe("document helpers", () => {
     expect(formatFileSize(2048)).toBe("2.0 KB");
     expect(formatFileSize(3 * 1024 * 1024)).toBe("3.0 MB");
     expect(formatFileSize(null)).toBe("Unknown size");
+  });
+});
+
+describe("zonedTimeToUtc", () => {
+  test("converts Toronto wall time to UTC in EDT and EST", () => {
+    expect(zonedTimeToUtc("2026-10-23", "09:00", "America/Toronto")).toBe(Date.UTC(2026, 9, 23, 13, 0));
+    expect(zonedTimeToUtc("2026-01-15", "09:00", "America/Toronto")).toBe(Date.UTC(2026, 0, 15, 14, 0));
+    expect(zonedTimeToUtc("2026-10-23", "09:00", "UTC")).toBe(Date.UTC(2026, 9, 23, 9, 0));
+  });
+
+  test("bad input is NaN", () => {
+    expect(Number.isNaN(zonedTimeToUtc("", "09:00", "UTC"))).toBe(true);
+    expect(Number.isNaN(zonedTimeToUtc("2026-10-23", "", "UTC"))).toBe(true);
   });
 });

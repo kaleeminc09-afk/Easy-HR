@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -167,6 +167,58 @@ const managerTools = [
         required: ["employee_name"],
       },
     },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_shift",
+      description: "Creates a scheduled shift. Use for 'schedule Asha on Friday 9 to 5', 'add an open shift Saturday 10-2'. employee_name may be omitted (or open_shift true) for an open shift anyone can claim.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "Who the shift is for. Omit for an open shift." },
+          open_shift: { type: "boolean", description: "True to create an open (unassigned) shift." },
+          date: { type: "string", description: "Shift date, YYYY-MM-DD." },
+          start_time: { type: "string", description: "Start time, HH:MM 24-hour local time." },
+          end_time: { type: "string", description: "End time, HH:MM 24-hour local time. Earlier than start means it ends the next day." },
+          worksite_name: { type: "string", description: "Optional worksite name." },
+          notes: { type: "string", description: "Optional note for the shift." },
+        },
+        required: ["date", "start_time", "end_time"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_shift_claim",
+      description: "Approves or denies an employee's pending claim on an open shift. Use for 'approve Ben's claim', 'deny Asha's claim on the Friday shift'.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "The employee who claimed the shift." },
+          decision: { type: "string", enum: ["approved", "denied"] },
+          date: { type: "string", description: "Optional shift date YYYY-MM-DD to disambiguate when the employee has several pending claims." },
+        },
+        required: ["employee_name", "decision"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_time_off",
+      description: "Approves or denies a pending time-off request. Use for 'approve Sara's vacation', 'deny Ben's time off'.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "The employee who requested the time off." },
+          decision: { type: "string", enum: ["approved", "denied"] },
+          date: { type: "string", description: "Optional request start date YYYY-MM-DD to disambiguate." },
+        },
+        required: ["employee_name", "decision"],
+      },
+    },
   }
 ];
 
@@ -245,6 +297,39 @@ const employeeTools = [
       description: "Shows the employee's own profile: job title, department, start date, employment type, primary worksite, phone, emergency contacts, and anything important that is missing. Use for 'my job title', 'who is my emergency contact', 'is my profile complete'.",
       parameters: { type: "object", properties: {}, required: [] },
     },
+  },
+  {
+    type: "function",
+    function: {
+      name: "claim_open_shift",
+      description: "Claims an open shift for the employee (goes to the manager for approval). Use for 'I'll take the open shift on Friday', 'claim the Saturday open shift'.",
+      parameters: {
+        type: "object",
+        properties: {
+          date: { type: "string", description: "The open shift's date, YYYY-MM-DD." },
+          start_time: { type: "string", description: "Optional start time HH:MM to pick between several open shifts that day." },
+        },
+        required: ["date"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "request_time_off",
+      description: "Submits a time-off request for the employee (pending manager approval). Use for 'request vacation Nov 2 to 4', 'book a sick day tomorrow'.",
+      parameters: {
+        type: "object",
+        properties: {
+          type: { type: "string", enum: ["Vacation", "Sick", "Personal", "Unpaid"] },
+          start_date: { type: "string", description: "First day off, YYYY-MM-DD." },
+          end_date: { type: "string", description: "Last day off, YYYY-MM-DD." },
+          half_day: { type: "boolean", description: "True only for a half day (start and end the same day)." },
+          reason: { type: "string", description: "Optional reason." },
+        },
+        required: ["type", "start_date", "end_date"],
+      },
+    },
   }
 ];
 
@@ -284,7 +369,7 @@ TASK DELEGATION:
 
 SCHEDULE:
 - Rota questions ("who's scheduled Saturday", "shifts this week") → get_schedule; pick the range from the wording (today / this_week / next_week).
-- Open shifts and pending claims → get_open_shifts. You cannot approve or deny claims in chat yet — point the manager to the Schedule screen for approvals.
+- Open shifts and pending claims → get_open_shifts. To approve or deny a claim, use review_shift_claim.
 - Shift results include a ready-made "when" label in the team's local time — use it word-for-word for the date and times instead of converting timestamps yourself.
 
 OVERTIME & COMPLIANCE:
@@ -293,7 +378,14 @@ OVERTIME & COMPLIANCE:
 
 PROFILES:
 - Job title, department, start date, phone, or emergency contact questions → get_employee_profile.
-- You never receive home addresses or dates of birth — if asked for those, say they are not available in chat.`;
+- You never receive home addresses or dates of birth — if asked for those, say they are not available in chat.
+
+WRITE ACTIONS - you can change data, not just read it:
+- Create a shift → create_shift. You need the employee (or an open shift), the date as YYYY-MM-DD, and start/end times in 24-hour HH:MM form.
+- Approve or deny a shift claim → review_shift_claim with the claimant's name.
+- Approve or deny time off → review_time_off with the employee's name.
+- If a write tool returns an error or a list to choose from, relay it and ask - never invent a person, worksite, date, or time.
+- After any successful write, say plainly what changed: who, what, and when, using the tool's own result.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
@@ -319,7 +411,9 @@ CAPABILITIES:
 - Team status: if they ask who's online, who's working, or who's on break, use get_team_status.
 - Geo-fence exception: if they need one, make sure you have their reason first (ask if missing), then call submit_exception_request with the reason. Their GPS is already in your context.
 - Blocker/issue report: call report_blocker with what they described, then confirm it is logged for their manager.
-- Schedule questions ("my shifts this week", "am I working Saturday") → get_schedule. Open shifts they could pick up → get_open_shifts; claiming happens in the Schedule tab, tell them to tap Claim there.
+- Schedule questions ("my shifts this week", "am I working Saturday") → get_schedule. Open shifts they could pick up → get_open_shifts.
+- To claim an open shift for them → claim_open_shift with the date. A claim is pending until a manager approves it - say that, never say the shift is confirmed as theirs.
+- To request time off for them → request_time_off with the type and dates. If the tool says the dates clash with an existing request or exceed their vacation balance, relay the numbers and ask how they want to adjust.
 - Shift results include a ready-made "when" label in local time — use it word-for-word for the date and times instead of converting timestamps yourself.
 - Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
 
@@ -377,7 +471,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({ error: "Your session has expired. Please sign in again." }), { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
     const effectiveUserId = authData.user.id;
-    const { data: myProfileRow } = await supabase.from("profiles").select("role").eq("id", effectiveUserId).single();
+    const { data: myProfileRow } = await supabase.from("profiles").select("role, full_name, business_id").eq("id", effectiveUserId).single();
     const dbRole = myProfileRow?.role || "employee";
     // Managers and admins both get the manager toolset.
     const effectiveRole = dbRole === "employee" ? "employee" : "manager";
@@ -388,11 +482,16 @@ Deno.serve(async (req) => {
       try { new Intl.DateTimeFormat("en-US", { timeZone }); callerTz = timeZone; } catch { /* keep default */ }
     }
 
+    const callerName = (myProfileRow as any)?.full_name || "the user";
+    const callerBusinessId = (myProfileRow as any)?.business_id || null;
+    const todayInTz = new Intl.DateTimeFormat("en-US", { timeZone: callerTz, weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(new Date());
+    const contextNote = `\n\nCONTEXT: Today is ${todayInTz} in the team's timezone (${callerTz}). You are talking to ${callerName} (${effectiveRole}). Convert relative dates like "Friday" or "next Monday" into YYYY-MM-DD dates using today as the anchor. Times the user gives are local wall-clock times in ${callerTz}; pass them to tools as HH:MM in 24-hour form.`;
+
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
 
     let messages = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPrompt + contextNote },
       ...cleanHistory,
       { role: "user", content: prompt },
     ];
@@ -842,6 +941,210 @@ Deno.serve(async (req) => {
                 phone: p.phone || undefined,
                 emergency_contacts: contacts,
               };
+            }
+          }
+        } else if (fn === "create_shift") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can create shifts." };
+          } else {
+            const empName = (args.employee_name || "").trim();
+            const isOpen = !!args.open_shift || !empName;
+            let targetId: string | null = null;
+            let targetName = "Open shift";
+            let failure: string | null = null;
+            if (!isOpen) {
+              const { data: emps } = await supabase.from("profiles").select("id, full_name");
+              const m = matchByName(emps || [], empName);
+              if (!m) failure = `No team member matches "${empName}".`;
+              else { targetId = m.id; targetName = m.full_name; }
+            }
+            const startMs = zonedTimeToUtc(args.date || "", args.start_time || "", callerTz);
+            let endMs = zonedTimeToUtc(args.date || "", args.end_time || "", callerTz);
+            if (!failure && (Number.isNaN(startMs) || Number.isNaN(endMs))) failure = "I could not read that date or time. Use a date like 2026-10-23 and 24-hour times like 09:00.";
+            if (!failure && endMs <= startMs) endMs += 24 * 3600 * 1000; // overnight
+            let worksiteId: string | null = null;
+            let worksiteName = "No worksite";
+            if (!failure && args.worksite_name) {
+              const { data: sites } = await supabase.from("worksites").select("id, name");
+              const sm = (sites || []).find((s: any) => (s.name || "").toLowerCase().includes(String(args.worksite_name).toLowerCase()));
+              if (!sm) failure = `No worksite matches "${args.worksite_name}". Sites on file: ${(sites || []).map((s: any) => s.name).join(", ") || "none"}.`;
+              else { worksiteId = sm.id; worksiteName = sm.name; }
+            }
+            if (!failure) {
+              const v = validateShiftInput(startMs, endMs);
+              if (!v.ok) failure = v.error || "That shift does not look valid.";
+            }
+            if (!failure && targetId) {
+              const { data: existing } = await supabase.from("shifts")
+                .select("start_time, end_time")
+                .eq("user_id", targetId)
+                .lt("start_time", new Date(endMs).toISOString())
+                .gt("end_time", new Date(startMs).toISOString());
+              const conflict = (existing || []).find((s: any) => shiftsOverlap(startMs, endMs, Date.parse(s.start_time), Date.parse(s.end_time)));
+              if (conflict) failure = `${targetName} already has a shift then (${fmtWhen(conflict.start_time, conflict.end_time, callerTz)}). Pick a different time or delete that shift first.`;
+            }
+            if (failure) {
+              output = { success: false, error: failure };
+            } else {
+              const startIso = new Date(startMs).toISOString();
+              const endIso = new Date(endMs).toISOString();
+              const { error: insErr } = await supabase.from("shifts").insert([{
+                business_id: callerBusinessId,
+                user_id: targetId,
+                worksite_id: worksiteId,
+                start_time: startIso,
+                end_time: endIso,
+                status: isOpen ? "open" : "assigned",
+                notes: args.notes || null,
+                created_by: effectiveUserId,
+              }]);
+              output = insErr
+                ? { success: false, error: "Could not create the shift: " + insErr.message }
+                : { success: true, created: { employee: targetName, when: fmtWhen(startIso, endIso, callerTz), worksite: worksiteName } };
+            }
+          }
+        } else if (fn === "review_shift_claim") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can review claims." };
+          } else {
+            const decision = args.decision === "denied" ? "denied" : "approved";
+            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const target = matchByName(emps || [], (args.employee_name || "").trim());
+            if (!target) {
+              output = { success: false, error: `No team member matches "${args.employee_name}".` };
+            } else {
+              const { data: claims } = await supabase.from("shifts")
+                .select("id, claimed_by, start_time, end_time")
+                .eq("status", "claim_pending")
+                .eq("claimed_by", target.id);
+              let matches = claims || [];
+              if (args.date) {
+                const dayInTz = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: callerTz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+                matches = matches.filter((c: any) => dayInTz(c.start_time) === args.date);
+              }
+              if (matches.length === 0) {
+                output = { success: false, error: `${target.full_name} has no pending shift claim${args.date ? " on that date" : ""}.` };
+              } else if (matches.length > 1) {
+                output = { success: false, needs_choice: true, claims: matches.map((c: any) => fmtWhen(c.start_time, c.end_time, callerTz)), error: `${target.full_name} has ${matches.length} pending claims. Ask which date, then call again with the date.` };
+              } else {
+                const c: any = matches[0];
+                const patch = decision === "approved"
+                  ? { status: "assigned", user_id: c.claimed_by, claimed_by: null }
+                  : { status: "open", claimed_by: null };
+                const { error: upErr } = await supabase.from("shifts").update(patch).eq("id", c.id);
+                output = upErr
+                  ? { success: false, error: "Could not update the claim: " + upErr.message }
+                  : { success: true, claim: { employee: target.full_name, when: fmtWhen(c.start_time, c.end_time, callerTz), decision } };
+              }
+            }
+          }
+        } else if (fn === "review_time_off") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can review time off." };
+          } else {
+            const decision = args.decision === "denied" ? "denied" : "approved";
+            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const target = matchByName(emps || [], (args.employee_name || "").trim());
+            if (!target) {
+              output = { success: false, error: `No team member matches "${args.employee_name}".` };
+            } else {
+              const { data: reqs } = await supabase.from("time_off_requests")
+                .select("id, type, start_date, end_date, half_day")
+                .eq("status", "pending")
+                .eq("user_id", target.id)
+                .order("start_date", { ascending: true });
+              let matches = reqs || [];
+              if (args.date) matches = matches.filter((r: any) => r.start_date === args.date);
+              if (matches.length === 0) {
+                output = { success: false, error: `${target.full_name} has no pending time-off request${args.date ? " starting on that date" : ""}.` };
+              } else if (matches.length > 1) {
+                output = { success: false, needs_choice: true, requests: matches.map((r: any) => `${r.type} ${r.start_date} to ${r.end_date}`), error: `${target.full_name} has ${matches.length} pending requests. Ask which one (by start date), then call again with the date.` };
+              } else {
+                const r: any = matches[0];
+                const { error: upErr } = await supabase.from("time_off_requests")
+                  .update({ status: decision, reviewed_by: effectiveUserId })
+                  .eq("id", r.id);
+                output = upErr
+                  ? { success: false, error: "Could not update the request: " + upErr.message }
+                  : { success: true, time_off: { employee: target.full_name, type: r.type, dates: `${r.start_date} to ${r.end_date}`, days: countBusinessDays(r.start_date, r.end_date, !!r.half_day), decision } };
+              }
+            }
+          }
+        } else if (fn === "claim_open_shift") {
+          const dayStart = zonedTimeToUtc(args.date || "", "00:00", callerTz);
+          if (Number.isNaN(dayStart)) {
+            output = { success: false, error: "I could not read that date. Use YYYY-MM-DD." };
+          } else {
+            const { data: opens } = await supabase.from("shifts")
+              .select("id, start_time, end_time, worksite_id")
+              .eq("status", "open")
+              .gte("start_time", new Date(dayStart).toISOString())
+              .lt("start_time", new Date(dayStart + 24 * 3600 * 1000).toISOString())
+              .order("start_time", { ascending: true });
+            let matches = opens || [];
+            if (args.start_time && matches.length > 1) {
+              const timeInTz = (iso: string) => new Intl.DateTimeFormat("en-GB", { timeZone: callerTz, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+              matches = matches.filter((s: any) => timeInTz(s.start_time) === args.start_time);
+            }
+            if (matches.length === 0) {
+              output = { success: false, error: `There are no open shifts on ${args.date}.` };
+            } else if (matches.length > 1) {
+              output = { success: false, needs_choice: true, open_shifts: matches.map((s: any) => fmtWhen(s.start_time, s.end_time, callerTz)), error: "More than one open shift that day. Ask which start time, then call again with start_time." };
+            } else {
+              const s: any = matches[0];
+              const { error: upErr } = await supabase.from("shifts")
+                .update({ status: "claim_pending", claimed_by: effectiveUserId })
+                .eq("id", s.id)
+                .eq("status", "open");
+              output = upErr
+                ? { success: false, error: "Could not claim that shift: " + upErr.message }
+                : { success: true, claimed: { when: fmtWhen(s.start_time, s.end_time, callerTz), status: "pending manager approval" } };
+            }
+          }
+        } else if (fn === "request_time_off") {
+          const TYPES = ["Vacation", "Sick", "Personal", "Unpaid"];
+          const type = TYPES.includes(args.type) ? args.type : "Vacation";
+          const start = args.start_date || "";
+          const end = args.end_date || start;
+          const half = !!args.half_day && start === end;
+          const days = countBusinessDays(start, end, half);
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end) || end < start) {
+            output = { success: false, error: "Dates must be YYYY-MM-DD with the end on or after the start." };
+          } else if (days <= 0) {
+            output = { success: false, error: "That range has no business days (Mon-Fri). Pick weekdays." };
+          } else {
+            const { data: myReqs } = await supabase.from("time_off_requests")
+              .select("type, start_date, end_date, half_day, status")
+              .eq("user_id", effectiveUserId)
+              .in("status", ["pending", "approved"]);
+            const clash = (myReqs || []).find((r: any) => dateRangesOverlap(r, { start_date: start, end_date: end }));
+            if (clash) {
+              output = { success: false, error: `Those dates overlap your ${String(clash.type).toLowerCase()} request (${clash.start_date} to ${clash.end_date}, ${clash.status}).` };
+            } else {
+              let remainingAfter: number | undefined;
+              let failure: string | null = null;
+              if (type === "Vacation") {
+                const { data: prof } = await supabase.from("profiles").select("vacation_days_entitlement").eq("id", effectiveUserId).single();
+                const entitlement = prof?.vacation_days_entitlement != null ? Number(prof.vacation_days_entitlement) : 10;
+                const bal = vacationBalance(entitlement, myReqs || [], Number(start.slice(0, 4)));
+                if (days > bal.remaining) failure = `This request is ${days} vacation days but only ${bal.remaining} of ${bal.entitlement} remain this year. Ask for fewer days or a different type.`;
+                else remainingAfter = +(bal.remaining - days).toFixed(1);
+              }
+              if (failure) {
+                output = { success: false, error: failure };
+              } else {
+                const { error: insErr } = await supabase.from("time_off_requests").insert([{
+                  business_id: callerBusinessId,
+                  user_id: effectiveUserId,
+                  type, start_date: start, end_date: end,
+                  half_day: half,
+                  reason: args.reason || null,
+                  status: "pending",
+                }]);
+                output = insErr
+                  ? { success: false, error: "Could not submit the request: " + insErr.message }
+                  : { success: true, requested: { type, dates: `${start} to ${end}`, days, status: "pending manager approval", ...(remainingAfter !== undefined ? { vacation_days_remaining_after: remainingAfter } : {}) } };
+              }
             }
           }
         } else if (fn === "get_my_profile") {

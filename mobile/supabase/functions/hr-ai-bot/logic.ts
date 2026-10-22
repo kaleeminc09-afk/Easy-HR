@@ -634,3 +634,27 @@ export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+/**
+ * Convert a wall-clock date + time in an IANA timezone to a UTC instant
+ * (ms). Two offset passes settle DST-boundary cases. NaN on bad input.
+ * Example: ("2026-10-23", "09:00", "America/Toronto") -> 13:00Z (EDT).
+ */
+export function zonedTimeToUtc(dateStr: string, timeStr: string, timeZone: string): number {
+  const [y, mo, d] = (dateStr || "").split("-").map(Number);
+  const [hh, mm] = (timeStr || "").split(":").map(Number);
+  if ([y, mo, d, hh, mm].some((n) => typeof n !== "number" || Number.isNaN(n))) return NaN;
+  const guess = Date.UTC(y, mo - 1, d, hh, mm);
+  const offsetAt = (utcMs: number): number => {
+    const parts = new Intl.DateTimeFormat("en-US", {
+      timeZone, hour12: false,
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+    }).formatToParts(new Date(utcMs));
+    const get = (t: string) => Number(parts.find((p) => p.type === t)?.value || 0);
+    const asUtc = Date.UTC(get("year"), get("month") - 1, get("day"), get("hour") % 24, get("minute"), get("second"));
+    return asUtc - utcMs;
+  };
+  const utc = guess - offsetAt(guess - offsetAt(guess));
+  return utc;
+}
