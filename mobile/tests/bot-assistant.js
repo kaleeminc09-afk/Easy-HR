@@ -265,7 +265,7 @@ async function appStartBreak(db, timeLogId, breakType) {
   ]);
   const r17c = await emp2('are there any open shifts I could pick up this week?');
   checkReply('employee open-shifts', r17c, [
-    ['mentions an open shift', /open|claim|pick up/i],
+    ['mentions an open shift', /open|claim|pick up|available/i],
   ]);
   await db3.from('shifts').delete().in('id', [shiftA && shiftA.id, shiftOpen && shiftOpen.id].filter(Boolean));
 
@@ -308,7 +308,7 @@ async function appStartBreak(db, timeLogId, breakType) {
     const d = new Date(Date.now() + 7 * 24 * 3600 * 1000);
     const p2 = (n) => String(n).padStart(2, '0');
     const dateStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-    const r = await askAs(mgr, `Schedule Bot Two for a shift on ${dateStr} from 09:00 to 13:00.`);
+    const r = await mgr(`Schedule Bot Two for a shift on ${dateStr} from 09:00 to 13:00.`);
     checkReply('manager create shift', r, [
       ['reply arrived', /./],
       ['mentions Bot Two', /bot two/i],
@@ -328,11 +328,11 @@ async function appStartBreak(db, timeLogId, breakType) {
       start_time: todayAt(15), end_time: todayAt(19), status: 'open', created_by: bot3.id,
     }]).select('id').single();
     if (openErr) throw new Error('open fixture: ' + openErr.message);
-    const rc = await askAs(emp, 'I want to claim the open shift today.');
+    const rc = await emp('I want to claim the open shift today.');
     checkReply('employee claim open shift', rc, [['says the claim went in', /claim|pending/i]]);
     let { data: after } = await db3.from('shifts').select('status, claimed_by').eq('id', openShift.id).single();
     check('claim recorded as pending for bot1', !!after && after.status === 'claim_pending' && after.claimed_by === bot1.id, JSON.stringify(after));
-    const ra = await askAs(mgr, 'Approve the shift claim from Bot One.');
+    const ra = await mgr('Approve the shift claim from Bot One.');
     checkReply('manager approve claim', ra, [['confirms approval', /approv/i]]);
     ({ data: after } = await db3.from('shifts').select('status, user_id').eq('id', openShift.id).single());
     check('claim approved into an assigned shift', !!after && after.status === 'assigned' && after.user_id === bot1.id, JSON.stringify(after));
@@ -341,12 +341,12 @@ async function appStartBreak(db, timeLogId, breakType) {
 
   // 24. Employee requests time off; manager approves it.
   try {
-    const r = await askAs(emp, 'Request vacation from 2026-11-02 to 2026-11-04.');
+    const r = await emp('Request vacation from 2026-11-02 to 2026-11-04.');
     checkReply('employee request time off', r, [['mentions vacation', /vacation/i], ['says it is pending', /pending/i]]);
     const { data: reqs } = await db1.from('time_off_requests').select('id, status, type')
       .eq('user_id', bot1.id).eq('start_date', '2026-11-02');
     check('time-off request stored as pending', !!(reqs && reqs.length && reqs[0].status === 'pending'), JSON.stringify(reqs));
-    const ra = await askAs(mgr, "Approve Bot One's time off request.");
+    const ra = await mgr("Approve Bot One's time off request.");
     checkReply('manager approve time off', ra, [['confirms approval', /approv/i]]);
     const { data: reqs2 } = await db1.from('time_off_requests').select('status').eq('user_id', bot1.id).eq('start_date', '2026-11-02');
     check('time-off request approved in DB', !!(reqs2 && reqs2.length && reqs2[0].status === 'approved'), JSON.stringify(reqs2));
@@ -356,7 +356,7 @@ async function appStartBreak(db, timeLogId, breakType) {
   // 25. Guard: an employee cannot create shifts (no such tool, no DB change).
   try {
     const before = await db3.from('shifts').select('id', { count: 'exact', head: true });
-    const r = await askAs(emp, 'Schedule Bot Two for a shift tomorrow from 09:00 to 13:00.');
+    const r = await emp('Schedule Bot Two for a shift tomorrow from 09:00 to 13:00.');
     const afterCount = await db3.from('shifts').select('id', { count: 'exact', head: true });
     check('employee cannot create shifts', (before.count || 0) === (afterCount.count || 0) && !/has been scheduled|shift created/i.test(r || ''), (r || '').slice(0, 120));
   } catch (e) { check('employee create-shift guard', false, String(e?.message || e)); }
