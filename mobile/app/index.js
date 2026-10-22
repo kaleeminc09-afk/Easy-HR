@@ -523,6 +523,11 @@ export default function App() {
               <Text style={styles.empNavButtonText}>Time Off</Text>
             </TouchableOpacity>
           </Link>
+          <Link href="/documents" asChild>
+            <TouchableOpacity style={styles.empNavButton}>
+              <Text style={styles.empNavButtonText}>Documents</Text>
+            </TouchableOpacity>
+          </Link>
           <Link href="/manager" asChild>
             <TouchableOpacity style={styles.empNavButton}>
               <Text style={styles.empNavButtonText}>Manager →</Text>

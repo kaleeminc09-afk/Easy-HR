@@ -613,3 +613,24 @@ export function plannedVsActual(
   }
   return [...rows.values()];
 }
+
+// ---- Documents ----
+
+/** Keep only safe characters for a storage object name. */
+export function sanitizeFileName(name: string): string {
+  const cleaned = name.replace(/[^a-zA-Z0-9._-]+/g, "_").replace(/^_+/, "");
+  return (cleaned || "file").slice(0, 80);
+}
+
+/** Object path inside the documents bucket: <userId>/<ts>-<safe name>.
+ *  The first segment is the security boundary the storage policies use. */
+export function buildStoragePath(userId: string, fileName: string, timestampMs: number): string {
+  return `${userId}/${timestampMs}-${sanitizeFileName(fileName)}`;
+}
+
+export function formatFileSize(bytes: number | null | undefined): string {
+  if (bytes == null || Number.isNaN(bytes)) return "Unknown size";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}

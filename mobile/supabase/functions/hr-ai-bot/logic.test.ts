@@ -22,6 +22,9 @@ import {
   plannedVsActual,
   vacationDaysUsed,
   vacationBalance,
+  sanitizeFileName,
+  buildStoragePath,
+  formatFileSize,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
 } from "./logic";
@@ -490,5 +493,24 @@ describe("plannedVsActual", () => {
     const rows = plannedVsActual(shifts, [], weekStart, new Date(2026, 9, 21, 12).getTime()); // now = Wed noon, Fri shift upcoming
     expect(rows[0].plannedCount).toBe(1);
     expect(rows[0].missedCount).toBe(0);
+  });
+});
+
+describe("document helpers", () => {
+  test("sanitizeFileName strips unsafe characters", () => {
+    expect(sanitizeFileName("my contract (final).pdf")).toBe("my_contract_final_.pdf");
+    expect(sanitizeFileName("a/b\\c.pdf")).toBe("a_b_c.pdf");
+    expect(sanitizeFileName("Résumé.pdf")).toBe("R_sum_.pdf");
+  });
+
+  test("buildStoragePath puts the user id first", () => {
+    expect(buildStoragePath("user-1", "ID Card.jpg", 1700000000000)).toBe("user-1/1700000000000-ID_Card.jpg");
+  });
+
+  test("formatFileSize scales units", () => {
+    expect(formatFileSize(512)).toBe("512 B");
+    expect(formatFileSize(2048)).toBe("2.0 KB");
+    expect(formatFileSize(3 * 1024 * 1024)).toBe("3.0 MB");
+    expect(formatFileSize(null)).toBe("Unknown size");
   });
 });
