@@ -103,6 +103,16 @@ describe("matchByName", () => {
     expect(m.kind).toBe("one");
   });
 
+  test("exact name beats longer substring match", () => {
+    const bots = [
+      { id: "b1", full_name: "Test Bot" },
+      { id: "b2", full_name: "Test Bot Two" },
+    ];
+    const m = matchByName(bots, getName, "Test Bot");
+    expect(m.kind).toBe("one");
+    if (m.kind === "one") expect(m.value.id).toBe("b1");
+  });
+
   test("ambiguous name returns many", () => {
     const m = matchByName(people, getName, "ahmed");
     expect(m.kind).toBe("many");

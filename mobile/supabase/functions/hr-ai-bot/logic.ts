@@ -47,6 +47,11 @@ export type NameMatch<T> =
 export function matchByName<T>(items: T[], getName: (t: T) => string, needle: string): NameMatch<T> {
   const n = needle.trim().toLowerCase();
   if (!n) return { kind: "none" };
+  // An exact full-name match wins over longer substring matches, so
+  // "Test Bot" resolves to Test Bot alone, not Test Bot + Test Bot Two.
+  const exact = items.filter((i) => getName(i).toLowerCase() === n);
+  if (exact.length === 1) return { kind: "one", value: exact[0] };
+  if (exact.length > 1) return { kind: "many", values: exact };
   const hits = items.filter((i) => getName(i).toLowerCase().includes(n));
   if (hits.length === 1) return { kind: "one", value: hits[0] };
   if (hits.length > 1) return { kind: "many", values: hits };
