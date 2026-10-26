@@ -524,6 +524,7 @@ Deno.serve(async (req) => {
 
       messages.push(choice);
 
+      const writeReplies: string[] = [];
       for (const toolCall of choice.tool_calls) {
         const fn = toolCall.function.name;
         const args = JSON.parse(toolCall.function.arguments || "{}");
@@ -1200,6 +1201,22 @@ Deno.serve(async (req) => {
           name: fn,
           content: JSON.stringify(output),
         });
+
+        // Deterministic write confirmations: the model has now
+        // contradicted successful writes three runs in a row (it
+        // re-checks after the write, finds the pending item gone,
+        // and reports that instead). A successful write is confirmed
+        // from the tool's own result, never re-paraphrased by the model.
+        if (output && output.success === true) {
+          if (fn === "create_shift" && output.created) writeReplies.push(`Shift created: ${output.created.employee}, ${output.created.when}.`);
+          else if (fn === "claim_open_shift" && output.claimed) writeReplies.push(`Your claim is in and pending manager approval for ${output.claimed.when}.`);
+          else if (fn === "review_shift_claim" && output.claim) writeReplies.push(`${output.claim.decision === "denied" ? "Denied" : "Approved"} the shift claim for ${output.claim.employee}, ${output.claim.when}.`);
+          else if (fn === "request_time_off" && output.requested) writeReplies.push(`Your ${output.requested.type} request for ${output.requested.dates} is pending manager approval.`);
+          else if (fn === "review_time_off" && output.time_off) writeReplies.push(`${output.time_off.decision === "denied" ? "Denied" : "Approved"} ${output.time_off.employee}'s ${output.time_off.type} request for ${output.time_off.dates}.`);
+        }
+      }
+      if (writeReplies.length > 0) {
+        return new Response(JSON.stringify({ reply: writeReplies.join(" ") }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
     }
 
