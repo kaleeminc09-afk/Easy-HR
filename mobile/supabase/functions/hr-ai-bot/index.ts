@@ -498,15 +498,26 @@ Deno.serve(async (req) => {
       { role: "user", content: prompt },
     ];
 
+    // Provider switch: AI_PROVIDER=together uses Together AI with the
+    // TOGETHER_API_KEY secret; anything else keeps Groq. Same model id
+    // ("openai/gpt-oss-120b") works on both, and Together is OpenAI-
+    // compatible including function calling, so no tool code changes.
+    const aiProvider = Deno.env.get("AI_PROVIDER") || "groq";
+    const aiApiUrl = aiProvider === "together"
+      ? "https://api.together.xyz/v1/chat/completions"
+      : "https://api.groq.com/openai/v1/chat/completions";
+    const aiApiKey = aiProvider === "together" ? (Deno.env.get("TOGETHER_API_KEY") || "") : GROQ_API_KEY;
+    const aiModel = Deno.env.get("AI_MODEL") || "openai/gpt-oss-120b";
+
     let iterations = 0;
     while (iterations < 4) {
       iterations++;
 
-      let response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      let response = await fetch(aiApiUrl, {
         method: "POST",
-        headers: { Authorization: `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
+        headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: Deno.env.get("AI_MODEL") || "openai/gpt-oss-120b",
+          model: aiModel,
           messages,
           tools,
           tool_choice: "auto",
@@ -514,7 +525,7 @@ Deno.serve(async (req) => {
       });
 
       let result = await response.json();
-      if (result.error) throw new Error(`Groq API Error: ${result.error.message || JSON.stringify(result.error)}`);
+      if (result.error) throw new Error(`AI provider error (${aiProvider}): ${result.error.message || JSON.stringify(result.error)}`);
 
       let choice = result.choices[0].message;
 
