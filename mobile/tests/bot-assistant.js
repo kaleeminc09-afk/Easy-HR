@@ -170,14 +170,14 @@ async function appStartBreak(db, timeLogId, breakType) {
     const d = new Date(Date.now() + 7 * 24 * 3600 * 1000);
     const p2 = (n) => String(n).padStart(2, '0');
     const dateStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-    const r = await mgr(`Schedule Bot Two for a shift on ${dateStr} from 09:00 to 13:00.`);
+    const r = await mgr(`Schedule Test Bot Two for a shift on ${dateStr} from 09:00 to 13:00.`);
     console.log('    [bot] ' + (r || '').slice(0, 220));
     checkReply('manager create shift', r, [
       ['reply arrived', /./],
       ['mentions Bot Two', /bot two/i],
     ]);
     const { data: created } = await db3.from('shifts').select('id, user_id, status')
-      .eq('user_id', bot2.id)
+      .eq('user_id', bot2)
       .gte('start_time', `${dateStr}T00:00:00`)
       .limit(5);
     check('created shift exists in DB as assigned', !!(created && created.some((s) => s.status === 'assigned')), JSON.stringify(created));
@@ -188,19 +188,19 @@ async function appStartBreak(db, timeLogId, breakType) {
   try {
     const { data: openShift, error: openErr } = await db3.from('shifts').insert([{
       business_id: null, user_id: null, worksite_id: null,
-      start_time: todayAt(15), end_time: todayAt(19), status: 'open', created_by: bot3.id,
+      start_time: todayAt(15), end_time: todayAt(19), status: 'open', created_by: bot3,
     }]).select('id').single();
     if (openErr) throw new Error('open fixture: ' + openErr.message);
     const rc = await emp('I want to claim the open shift today.');
     console.log('    [bot] ' + (rc || '').slice(0, 220));
     checkReply('employee claim open shift', rc, [['says the claim went in', /claim|pending/i]]);
     let { data: after } = await db3.from('shifts').select('status, claimed_by').eq('id', openShift.id).single();
-    check('claim recorded as pending for bot1', !!after && after.status === 'claim_pending' && after.claimed_by === bot1.id, JSON.stringify(after));
-    const ra = await mgr('Approve the shift claim from Bot One.');
+    check('claim recorded as pending for bot1', !!after && after.status === 'claim_pending' && after.claimed_by === bot1, JSON.stringify(after));
+    const ra = await mgr('Approve the shift claim from Test Bot.');
     console.log('    [bot] ' + (ra || '').slice(0, 220));
     checkReply('manager approve claim', ra, [['confirms approval', /approv/i]]);
     ({ data: after } = await db3.from('shifts').select('status, user_id').eq('id', openShift.id).single());
-    check('claim approved into an assigned shift', !!after && after.status === 'assigned' && after.user_id === bot1.id, JSON.stringify(after));
+    check('claim approved into an assigned shift', !!after && after.status === 'assigned' && after.user_id === bot1, JSON.stringify(after));
     await db3.from('shifts').delete().eq('id', openShift.id);
   } catch (e) { check('claim + approve flow', false, String(e?.message || e)); }
 
@@ -210,12 +210,12 @@ async function appStartBreak(db, timeLogId, breakType) {
     console.log('    [bot] ' + (r || '').slice(0, 220));
     checkReply('employee request time off', r, [['mentions vacation', /vacation/i], ['says it is pending', /pending/i]]);
     const { data: reqs, error: reqErr } = await db1.from('time_off_requests').select('id, status, type')
-      .eq('user_id', bot1.id).eq('start_date', '2026-11-02');
+      .eq('user_id', bot1).eq('start_date', '2026-11-02');
     check('time-off request stored as pending', !!(reqs && reqs.length && reqs[0].status === 'pending'), JSON.stringify(reqs) + (reqErr ? ' err: ' + reqErr.message : ''));
-    const ra = await mgr("Approve Bot One's time off request.");
+    const ra = await mgr("Approve Test Bot's time off request.");
     console.log('    [bot] ' + (ra || '').slice(0, 220));
     checkReply('manager approve time off', ra, [['confirms approval', /approv/i]]);
-    const { data: reqs2 } = await db1.from('time_off_requests').select('status').eq('user_id', bot1.id).eq('start_date', '2026-11-02');
+    const { data: reqs2 } = await db1.from('time_off_requests').select('status').eq('user_id', bot1).eq('start_date', '2026-11-02');
     check('time-off request approved in DB', !!(reqs2 && reqs2.length && reqs2[0].status === 'approved'), JSON.stringify(reqs2));
     if (reqs && reqs.length) await db1.from('time_off_requests').delete().eq('id', reqs[0].id);
   } catch (e) { check('time-off request + approve flow', false, String(e?.message || e)); }
@@ -223,7 +223,7 @@ async function appStartBreak(db, timeLogId, breakType) {
   // 25. Guard: an employee cannot create shifts (no such tool, no DB change).
   try {
     const before = await db3.from('shifts').select('id', { count: 'exact', head: true });
-    const r = await emp('Schedule Bot Two for a shift tomorrow from 09:00 to 13:00.');
+    const r = await emp('Schedule Test Bot Two for a shift tomorrow from 09:00 to 13:00.');
     const afterCount = await db3.from('shifts').select('id', { count: 'exact', head: true });
     check('employee cannot create shifts', (before.count || 0) === (afterCount.count || 0) && !/has been scheduled|shift created/i.test(r || ''), (r || '').slice(0, 120));
   } catch (e) { check('employee create-shift guard', false, String(e?.message || e)); }
