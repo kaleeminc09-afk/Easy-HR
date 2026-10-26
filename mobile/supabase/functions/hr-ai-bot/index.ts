@@ -526,6 +526,13 @@ Deno.serve(async (req) => {
             messages,
             tools,
             tool_choice: "auto",
+            // Together's gpt-oss reasoning trace shares the completion
+            // budget with the answer: with no cap set, the model hit its
+            // thought limit on the claim turn and returned a summary
+            // instead of calling the tool. Give it headroom, and keep
+            // reasoning shallow for these routine turns.
+            max_tokens: 8192,
+            ...(aiProvider === "together" ? { reasoning_effort: "low" } : {}),
           }),
         });
         result = await response.json();
