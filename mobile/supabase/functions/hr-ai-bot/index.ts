@@ -513,19 +513,28 @@ Deno.serve(async (req) => {
     while (iterations < 4) {
       iterations++;
 
-      let response = await fetch(aiApiUrl, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: aiModel,
-          messages,
-          tools,
-          tool_choice: "auto",
-        }),
-      });
-
-      let result = await response.json();
-      if (result.error) throw new Error(`AI provider error (${aiProvider}): ${result.error.message || JSON.stringify(result.error)}`);
+      // Together (like most hosted inference) can return transient 5xx
+      // "Internal server error" responses. Retry those inside the
+      // function instead of failing the whole chat turn on one bad call.
+      let result: any = null;
+      for (let attempt = 0; ; attempt++) {
+        const response = await fetch(aiApiUrl, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: aiModel,
+            messages,
+            tools,
+            tool_choice: "auto",
+          }),
+        });
+        result = await response.json();
+        if (!result.error) break;
+        const msg = result.error.message || JSON.stringify(result.error);
+        const retryable = response.status >= 500 || /internal server error|server error|temporarily|overloaded|502|503|504/i.test(msg);
+        if (!retryable || attempt >= 2) throw new Error(`AI provider error (${aiProvider}): ${msg}`);
+        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      }
 
       let choice = result.choices[0].message;
 
