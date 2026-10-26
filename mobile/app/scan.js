@@ -19,6 +19,8 @@ export default function ScanScreen() {
   const [session, setSession] = useState(null);
   const [authChecked, setAuthChecked] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [facing, setFacing] = useState('back');
+  const [cameraReady, setCameraReady] = useState(false);
   const [result, setResult] = useState(null);
   const handledRef = useRef(false);
 
@@ -168,12 +170,16 @@ export default function ScanScreen() {
       </View>
       <View style={styles.cameraWrap}>
         <CameraView
-          style={StyleSheet.absoluteFillObject}
-          facing="back"
+          style={{ flex: 1 }}
+          facing={facing}
           barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
           onBarcodeScanned={busy ? undefined : handleScan}
+          onCameraReady={() => setCameraReady(true)}
         />
         <View style={styles.frame} pointerEvents="none" />
+        <TouchableOpacity style={styles.flipButton} onPress={() => { setCameraReady(false); setFacing((f) => (f === 'back' ? 'front' : 'back')); }}>
+          <Text style={styles.flipButtonText}>Flip camera ({facing === 'back' ? 'back' : 'front'})</Text>
+        </TouchableOpacity>
         {busy && (
           <View style={styles.busyOverlay}>
             <ActivityIndicator size="large" color={colors.accent} />
@@ -182,6 +188,7 @@ export default function ScanScreen() {
         )}
       </View>
       <Text style={styles.hint}>Point at the worksite QR code. Scanning once clocks you in; scanning again clocks you out.</Text>
+      <Text style={styles.cameraStatus}>{cameraReady ? 'Camera ready' : 'Starting camera\u2026 if this stays, the camera did not initialise'}</Text>
     </SafeAreaView>
   );
 }
@@ -199,11 +206,14 @@ const styles = StyleSheet.create({
   backButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 15 },
   title: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 17 },
   headerSpacer: { width: 60 },
-  cameraWrap: { flex: 1, position: 'relative', overflow: 'hidden' },
+  cameraWrap: { flex: 1, position: 'relative', backgroundColor: '#000000' },
   frame: { position: 'absolute', top: '22%', left: '15%', right: '15%', aspectRatio: 1, borderWidth: 2, borderColor: colors.accent, borderRadius: radius.lg, backgroundColor: 'transparent' },
   busyOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(10, 14, 26, 0.75)', justifyContent: 'center', alignItems: 'center' },
   busyText: { marginTop: spacing.sm, color: colors.textPrimary, fontFamily: fontFamily.semibold },
   hint: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 14, textAlign: 'center', padding: spacing.lg },
+  flipButton: { position: 'absolute', bottom: 16, alignSelf: 'center', backgroundColor: 'rgba(10, 14, 26, 0.75)', borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md, paddingHorizontal: spacing.md, minHeight: 44, justifyContent: 'center' },
+  flipButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 14 },
+  cameraStatus: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, textAlign: 'center', paddingBottom: spacing.lg },
   resultCard: { width: '100%', borderWidth: 1, borderRadius: radius.md, padding: spacing.xl, alignItems: 'center', marginBottom: spacing.lg, backgroundColor: colors.surface },
   resultOk: { borderColor: colors.success },
   resultBad: { borderColor: colors.danger },
