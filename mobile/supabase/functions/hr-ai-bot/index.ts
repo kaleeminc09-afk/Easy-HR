@@ -506,7 +506,7 @@ Deno.serve(async (req) => {
         method: "POST",
         headers: { Authorization: `Bearer ${GROQ_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "openai/gpt-oss-120b",
+          model: Deno.env.get("AI_MODEL") || "openai/gpt-oss-120b",
           messages,
           tools,
           tool_choice: "auto",
@@ -974,8 +974,8 @@ Deno.serve(async (req) => {
               else { worksiteId = sm.id; worksiteName = sm.name; }
             }
             if (!failure) {
-              const v = validateShiftInput(startMs, endMs);
-              if (!v.ok) failure = v.error || "That shift does not look valid.";
+              const vErr = validateShiftInput(new Date(startMs).toISOString(), new Date(endMs).toISOString());
+              if (vErr) failure = vErr;
             }
             if (!failure && targetId) {
               const { data: existing } = await supabase.from("shifts")

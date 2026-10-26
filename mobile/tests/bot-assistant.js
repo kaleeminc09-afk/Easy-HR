@@ -163,6 +163,7 @@ async function appStartBreak(db, timeLogId, breakType) {
   const mgr = (prompt, history = []) => aiChat({ prompt, managerId: bot3, role: 'manager', history }, TOKENS[bot3]);
 
   // ── 11. THE 2026-10-19 gap: employee asks who's online ──
+  const todayAt = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d.toISOString(); };
   const runWriteScenarios = async () => {
   // 22. Manager creates a shift by chat; verify the row in the DB.
   try {
@@ -321,7 +322,6 @@ async function appStartBreak(db, timeLogId, breakType) {
 
   // ── 17. Schedule tools (Phase B) ──
   section('17 · Schedule tools');
-  const todayAt = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d.toISOString(); };
   const { data: shiftA } = await db3.from('shifts').insert([{ user_id: bot2, start_time: todayAt(10), end_time: todayAt(14), status: 'assigned', created_by: bot3 }]).select().single();
   const { data: shiftOpen } = await db3.from('shifts').insert([{ user_id: null, start_time: todayAt(15), end_time: todayAt(19), status: 'open', created_by: bot3 }]).select().single();
   check('schedule fixtures created', !!(shiftA && shiftOpen));
