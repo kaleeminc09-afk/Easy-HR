@@ -503,45 +503,54 @@ Deno.serve(async (req) => {
     // ("openai/gpt-oss-120b") works on both, and Together is OpenAI-
     // compatible including function calling, so no tool code changes.
     const aiProvider = Deno.env.get("AI_PROVIDER") || "groq";
-    const aiApiUrl = aiProvider === "together"
-      ? "https://api.together.xyz/v1/chat/completions"
-      : "https://api.groq.com/openai/v1/chat/completions";
-    const aiApiKey = aiProvider === "together" ? (Deno.env.get("TOGETHER_API_KEY") || "") : GROQ_API_KEY;
     const aiModel = Deno.env.get("AI_MODEL") || "openai/gpt-oss-120b";
+    // Backup plan, kept in code: the primary provider is AI_PROVIDER
+    // (Together by default in production), and the other provider is
+    // kept as a fallback for that same turn if the primary fails after
+    // retries. Same model id, same tools, no user action needed. A
+    // provider with no key configured is skipped, so unsetting a key
+    // cleanly removes it from the fallback chain.
+    const togetherProvider = { name: "together", url: "https://api.together.xyz/v1/chat/completions", key: Deno.env.get("TOGETHER_API_KEY") || "", extra: { reasoning_effort: "low" } };
+    const groqProvider = { name: "groq", url: "https://api.groq.com/openai/v1/chat/completions", key: GROQ_API_KEY, extra: {} };
+    const providers = (aiProvider === "together" ? [togetherProvider, groqProvider] : [groqProvider, togetherProvider]).filter((pr) => pr.key);
+    if (providers.length === 0) throw new Error("No AI provider key is configured.");
 
     let iterations = 0;
     while (iterations < 4) {
       iterations++;
 
-      // Together (like most hosted inference) can return transient 5xx
-      // "Internal server error" responses. Retry those inside the
-      // function instead of failing the whole chat turn on one bad call.
+      // Try the primary provider with retries for transient 5xx
+      // errors, then fall back to the other provider for this turn
+      // before failing. The app's core features (clock-in, schedule,
+      // time off) never depend on this call, so a total provider
+      // outage only affects chat, never the HR data itself.
       let result: any = null;
-      for (let attempt = 0; ; attempt++) {
-        const response = await fetch(aiApiUrl, {
-          method: "POST",
-          headers: { Authorization: `Bearer ${aiApiKey}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            model: aiModel,
-            messages,
-            tools,
-            tool_choice: "auto",
-            // Together's gpt-oss reasoning trace shares the completion
-            // budget with the answer: with no cap set, the model hit its
-            // thought limit on the claim turn and returned a summary
-            // instead of calling the tool. Give it headroom, and keep
-            // reasoning shallow for these routine turns.
-            max_tokens: 8192,
-            ...(aiProvider === "together" ? { reasoning_effort: "low" } : {}),
-          }),
-        });
-        result = await response.json();
-        if (!result.error) break;
-        const msg = result.error.message || JSON.stringify(result.error);
-        const retryable = response.status >= 500 || /internal server error|server error|temporarily|overloaded|502|503|504/i.test(msg);
-        if (!retryable || attempt >= 2) throw new Error(`AI provider error (${aiProvider}): ${msg}`);
-        await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      let lastError: Error | null = null;
+      for (const prov of providers) {
+        lastError = null;
+        for (let attempt = 0; ; attempt++) {
+          const response = await fetch(prov.url, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${prov.key}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: aiModel,
+              messages,
+              tools,
+              tool_choice: "auto",
+              max_tokens: 8192,
+              ...prov.extra,
+            }),
+          });
+          result = await response.json();
+          if (!result.error) break;
+          const msg = result.error.message || JSON.stringify(result.error);
+          const retryable = response.status >= 500 || /internal server error|server error|temporarily|overloaded|502|503|504/i.test(msg);
+          if (!retryable || attempt >= 2) { lastError = new Error(`AI provider error (${prov.name}): ${msg}`); break; }
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+        if (!lastError) break;
       }
+      if (lastError) throw lastError;
 
       let choice = result.choices[0].message;
 

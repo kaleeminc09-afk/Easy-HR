@@ -10,6 +10,7 @@ import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '.
 export default function App() {
   const [session, setSession] = useState(null);
   const [businessName, setBusinessName] = useState('');
+  const [myRole, setMyRole] = useState('employee');
   const [loading, setLoading] = useState(true);
 
   // Auth Form State
@@ -54,8 +55,8 @@ export default function App() {
   useEffect(() => {
     if (!session) { setBusinessName(''); return; }
     (async () => {
-      const { data } = await supabase.from('profiles').select('business_id, phone, emergency_contact_1_phone').eq('id', session.user.id).single();
-      if (data) setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone);
+      const { data } = await supabase.from('profiles').select('business_id, phone, emergency_contact_1_phone, role').eq('id', session.user.id).single();
+      if (data) { setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone); setMyRole(data.role || 'employee'); }
       if (data && data.business_id) {
         const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', data.business_id).single();
         if (biz) setBusinessName(biz.business_name || '');
@@ -481,7 +482,7 @@ export default function App() {
           </View>
 
           <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
-            <Text style={styles.authBiometricButtonText}>Sign in with Face ID</Text>
+            <Text style={styles.authBiometricButtonText}>Sign in with biometrics</Text>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.authSecondaryButton} onPress={handleSignUp} disabled={authLoading}>
@@ -501,8 +502,9 @@ export default function App() {
             <Text style={styles.empBrand}>NorthShift</Text>
           </View>
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
+          {(myRole === 'manager' || myRole === 'admin') && (<Text style={styles.roleBadge}>Manager</Text>)}
         </View>
-        <View style={styles.empHeaderRight}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.empHeaderRight}>
           <Link href="/EmployeeChatScreen" asChild>
             <TouchableOpacity style={styles.empAssistantButton}>
               <Text style={styles.empAssistantButtonText}>✦ Assistant</Text>
@@ -538,7 +540,7 @@ export default function App() {
               <Text style={styles.empNavButtonText}>Profile</Text>
             </TouchableOpacity>
           </Link>
-        </View>
+        </ScrollView>
       </View>
 
       <ScrollView contentContainerStyle={styles.empContent}>
@@ -722,10 +724,11 @@ const styles = StyleSheet.create({
   empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   empBrand: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.textPrimary },
   empEmail: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
+  roleBadge: { alignSelf: 'flex-start', marginTop: 2, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 2, paddingHorizontal: 8, fontSize: 11, fontFamily: fontFamily.semibold, color: colors.accent, overflow: 'hidden' },
   empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   empAssistantButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12 },
-  empNavButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
+  empNavButton: { ...buttons.glass },
   empNavButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 12 },
   empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
   profileNudge: { width: '100%', maxWidth: 420, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },

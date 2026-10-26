@@ -234,34 +234,41 @@ export default function ManagerDashboard() {
     setIsChatLoading(true);
 
     // Send recent conversation so the bot can resolve "them", bare names, etc.
-    const history = [...messages, userMsg].slice(-20).map((m) => ({
+    const history = [...messages, userMsg].slice(-10).map((m) => ({
       role: m.role === 'bot' ? 'assistant' : 'user',
       content: m.content,
     }));
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: text,
-          managerId: currentUser?.id || 'mgr_123',
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          history,
-        }),
-      });
-
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
+      // One automatic retry for transient provider errors, so a single
+      // blip does not surface as a failure in chat.
+      let data = null;
+      for (let attempt = 0; ; attempt++) {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session?.access_token || SUPABASE_ANON_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: text,
+            managerId: currentUser?.id || 'mgr_123',
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            history,
+          }),
+        });
+        data = await response.json();
+        if (!data.error) break;
+        if (attempt >= 1 || !/rate|provider|internal|network|fetch/i.test(data.error)) throw new Error(data.error);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
 
       const botMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: (data.reply || '').replace(/\*\*/g, '') };
       setMessages((prev) => [...prev, botMsg]);
     } catch (error) {
-      const errorMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: `Error: ${error.message}` };
+      const friendly = /rate|provider|internal|network|fetch/i.test(error.message || '') ? 'The assistant is busy right now — please try again in a moment.' : 'Something went wrong with the assistant — please try again.';
+      const errorMsg = { id: (Date.now() + 1).toString(), role: 'bot', content: friendly };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsChatLoading(false);
@@ -385,7 +392,7 @@ export default function ManagerDashboard() {
           </View>
           {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
         </View>
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 8 }}>
           <Link href="/team" asChild>
             <TouchableOpacity style={styles.navButton}>
               <Text style={styles.navButtonText}>Team</Text>
@@ -426,7 +433,7 @@ export default function ManagerDashboard() {
               <Text style={styles.navButtonText}>← Employee Portal</Text>
             </TouchableOpacity>
           </Link>
-        </View>
+        </ScrollView>
       </View>
 
       {userRole === 'admin' && (
@@ -537,6 +544,7 @@ export default function ManagerDashboard() {
         <View style={styles.exportSection}>
           {filter !== 'EXCEPTIONS' && filter !== 'AI' && (
             <>
+              <Text style={styles.label}>Payroll export — all logs in this list (separate from the Audit Export above)</Text>
               <View style={styles.formatSelector}>
                 <TouchableOpacity style={[styles.formatTab, payrollFormat === 'STANDARD' && styles.activeFormatTab]} onPress={() => setPayrollFormat('STANDARD')}>
                   <Text style={[styles.formatText, payrollFormat === 'STANDARD' && styles.activeFormatText]}>Standard</Text>
@@ -733,7 +741,7 @@ const styles = StyleSheet.create({
   exportMsg: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, marginTop: spacing.sm },
   brandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
-  navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
+  navButton: { ...buttons.glass },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   adminCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, marginHorizontal: spacing.lg, marginTop: spacing.md, ...elevation.card },
   adminCardTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
@@ -758,7 +766,7 @@ const styles = StyleSheet.create({
   exportButtonText: { fontSize: 13, color: '#0A0E1A', fontFamily: fontFamily.bold },
   refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   refreshButtonText: { fontSize: 13, color: colors.textSecondary },
-  scrollContent: { padding: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxl, maxWidth: 800, width: '100%', alignSelf: 'center' },
   emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
   emptyTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },
   emptyText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular, textAlign: 'center', lineHeight: 20 },

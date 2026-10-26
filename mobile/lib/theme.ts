@@ -3,11 +3,11 @@
 // Import: `import { colors, spacing, radius, type } from '../lib/theme';`
 
 export const colors = {
-  // Surfaces — deep navy, never pure black
-  background: '#0A0E1A',
-  backgroundSecondary: '#0E1526',
-  surface: 'rgba(255, 255, 255, 0.06)',
-  surfaceBorder: 'rgba(255, 255, 255, 0.10)',
+  // Surfaces — brighter dark navy, never pure black
+  background: '#121A2B',
+  backgroundSecondary: '#182238',
+  surface: 'rgba(255, 255, 255, 0.10)',
+  surfaceBorder: 'rgba(255, 255, 255, 0.16)',
 
   // Accent — electric cyan, used sparingly (primary actions, active states)
   accent: '#00D4FF',
@@ -22,13 +22,13 @@ export const colors = {
 
   // Text
   textPrimary: '#F2F5F9',
-  textSecondary: '#9AA4B2',
-  textMuted: '#6B7686',
+  textSecondary: '#B8C0CE',
+  textMuted: '#8A94A6',
 
   // Inputs
-  inputBackground: 'rgba(255, 255, 255, 0.05)',
-  inputBorder: 'rgba(255, 255, 255, 0.14)',
-  inputPlaceholder: '#6B7686',
+  inputBackground: 'rgba(255, 255, 255, 0.08)',
+  inputBorder: 'rgba(255, 255, 255, 0.20)',
+  inputPlaceholder: '#8A94A6',
 };
 
 export const spacing = {
@@ -182,6 +182,25 @@ export const buttons = {
     color: colors.accent,
     fontSize: 13,
     fontFamily: fontFamily.bold,
+  },
+  // Glass nav buttons — translucent surface with a light border, for
+  // secondary navigation. JS-only glass: no native blur module, so
+  // this stays rebuild-free. Primary actions stay solid cyan so they pop.
+  glass: {
+    minHeight: 44,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.22)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    alignItems: 'center' as const,
+    justifyContent: 'center' as const,
+  },
+  glassText: {
+    color: colors.textPrimary,
+    fontSize: 12,
+    fontFamily: fontFamily.semibold,
   },
 };
 

@@ -53,6 +53,10 @@ export default function ScheduleScreen() {
   const [formEmployee, setFormEmployee] = useState('');
   const [formWorksite, setFormWorksite] = useState('');
   const [formDate, setFormDate] = useState(todayStr());
+  // Tap-specific-dates multi-day: one shift per tapped date, same times.
+  // Tapping one date behaves exactly like the old single-date form.
+  const [formDates, setFormDates] = useState([todayStr()]);
+  const [formTypedDate, setFormTypedDate] = useState('');
   const [formStart, setFormStart] = useState('09:00');
   const [formEnd, setFormEnd] = useState('17:00');
   const [formNextDay, setFormNextDay] = useState(false);
@@ -113,39 +117,50 @@ export default function ScheduleScreen() {
   };
 
   const createShift = async () => {
-    const startD = new Date(`${formDate}T${formStart}:00`);
-    const endD = new Date(`${formDate}T${formEnd}:00`);
-    if (formNextDay) endD.setDate(endD.getDate() + 1);
-    const err = validateShiftInput(startD.toISOString(), endD.toISOString());
-    if (err) { setMessage(err); return; }
-    if (formEmployee) {
-      const clash = shifts.find((s) =>
-        s.user_id === formEmployee && s.status === 'assigned' &&
-        shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
-      if (clash) {
-        setMessage(`${nameOf(formEmployee)} already has a shift overlapping that time (${fmtTime12(clash.start_time)} – ${fmtTime12(clash.end_time)}).`);
-        return;
-      }
-    }
+    // One shift per tapped date. A clashing date (overlap or approved
+    // leave) is skipped and reported — it does not fail the batch.
+    // Note: clash/leave checks use the loaded week only; dates outside
+    // the current week are created without that check, matching the
+    // old single-date behaviour for typed dates.
+    if (formDates.length === 0) { setMessage('Tap at least one date.'); return; }
+    const created = [];
+    const skipped = [];
     setCreating(true);
     setMessage('');
-    const { error } = await supabase.from('shifts').insert([{
-      business_id: businessId,
-      user_id: formEmployee || null,
-      worksite_id: formWorksite || null,
-      start_time: startD.toISOString(),
-      end_time: endD.toISOString(),
-      status: formEmployee ? 'assigned' : 'open',
-      notes: formNotes.trim() || null,
-      created_by: myId,
-    }]);
-    if (error) {
-      setMessage('Could not create the shift: ' + error.message);
-    } else {
-      setMessage(formEmployee ? 'Shift created.' : 'Open shift posted.');
+    for (const formDate of [...formDates].sort()) {
+      const startD = new Date(`${formDate}T${formStart}:00`);
+      const endD = new Date(`${formDate}T${formEnd}:00`);
+      if (formNextDay) endD.setDate(endD.getDate() + 1);
+      const err = validateShiftInput(startD.toISOString(), endD.toISOString());
+      if (err) { skipped.push(`${formDate} (${err})`); continue; }
+      if (formEmployee) {
+        const clash = shifts.find((s) =>
+          s.user_id === formEmployee && s.status === 'assigned' &&
+          shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
+        if (clash) { skipped.push(`${formDate} (overlaps an existing shift)`); continue; }
+        const onLeave = leaves.some((l) => l.user_id === formEmployee && l.start_date <= formDate && l.end_date >= formDate);
+        if (onLeave) { skipped.push(`${formDate} (approved leave)`); continue; }
+      }
+      const { error } = await supabase.from('shifts').insert([{
+        business_id: businessId,
+        user_id: formEmployee || null,
+        worksite_id: formWorksite || null,
+        start_time: startD.toISOString(),
+        end_time: endD.toISOString(),
+        status: formEmployee ? 'assigned' : 'open',
+        notes: formNotes.trim() || null,
+        created_by: myId,
+      }]);
+      if (error) skipped.push(`${formDate} (${error.message})`);
+      else created.push(formDate);
+    }
+    if (created.length > 0) {
+      setMessage((formEmployee ? 'Shift created for ' : 'Open shift posted for ') + created.join(', ') + (skipped.length > 0 ? `. Skipped: ${skipped.join(', ')}.` : '.'));
       setShowForm(false);
       setFormNotes('');
       await loadShifts();
+    } else {
+      setMessage('Nothing created. Skipped: ' + skipped.join(', ') + '.');
     }
     setCreating(false);
   };
@@ -295,8 +310,22 @@ export default function ScheduleScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={styles.label}>Date</Text>
-                <TextInput style={styles.input} value={formDate} onChangeText={setFormDate} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+                <Text style={styles.label}>Dates — tap each date (one shift per date)</Text>
+                <View style={styles.chipRow}>
+                  {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+                    const d = new Date(weekStart + i * DAY_MS);
+                    const p2 = (n) => String(n).padStart(2, '0');
+                    const dayStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+                    const on = formDates.includes(dayStr);
+                    return (
+                      <TouchableOpacity key={dayStr} style={[styles.chip, on && styles.chipActive]} onPress={() => setFormDates(on ? formDates.filter((x) => x !== dayStr) : [...formDates, dayStr])}>
+                        <Text style={[styles.chipText, on && styles.chipTextActive]}>{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+                <Text style={styles.label}>Or type a date (YYYY-MM-DD) to add it</Text>
+                <TextInput style={styles.input} value={formTypedDate} onChangeText={(v) => { setFormTypedDate(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !formDates.includes(v)) { setFormDates([...formDates, v]); setFormTypedDate(''); } }} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
                 <View style={styles.timeRow}>
                   <View style={{ flex: 1 }}>
                     <Text style={styles.label}>Start (24h)</Text>
@@ -327,14 +356,14 @@ export default function ScheduleScreen() {
 
             {days.map((d) => (
               <View key={d.key} style={styles.dayBlock}>
-                <View style={styles.dayHeader}>
+                <TouchableOpacity style={styles.dayHeader} onPress={() => { const dd = new Date(d.dayMs); const p2 = (n) => String(n).padStart(2, '0'); const dayStr = `${dd.getFullYear()}-${p2(dd.getMonth() + 1)}-${p2(dd.getDate())}`; setFormDates([dayStr]); setShowForm(true); }}>
                   <Text style={styles.dayTitle}>
-                    {new Date(d.dayMs).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                    {new Date(d.dayMs).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} — tap to schedule
                   </Text>
                   {d.key === todayKey && (
                     <View style={styles.todayPill}><Text style={styles.todayPillText}>TODAY</Text></View>
                   )}
-                </View>
+                </TouchableOpacity>
                 {(() => {
                   const p2 = (n) => String(n).padStart(2, '0');
                   const dd = new Date(d.dayMs);

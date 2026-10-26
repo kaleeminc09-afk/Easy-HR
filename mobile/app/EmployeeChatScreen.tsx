@@ -50,35 +50,42 @@ export default function EmployeeChatScreen() {
     setIsChatLoading(true);
 
     // Send recent conversation so the bot follows pronouns and short follow-ups.
-    const history = [...messages, userMsg].slice(-20).map((m) => ({
+    const history = [...messages, userMsg].slice(-10).map((m) => ({
       role: m.role === 'bot' ? 'assistant' : 'user',
       content: m.content,
     }));
 
     try {
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${session.access_token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          prompt: text,
-          userId: session.user.id,
-          role: 'employee',
-          location: coords,
-          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          history,
-        }),
-      });
-
-      const data = await response.json();
-      if (data.error) throw new Error(data.error);
+      // One automatic retry for transient provider errors, so a single
+      // blip does not surface as a failure in chat.
+      let data: any = null;
+      for (let attempt = 0; ; attempt++) {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/hr-ai-bot`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            prompt: text,
+            userId: session.user.id,
+            role: 'employee',
+            location: coords,
+            timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            history,
+          }),
+        });
+        data = await response.json();
+        if (!data.error) break;
+        if (attempt >= 1 || !/rate|provider|internal|network|fetch/i.test(data.error)) throw new Error(data.error);
+        await new Promise((r) => setTimeout(r, 1000));
+      }
 
       const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: (data.reply || '').replace(/\*\*/g, '') };
       setMessages((prev) => [...prev, botMsg]);
     } catch (error: any) {
-      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: `Error: ${error.message}` };
+      const friendly = /rate|provider|internal|network|fetch/i.test(error.message || '') ? 'The assistant is busy right now — please try again in a moment.' : 'Something went wrong with the assistant — please try again.';
+      const errorMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'bot', content: friendly };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsChatLoading(false);
@@ -139,7 +146,7 @@ export default function EmployeeChatScreen() {
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.chatInput}
-            placeholder="e.g. How many hours did I work today?"
+            placeholder="Ask about shifts or hours…"
             placeholderTextColor={colors.inputPlaceholder}
             value={inputText}
             onChangeText={setInputText}
