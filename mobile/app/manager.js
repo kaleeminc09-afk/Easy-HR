@@ -20,6 +20,8 @@ export default function ManagerDashboard() {
   
   const [logs, setLogs] = useState([]);
   const [exceptions, setExceptions] = useState([]);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [excErrorMsg, setExcErrorMsg] = useState('');
   const [breaks, setBreaks] = useState([]);
   const [exportDays, setExportDays] = useState(14);
   const [exportMsg, setExportMsg] = useState('');

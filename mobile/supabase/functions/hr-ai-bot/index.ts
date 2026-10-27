@@ -516,6 +516,12 @@ Deno.serve(async (req) => {
     if (providers.length === 0) throw new Error("No AI provider key is configured.");
 
     let iterations = 0;
+    // Deterministic read fallback: if the model keeps calling tools
+    // and never writes a final answer, do not end on the generic
+    // 'thought limit' line for a question the tools already answered.
+    // get_team_status (and any plain tool message) is summarised
+    // from the tool's own result instead.
+    let lastReadSummary: string | null = null;
     while (iterations < 4) {
       iterations++;
 
@@ -641,6 +647,11 @@ Deno.serve(async (req) => {
                   online: status.online,
                   on_break: status.on_break,
                 };
+            if (!sErr) {
+              lastReadSummary = status.online.length === 0 && status.on_break.length === 0
+                ? "Nobody is clocked in right now."
+                : `Currently clocked in: ${status.online.map((m: any) => m.name).join(", ")}.${status.on_break.length ? ` On break: ${status.on_break.map((m: any) => m.name).join(", ")}.` : ""}`;
+            }
           }
         } else if (fn === "clock_out_employee") {
           const { data: profs, error: pErr } = await supabase
@@ -1231,6 +1242,7 @@ Deno.serve(async (req) => {
         }
 
 
+        if (output && typeof output.message === "string") lastReadSummary = output.message;
         messages.push({
           tool_call_id: toolCall.id,
           role: "tool",
@@ -1256,7 +1268,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return new Response(JSON.stringify({ reply: "I processed the tasks, but reached my thought limit before I could summarize." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    return new Response(JSON.stringify({ reply: lastReadSummary || "I processed the tasks, but reached my thought limit before I could summarize." }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
   } catch (error: any) {
     return new Response(JSON.stringify({ error: error.message }), { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } });
   }
