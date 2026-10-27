@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -11,6 +11,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [businessName, setBusinessName] = useState('');
   const [myRole, setMyRole] = useState('employee');
+  const [menuOpen, setMenuOpen] = useState(false);
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
 
   // Auth Form State
@@ -504,44 +506,27 @@ export default function App() {
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
           {(myRole === 'manager' || myRole === 'admin') && (<Text style={styles.roleBadge}>Manager</Text>)}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.empHeaderRight}>
-          <Link href="/EmployeeChatScreen" asChild>
-            <TouchableOpacity style={styles.empAssistantButton}>
-              <Text style={styles.empAssistantButtonText}>✦ Assistant</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/team" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Team</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/schedule" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Schedule</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/timeoff" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Time Off</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/documents" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Documents</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Manager →</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/profile" asChild>
-            <TouchableOpacity style={styles.empNavButton}>
-              <Text style={styles.empNavButtonText}>Profile</Text>
-            </TouchableOpacity>
-          </Link>
-        </ScrollView>
+        <TouchableOpacity style={styles.empNavButton} onPress={() => setMenuOpen(!menuOpen)}>
+          <Text style={styles.empNavButtonText}>☰ Menu</Text>
+        </TouchableOpacity>
       </View>
+      {menuOpen && (
+        <View style={styles.menuPanel}>
+          {[
+            ['✦ Assistant', '/EmployeeChatScreen'],
+            ['Team', '/team'],
+            ['Schedule', '/schedule'],
+            ['Time Off', '/timeoff'],
+            ['Documents', '/documents'],
+            ['Manager →', '/manager'],
+            ['Profile', '/profile'],
+          ].map(([label, href]) => (
+            <TouchableOpacity key={href} style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push(href); }}>
+              <Text style={styles.menuItemText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.empContent}>
         {profileIncomplete && (
@@ -726,6 +711,9 @@ const styles = StyleSheet.create({
   empEmail: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   roleBadge: { alignSelf: 'flex-start', marginTop: 2, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 2, paddingHorizontal: 8, fontSize: 11, fontFamily: fontFamily.semibold, color: colors.accent, overflow: 'hidden' },
   empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  menuPanel: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, gap: 8 },
+  menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.sm },
+  menuItemText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 15 },
   empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   empAssistantButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12 },
   empNavButton: { ...buttons.glass },

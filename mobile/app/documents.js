@@ -3,36 +3,32 @@ import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
-import * as FileSystem from 'expo-file-system';
+import { File } from 'expo-file-system';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { buildStoragePath, formatFileSize } from '../supabase/functions/hr-ai-bot/logic';
 
 const BUCKET = 'employee-documents';
 const MAX_BYTES = 10 * 1024 * 1024;
-const CATEGORIES = ['Contract', 'Certification', 'ID', 'Policy', 'Other'];
-
-// Pure-JS base64 decoder (Hermes has no reliable Buffer/atob for binary).
-function base64ToBytes(b64) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-  const lookup = new Uint8Array(256);
-  for (let i = 0; i < chars.length; i++) lookup[chars.charCodeAt(i)] = i;
-  const clean = b64.replace(/[^A-Za-z0-9+/=]/g, '');
-  let len = Math.floor(clean.length * 0.75);
-  if (clean.endsWith('==')) len -= 2; else if (clean.endsWith('=')) len -= 1;
-  const bytes = new Uint8Array(len);
-  let p = 0;
-  for (let i = 0; i + 3 < clean.length + 4 && i < clean.length; i += 4) {
-    const e1 = lookup[clean.charCodeAt(i)];
-    const e2 = lookup[clean.charCodeAt(i + 1)];
-    const e3 = lookup[clean.charCodeAt(i + 2)];
-    const e4 = lookup[clean.charCodeAt(i + 3)];
-    if (p < len) bytes[p++] = (e1 << 2) | (e2 >> 4);
-    if (p < len) bytes[p++] = ((e2 & 15) << 4) | (e3 >> 2);
-    if (p < len) bytes[p++] = ((e3 & 3) << 6) | (e4 & 63);
-  }
-  return bytes;
+// Hard format check: the picker type filter is only a hint to the OS,
+// so a wrong type can still be picked (Android especially). Reject it
+// here with a plain message instead of uploading it anyway.
+const ALLOWED_EXTS = new Set(['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'heic', 'heif', 'doc', 'docx']);
+const MIME_BY_EXT = { pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp' };
+function fileTypeOk(asset) {
+  const mime = (asset.mimeType || '').toLowerCase();
+  if (mime === 'application/pdf' || mime.startsWith('image/') || mime === 'application/msword' || mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return true;
+  if (mime && mime !== 'application/octet-stream') return false;
+  const ext = (asset.name || '').split('.').pop()?.toLowerCase();
+  return ALLOWED_EXTS.has(ext);
 }
+function contentTypeFor(asset) {
+  const mime = (asset.mimeType || '').toLowerCase();
+  if (mime && mime !== 'application/octet-stream') return asset.mimeType;
+  const ext = (asset.name || '').split('.').pop()?.toLowerCase();
+  return MIME_BY_EXT[ext] || 'application/octet-stream';
+}
+const CATEGORIES = ['Contract', 'Certification', 'ID', 'Policy', 'Other'];
 
 export default function DocumentsScreen() {
   const router = useRouter();
@@ -92,17 +88,28 @@ export default function DocumentsScreen() {
       });
       if (result.canceled || !result.assets?.length) return;
       const asset = result.assets[0];
+      if (!fileTypeOk(asset)) {
+        setMessage('That file type is not accepted. Please pick a PDF, photo, or Word document.');
+        return;
+      }
       if (asset.size && asset.size > MAX_BYTES) {
-        setMessage('That file is over the 10 MB limit.');
+        setMessage(`That file is ${formatFileSize(asset.size)} — over the 10 MB limit.`);
         return;
       }
       setUploading(true);
       setMessage('');
-      const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
-      const bytes = base64ToBytes(base64);
+      // New expo-file-system API: the old readAsStringAsync throws a
+      // deprecation error on this SDK. File.bytes() returns the raw
+      // bytes directly, no base64 round-trip.
+      const bytes = await new File(asset.uri).bytes();
+      if (bytes.length > MAX_BYTES) {
+        setMessage(`That file is ${formatFileSize(bytes.length)} — over the 10 MB limit.`);
+        setUploading(false);
+        return;
+      }
       const path = buildStoragePath(selectedUser, asset.name || 'document', Date.now());
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, bytes, {
-        contentType: asset.mimeType || 'application/octet-stream',
+        contentType: contentTypeFor(asset),
         upsert: false,
       });
       if (upErr) {
@@ -118,7 +125,7 @@ export default function DocumentsScreen() {
         uploaded_by: myId,
         file_name: asset.name || 'document',
         storage_path: path,
-        content_type: asset.mimeType || null,
+        content_type: contentTypeFor(asset),
         size_bytes: asset.size || bytes.length,
         category,
       }]);
@@ -126,7 +133,10 @@ export default function DocumentsScreen() {
       await loadDocs(selectedUser);
       setUploading(false);
     } catch (e) {
-      setMessage('Could not upload: ' + (e?.message || 'unknown error'));
+      const msg = e?.message || '';
+      setMessage(/deprecated|legacy|readAsStringAsync/i.test(msg)
+        ? 'Upload failed because the file reader is out of date. Please reload the app and try again.'
+        : 'Could not upload that file. Please try again.');
       setUploading(false);
     }
   };

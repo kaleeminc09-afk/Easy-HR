@@ -96,13 +96,16 @@ export default function ManagerDashboard() {
       .from('time_exceptions')
       .select(`
         id, attempted_at, distance_meters, reason_note, status, user_id, worksite_id,
-        profiles ( full_name, email, first_name, last_name ), worksites ( name )
+        profiles!time_exceptions_user_id_fkey ( full_name, email, first_name, last_name ), worksites ( name )
       `)
       .order('attempted_at', { ascending: false });
 
     if (excError) {
       console.error('Exceptions Error:', excError.message);
+      setExcErrorMsg(excError.message);
+      setExceptions([]);
     } else if (excData) {
+      setExcErrorMsg('');
       setExceptions(excData);
     }
   };
@@ -392,49 +395,28 @@ export default function ManagerDashboard() {
           </View>
           {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
         </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ flexDirection: 'row', gap: 8 }}>
-          <Link href="/team" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Team</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/documents" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Documents</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/timeoff" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Time Off</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/reports" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Reports</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/schedule" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Schedule</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/qrcodes" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>QR Codes</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/profile" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>Profile</Text>
-            </TouchableOpacity>
-          </Link>
-          <Link href="/" asChild>
-            <TouchableOpacity style={styles.navButton}>
-              <Text style={styles.navButtonText}>← Employee Portal</Text>
-            </TouchableOpacity>
-          </Link>
-        </ScrollView>
+        <TouchableOpacity style={styles.navButton} onPress={() => setMenuOpen(!menuOpen)}>
+          <Text style={styles.navButtonText}>☰ Menu</Text>
+        </TouchableOpacity>
       </View>
+      {menuOpen && (
+        <View style={styles.menuPanel}>
+          {[
+            ['Team', '/team'],
+            ['Documents', '/documents'],
+            ['Time Off', '/timeoff'],
+            ['Reports', '/reports'],
+            ['Schedule', '/schedule'],
+            ['QR Codes', '/qrcodes'],
+            ['Profile', '/profile'],
+            ['← Employee Portal', '/'],
+          ].map(([label, href]) => (
+            <TouchableOpacity key={href} style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push(href); }}>
+              <Text style={styles.menuItemText}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {userRole === 'admin' && (
         <View style={styles.adminCard}>
@@ -599,7 +581,12 @@ export default function ManagerDashboard() {
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {filter === 'EXCEPTIONS' ? (
-            exceptions.length === 0 ? (
+            excErrorMsg ? (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>Could not load exceptions</Text>
+                <Text style={styles.emptyText}>{excErrorMsg}</Text>
+              </View>
+            ) : exceptions.length === 0 ? (
               <View style={styles.emptyCard}>
                 <Text style={styles.emptyTitle}>All clear</Text>
                 <Text style={styles.emptyText}>No out-of-range exception requests. When an employee clocks in outside a worksite, it'll land here for your review.</Text>
@@ -767,6 +754,9 @@ const styles = StyleSheet.create({
   refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   refreshButtonText: { fontSize: 13, color: colors.textSecondary },
   scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxl, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  menuPanel: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, gap: 8 },
+  menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.sm },
+  menuItemText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 15 },
   emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
   emptyTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },
   emptyText: { color: colors.textSecondary, fontSize: 14, fontFamily: fontFamily.regular, textAlign: 'center', lineHeight: 20 },
