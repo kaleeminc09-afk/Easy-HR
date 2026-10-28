@@ -198,6 +198,129 @@ export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): Ov
   return rows.sort((a, b) => b.hours - a.hours);
 }
 
+// ---- Supervised break policy (all Canadian jurisdictions) ----
+// Minimums summarised 2026-10-28 from provincial/territorial and federal
+// employment-standards summaries. CONFIRM against the official
+// employment-standards source for the province before payroll use.
+// This table is a compliance aid, never legal advice.
+// "Paid if available" = the meal break is paid when the employee must
+// remain available to the employer / at the workstation during it.
+// "Split" = the meal may be taken as two shorter periods totalling the
+// meal length (Ontario: two 15-minute periods by agreement; Alberta:
+// 30 minutes or two 15-minute periods).
+
+export interface ProvinceBreakRule {
+  code: string;
+  name: string;
+  meal_threshold_minutes: number | null; // max consecutive work before a meal is owed; null = no express statutory meal break
+  meal_minutes: number; // statutory meal length (0 when no express rule)
+  split_allowed: boolean;
+  second_meal_threshold_minutes: number | null; // e.g. Alberta: a second meal for shifts over 10 hours
+  paid_if_available: boolean;
+  min_shift_minutes_for_meal: number | null; // e.g. Saskatchewan: meal only owed on shifts over 6 hours
+  note: string;
+}
+
+export const PROVINCE_BREAK_RULES: Record<string, ProvinceBreakRule> = {
+  ON: { code: "ON", name: "Ontario", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: true, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "Eating period after no more than 5 consecutive hours; may be split into two 15-minute periods by agreement." },
+  BC: { code: "BC", name: "British Columbia", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours; paid if the employee must remain available." },
+  AB: { code: "AB", name: "Alberta", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: true, second_meal_threshold_minutes: 600, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes (or two 15-minute periods) after 5 hours; a second 30-minute break for shifts over 10 hours." },
+  QC: { code: "QC", name: "Quebec", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours; paid if the employee is not allowed to leave the workstation." },
+  MB: { code: "MB", name: "Manitoba", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  SK: { code: "SK", name: "Saskatchewan", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: 360, note: "Meal within the first 5 hours, owed on shifts over 6 hours." },
+  NS: { code: "NS", name: "Nova Scotia", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  NB: { code: "NB", name: "New Brunswick", meal_threshold_minutes: null, meal_minutes: 0, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: false, min_shift_minutes_for_meal: null, note: "No express statutory meal break — employer policy governs; the app flags nothing as a legal violation here." },
+  NL: { code: "NL", name: "Newfoundland and Labrador", meal_threshold_minutes: 300, meal_minutes: 60, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "1 hour after 5 consecutive hours." },
+  PE: { code: "PE", name: "Prince Edward Island", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  YT: { code: "YT", name: "Yukon", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  NT: { code: "NT", name: "Northwest Territories", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  NU: { code: "NU", name: "Nunavut", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes after 5 consecutive hours." },
+  FED: { code: "FED", name: "Federal (Canada Labour Code)", meal_threshold_minutes: 300, meal_minutes: 30, split_allowed: false, second_meal_threshold_minutes: null, paid_if_available: true, min_shift_minutes_for_meal: null, note: "30 minutes for every 5 consecutive hours; paid if the employee must be at the employer's disposal." },
+};
+
+export const PROVINCE_CODES = Object.keys(PROVINCE_BREAK_RULES);
+
+export interface BreakPolicy {
+  meal_minutes?: number;
+  rest_minutes?: number;
+  rest_max_per_shift?: number;
+  meal_paid_if_available?: boolean;
+}
+
+export const DEFAULT_BREAK_POLICY: Required<BreakPolicy> = {
+  meal_minutes: 30,
+  rest_minutes: 15,
+  rest_max_per_shift: 2,
+  meal_paid_if_available: true,
+};
+
+export interface ChosenBreak {
+  break_type: string | null; // null = nothing may be offered (rest cap reached)
+  paid: boolean;
+  max_minutes: number;
+  reason: string;
+}
+
+// The supervised chooser: the employee never picks paid vs unpaid.
+// The meal break comes first and is never capped (an employee right);
+// later short breaks are paid rest up to the policy cap; after the cap
+// no more paid rest is offered. An on-call meal is flagged for manager
+// review — it is paid only when the policy allows paid-if-available.
+export function chooseBreakType(
+  policy: BreakPolicy | null | undefined,
+  breaksTakenThisShift: Array<string | { break_type?: string | null }>,
+  opts?: { onCall?: boolean },
+): ChosenBreak {
+  const p = { ...DEFAULT_BREAK_POLICY, ...(policy || {}) };
+  const types = breaksTakenThisShift.map((b) => (typeof b === "string" ? b : b.break_type || ""));
+  const isMeal = (t: string) => /meal|lunch/i.test(t);
+  const hasMeal = types.some(isMeal);
+  const restCount = types.filter((t) => /^paid rest/i.test(t)).length;
+  if (opts?.onCall && !hasMeal) {
+    return {
+      break_type: "On-call Meal",
+      paid: !!p.meal_paid_if_available,
+      max_minutes: p.meal_minutes,
+      reason: p.meal_paid_if_available
+        ? "On-call meal — flagged for manager review; paid because the business allows paid-if-available."
+        : "On-call meal — flagged for manager review; unpaid under this business policy.",
+    };
+  }
+  if (!hasMeal) {
+    return {
+      break_type: "Unpaid Meal",
+      paid: false,
+      max_minutes: p.meal_minutes,
+      reason: "First break of the shift is the meal break — an employee right, never capped.",
+    };
+  }
+  if (restCount < p.rest_max_per_shift) {
+    return {
+      break_type: "Paid Rest",
+      paid: true,
+      max_minutes: p.rest_minutes,
+      reason: "Paid rest break under the business break policy.",
+    };
+  }
+  return {
+    break_type: null,
+    paid: false,
+    max_minutes: 0,
+    reason: "Paid rest cap reached for this shift — no more paid rest breaks are offered. A meal break is still never capped.",
+  };
+}
+
+// Max minutes allowed for a stored break type, used for overrun notes
+// on the manager log cards and for the end-break message.
+export function maxMinutesForBreakType(
+  breakType: string | null | undefined,
+  policy: BreakPolicy | null | undefined,
+): number {
+  const p = { ...DEFAULT_BREAK_POLICY, ...(policy || {}) };
+  if (/meal|lunch/i.test(breakType || "")) return p.meal_minutes;
+  return p.rest_minutes;
+}
+
 // ---- Ontario ESA meal-break compliance ----
 // An employee must not work more than 5 consecutive hours without a
 // 30-minute eating period. The 30 minutes may be split into two periods
@@ -237,15 +360,24 @@ function mealBreakViolation(longestWorkMin: number): MealBreakViolation {
  * resets the clock. Crossing 300 work minutes with <30 credit is a violation.
  * Open breaks/shifts are measured up to nowMs. Returns null when compliant.
  */
-export function checkMealBreakCompliance(
+// Province-aware version of the same walk. Where split is allowed,
+// break minutes accumulate toward the meal length (two 15s = 30);
+// otherwise only a single break of at least the meal length satisfies
+// the span. BreakInterval carries no type, so any break time counts
+// toward meal credit — the same simplification the Ontario check
+// already had; a future pass can require a meal-typed break.
+export function checkMealBreakComplianceForRule(
   shift: ShiftWindow,
   breaks: BreakInterval[],
   nowMs: number,
+  rule: ProvinceBreakRule,
 ): MealBreakViolation | null {
+  if (rule.meal_threshold_minutes == null || rule.meal_minutes <= 0) return null;
   const start = new Date(shift.clock_in).getTime();
   if (Number.isNaN(start)) return null;
   const end = shift.clock_out ? new Date(shift.clock_out).getTime() : nowMs;
   if (end <= start) return null;
+  if (rule.min_shift_minutes_for_meal != null && (end - start) / 60000 <= rule.min_shift_minutes_for_meal) return null;
 
   const ivs = breaks
     .map((b) => {
@@ -256,6 +388,16 @@ export function checkMealBreakCompliance(
     .filter((iv) => iv.e > iv.s)
     .sort((a, b) => a.s - b.s);
 
+  const violation = (workMin: number): MealBreakViolation => {
+    const h = Math.floor(workMin / 60);
+    const m = Math.round(workMin % 60);
+    const label = rule.code === "ON" ? "Ontario ESA" : rule.name;
+    return {
+      longest_work_minutes: Math.round(workMin),
+      message: `Worked ${h}h ${String(m).padStart(2, "0")}m without a ${rule.meal_minutes}-minute meal break (${label})`,
+    };
+  };
+
   let workMin = 0;
   let creditMin = 0;
   let cursor = start;
@@ -263,24 +405,34 @@ export function checkMealBreakCompliance(
   for (const iv of ivs) {
     if (iv.s > cursor) {
       workMin += (iv.s - cursor) / 60000;
-      if (workMin > MEAL_BREAK_MAX_WORK_MINUTES && creditMin < MEAL_BREAK_REQUIRED_MINUTES) {
-        return mealBreakViolation(workMin);
+      if (workMin > rule.meal_threshold_minutes && creditMin < rule.meal_minutes) {
+        return violation(workMin);
       }
     }
-    creditMin += (iv.e - iv.s) / 60000;
-    if (creditMin >= MEAL_BREAK_REQUIRED_MINUTES) {
-      workMin = 0;
-      creditMin = 0;
+    const dur = (iv.e - iv.s) / 60000;
+    if (rule.split_allowed) {
+      creditMin += dur;
+      if (creditMin >= rule.meal_minutes) { workMin = 0; creditMin = 0; }
+    } else if (dur >= rule.meal_minutes) {
+      workMin = 0; creditMin = 0;
     }
     cursor = Math.max(cursor, iv.e);
   }
   if (end > cursor) {
     workMin += (end - cursor) / 60000;
-    if (workMin > MEAL_BREAK_MAX_WORK_MINUTES && creditMin < MEAL_BREAK_REQUIRED_MINUTES) {
-      return mealBreakViolation(workMin);
+    if (workMin > rule.meal_threshold_minutes && creditMin < rule.meal_minutes) {
+      return violation(workMin);
     }
   }
   return null;
+}
+
+export function checkMealBreakCompliance(
+  shift: ShiftWindow,
+  breaks: BreakInterval[],
+  nowMs: number,
+): MealBreakViolation | null {
+  return checkMealBreakComplianceForRule(shift, breaks, nowMs, PROVINCE_BREAK_RULES.ON);
 }
 
 export interface ShiftWithBreaks extends ShiftWindow {
@@ -396,7 +548,11 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
       const bs = Math.max(inMs, new Date(b.start_time).getTime());
       const be = Math.min(outMs, b.end_time ? new Date(b.end_time).getTime() : outMs);
       const mins = Math.max(0, Math.round((be - bs) / 60000));
-      if (b.break_type === "Unpaid Lunch") unpaidMin += mins;
+      // Any Unpaid* type deducts (legacy "Unpaid Lunch" and new
+      // "Unpaid Meal"). "On-call Meal" is NOT deducted here: its pay
+      // treatment is pending manager review, and silently underpaying
+      // a disputed break would be worse than counting it as paid.
+      if ((b.break_type || "").startsWith("Unpaid")) unpaidMin += mins;
       breakParts.push(`${b.break_type} ${mins}m`);
     }
 

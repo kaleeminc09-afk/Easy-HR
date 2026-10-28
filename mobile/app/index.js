@@ -6,6 +6,7 @@ import { Link, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
+import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -32,6 +33,9 @@ export default function App() {
   const [todayHours, setTodayHours] = useState(0);
   const [activeSessionSeconds, setActiveSessionSeconds] = useState(0);
   const [statusMessage, setStatusMessage] = useState('');
+  const [myBusinessId, setMyBusinessId] = useState(null);
+  const [breakPolicy, setBreakPolicy] = useState({ ...DEFAULT_BREAK_POLICY, province: 'ON' });
+  const [onCallBreak, setOnCallBreak] = useState(false);
   const [locationChecking, setLocationChecking] = useState(false);
 
   // Exception Flow State
@@ -58,8 +62,20 @@ export default function App() {
     if (!session) { setBusinessName(''); return; }
     (async () => {
       const { data } = await supabase.from('profiles').select('business_id, phone, emergency_contact_1_phone, role').eq('id', session.user.id).single();
-      if (data) { setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone); setMyRole(data.role || 'employee'); }
+      if (data) { setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone); setMyRole(data.role || 'employee'); setMyBusinessId(data.business_id || null); }
       if (data && data.business_id) {
+        const { data: pol } = await supabase.from('break_policies').select('*').eq('business_id', data.business_id).maybeSingle();
+        if (pol) {
+          const rule = PROVINCE_BREAK_RULES[pol.province] || PROVINCE_BREAK_RULES.ON;
+          const minMeal = rule.meal_minutes || 0;
+          setBreakPolicy({
+            province: pol.province || 'ON',
+            meal_minutes: Math.max(pol.meal_minutes || 0, minMeal),
+            rest_minutes: pol.rest_minutes || DEFAULT_BREAK_POLICY.rest_minutes,
+            rest_max_per_shift: pol.rest_max_per_shift ?? DEFAULT_BREAK_POLICY.rest_max_per_shift,
+            meal_paid_if_available: pol.meal_paid_if_available ?? DEFAULT_BREAK_POLICY.meal_paid_if_available,
+          });
+        }
         const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', data.business_id).single();
         if (biz) setBusinessName(biz.business_name || '');
       }
@@ -284,19 +300,30 @@ export default function App() {
     }
   };
 
-  const handleStartBreak = async (breakType) => {
+  // Supervised breaks: the employee never picks paid vs unpaid.
+  // One button; chooseBreakType (shared with logic.ts) picks the type
+  // from the business policy and this shift's breaks so far.
+  const handleStartBreak = async () => {
     if (!activeSession) return;
     if (activeBreak) {
       setStatusMessage('You are already on a break.');
       return;
     }
-    setStatusMessage(`Starting ${breakType}...`);
-
+    setStatusMessage('Starting break...');
+    const { data: taken } = await supabase
+      .from('time_breaks')
+      .select('break_type')
+      .eq('time_log_id', activeSession.id);
+    const chosen = chooseBreakType(breakPolicy, taken || [], { onCall: onCallBreak });
+    if (!chosen.break_type) {
+      setStatusMessage(chosen.reason);
+      return;
+    }
     const { data, error } = await supabase
       .from('time_breaks')
       .insert([{
         time_log_id: activeSession.id,
-        break_type: breakType,
+        break_type: chosen.break_type,
         start_time: new Date().toISOString()
       }])
       .select()
@@ -306,53 +333,35 @@ export default function App() {
       setStatusMessage('❌ Error starting break: ' + error.message);
     } else {
       setActiveBreak(data);
-      setStatusMessage(`☕ On ${breakType}`);
+      setOnCallBreak(false);
+      setStatusMessage(`☕ On ${chosen.break_type} · ${chosen.paid ? 'paid' : 'unpaid'} · up to ${chosen.max_minutes} min. ${chosen.reason}`);
     }
   };
 
   const handleEndBreak = async () => {
     if (!activeBreak) return;
     setStatusMessage('Ending break...');
-
+    const endIso = new Date().toISOString();
     const { error } = await supabase
       .from('time_breaks')
-      .update({ end_time: new Date().toISOString() })
+      .update({ end_time: endIso })
       .eq('id', activeBreak.id);
 
     if (error) {
       setStatusMessage('❌ Error ending break: ' + error.message);
     } else {
+      const maxMin = maxMinutesForBreakType(activeBreak.break_type, breakPolicy);
+      const durMin = Math.max(0, Math.round((new Date(endIso).getTime() - new Date(activeBreak.start_time).getTime()) / 60000));
       setActiveBreak(null);
-      setStatusMessage('🟢 Returned to active shift');
+      if (durMin > maxMin) {
+        setStatusMessage(`🟢 Returned to active shift — break ran ${durMin} min vs ${maxMin} min allowed for ${activeBreak.break_type}; the overrun is flagged for the manager to review. Overrun pay is not changed automatically.`);
+      } else if (activeBreak.break_type === 'On-call Meal') {
+        setStatusMessage('🟢 Returned to active shift — on-call meal flagged for manager review.');
+      } else {
+        setStatusMessage('🟢 Returned to active shift');
+      }
       fetchTimeData(session.user.id);
     }
-  };
-
-  const handleExceptionSubmit = async () => {
-    if (!exceptionNote.trim()) {
-      setStatusMessage('❌ Please provide a reason note.');
-      return;
-    }
-
-    setSubmittingException(true);
-    const { error } = await supabase.from('time_exceptions').insert([{
-      user_id: session.user.id,
-      worksite_id: outOfRangeData.worksite.id,
-      latitude: outOfRangeData.latitude,
-      longitude: outOfRangeData.longitude,
-      distance_meters: outOfRangeData.distance,
-      reason_note: exceptionNote,
-      status: 'pending'
-    }]);
-
-    if (error) {
-      setStatusMessage('❌ Error submitting exception: ' + error.message);
-    } else {
-      setStatusMessage('✅ Exception request submitted successfully for manager review!');
-      setOutOfRangeData(null);
-      setExceptionNote('');
-    }
-    setSubmittingException(false);
   };
 
   const handleClockOut = async () => {
@@ -623,17 +632,16 @@ export default function App() {
                 </Animated.View>
               ) : (
                 <>
+                  <TouchableOpacity style={styles.empOnCallRow} onPress={() => setOnCallBreak(!onCallBreak)}>
+                    <Text style={styles.empOnCallBox}>{onCallBreak ? '☑' : '☐'}</Text>
+                    <Text style={styles.empOnCallText}>I must stay available during this break</Text>
+                  </TouchableOpacity>
                   <View style={styles.empBreakRow}>
-                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Unpaid Lunch')}>
-                      <Text style={styles.empChipText}>Unpaid Lunch</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Lunch')}>
-                      <Text style={styles.empChipText}>Paid Lunch</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.empChip} onPress={() => handleStartBreak('Paid Rest Break')}>
-                      <Text style={styles.empChipText}>Rest Break</Text>
+                    <TouchableOpacity style={styles.empBreakButton} onPress={handleStartBreak}>
+                      <Text style={styles.empBreakButtonText}>Start Break</Text>
                     </TouchableOpacity>
                   </View>
+                  <Text style={styles.empBreakPolicyText}>Meal {breakPolicy.meal_minutes} min unpaid · Rest {breakPolicy.rest_minutes} min paid, max {breakPolicy.rest_max_per_shift} per shift · {(PROVINCE_BREAK_RULES[breakPolicy.province] || PROVINCE_BREAK_RULES.ON).name}</Text>
                   <Animated.View style={animatedBtnStyle}>
                     <TouchableOpacity
                       style={styles.empCircleButton}
@@ -749,6 +757,12 @@ const styles = StyleSheet.create({
   empCircleButtonDisabled: { opacity: 0.6 },
   empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontFamily: fontFamily.extrabold, textAlign: 'center', letterSpacing: 1 },
   empBreakRow: { flexDirection: 'row', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
+  empOnCallRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
+  empOnCallBox: { color: colors.textPrimary, fontSize: 18 },
+  empOnCallText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, flex: 1 },
+  empBreakButton: { flex: 1, backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center', minHeight: 56, justifyContent: 'center' },
+  empBreakButtonText: { color: '#0A0E1A', fontFamily: fontFamily.semibold, fontSize: 15 },
+  empBreakPolicyText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 12, marginTop: spacing.sm, textAlign: 'center', width: '100%', maxWidth: 400 },
   empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
   empChipText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   empMessage: { marginTop: spacing.lg, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', maxWidth: 400, lineHeight: 20 },

@@ -5,6 +5,7 @@ import { Link, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
 import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv } from '../supabase/functions/hr-ai-bot/logic';
+import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -23,6 +24,8 @@ export default function ManagerDashboard() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [excErrorMsg, setExcErrorMsg] = useState('');
   const [breaks, setBreaks] = useState([]);
+  const [myBusinessId, setMyBusinessId] = useState(null);
+  const [breakPolicy, setBreakPolicy] = useState({ ...DEFAULT_BREAK_POLICY, province: 'ON' });
   const [exportDays, setExportDays] = useState(14);
   const [exportMsg, setExportMsg] = useState('');
   const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
@@ -66,6 +69,20 @@ export default function ManagerDashboard() {
       if (profBiz && profBiz.business_id) {
         const { data: biz } = await supabase.from('businesses').select('business_name').eq('id', profBiz.business_id).single();
         if (biz) setBusinessName(biz.business_name || '');
+      }
+      if (profBiz && profBiz.business_id) {
+        setMyBusinessId(profBiz.business_id);
+        const { data: pol } = await supabase.from('break_policies').select('*').eq('business_id', profBiz.business_id).maybeSingle();
+        if (pol) {
+          const rule = PROVINCE_BREAK_RULES[pol.province] || PROVINCE_BREAK_RULES.ON;
+          setBreakPolicy({
+            province: pol.province || 'ON',
+            meal_minutes: Math.max(pol.meal_minutes || 0, rule.meal_minutes || 0),
+            rest_minutes: pol.rest_minutes || DEFAULT_BREAK_POLICY.rest_minutes,
+            rest_max_per_shift: pol.rest_max_per_shift ?? DEFAULT_BREAK_POLICY.rest_max_per_shift,
+            meal_paid_if_available: pol.meal_paid_if_available ?? DEFAULT_BREAK_POLICY.meal_paid_if_available,
+          });
+        }
       }
       await fetchAllManagerData();
     } catch (err) {
@@ -408,6 +425,7 @@ export default function ManagerDashboard() {
             ['Documents', '/documents'],
             ['Time Off', '/timeoff'],
             ['Reports', '/reports'],
+            ['Break Policy', '/break-policy'],
             ['Schedule', '/schedule'],
             ['QR Codes', '/qrcodes'],
             ['Profile', '/profile'],
@@ -653,7 +671,22 @@ export default function ManagerDashboard() {
                       <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
-                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+                      {(() => {
+                        const logBreaks = breaks.filter(b => b.time_log_id === log.id);
+                        const notes = [];
+                        for (const b of logBreaks) {
+                          if (b.break_type === 'On-call Meal') notes.push('On-call Meal — review pay treatment');
+                          if (b.start_time && b.end_time) {
+                            const dur = Math.max(0, Math.round((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / 60000));
+                            const max = maxMinutesForBreakType(b.break_type, breakPolicy);
+                            if (dur > max) notes.push(`Break overrun: ${b.break_type} ran ${dur} min vs ${max} min allowed`);
+                          }
+                        }
+                        return notes.length ? (
+                          <View style={styles.noteBox}>{notes.map((n, i) => (<Text key={i} style={styles.noteText}>⚠️ {n}</Text>))}</View>
+                        ) : null;
+                      })()}
                       {isAnomaly && (
                         reviewingAnomaly?.logId === log.id ? (
                           <View style={styles.reviewNoteWrap}>

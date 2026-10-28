@@ -12,6 +12,12 @@ import {
   weekStartMs,
   checkMealBreakCompliance,
   findMealBreakViolations,
+  checkMealBreakComplianceForRule,
+  PROVINCE_BREAK_RULES,
+  PROVINCE_CODES,
+  chooseBreakType,
+  maxMinutesForBreakType,
+  DEFAULT_BREAK_POLICY,
   buildAuditCsv,
   type AuditBreak,
   shiftsOverlap,
@@ -536,5 +542,132 @@ describe("zonedTimeToUtc", () => {
   test("bad input is NaN", () => {
     expect(Number.isNaN(zonedTimeToUtc("", "09:00", "UTC"))).toBe(true);
     expect(Number.isNaN(zonedTimeToUtc("2026-10-23", "", "UTC"))).toBe(true);
+  });
+});
+
+describe("supervised break chooser (chooseBreakType)", () => {
+  const policy = { meal_minutes: 30, rest_minutes: 15, rest_max_per_shift: 2, meal_paid_if_available: true };
+
+  test("first break of a shift is the unpaid meal", () => {
+    const c = chooseBreakType(policy, []);
+    expect(c).toEqual({ break_type: "Unpaid Meal", paid: false, max_minutes: 30, reason: expect.any(String) });
+  });
+
+  test("after the meal, paid rest is offered up to the cap, then nothing", () => {
+    expect(chooseBreakType(policy, ["Unpaid Meal"]).break_type).toBe("Paid Rest");
+    expect(chooseBreakType(policy, ["Unpaid Meal", "Paid Rest"]).break_type).toBe("Paid Rest");
+    const capped = chooseBreakType(policy, ["Unpaid Meal", "Paid Rest", "Paid Rest"]);
+    expect(capped.break_type).toBeNull();
+    expect(capped.max_minutes).toBe(0);
+  });
+
+  test("meal is never capped, even when rest breaks were taken first", () => {
+    const c = chooseBreakType(policy, ["Paid Rest", "Paid Rest"]);
+    expect(c.break_type).toBe("Unpaid Meal");
+    expect(c.paid).toBe(false);
+  });
+
+  test("on-call meal is flagged and paid when the policy allows it", () => {
+    const c = chooseBreakType(policy, [], { onCall: true });
+    expect(c.break_type).toBe("On-call Meal");
+    expect(c.paid).toBe(true);
+    expect(c.max_minutes).toBe(30);
+    const unpaid = chooseBreakType({ ...policy, meal_paid_if_available: false }, [], { onCall: true });
+    expect(unpaid.paid).toBe(false);
+  });
+
+  test("on-call after the meal falls through to paid rest", () => {
+    expect(chooseBreakType(policy, ["Unpaid Meal"], { onCall: true }).break_type).toBe("Paid Rest");
+  });
+
+  test("defaults apply when no policy is saved yet", () => {
+    expect(chooseBreakType(null, [])).toEqual({ break_type: "Unpaid Meal", paid: false, max_minutes: 30, reason: expect.any(String) });
+    expect(DEFAULT_BREAK_POLICY.rest_max_per_shift).toBe(2);
+  });
+
+  test("maxMinutesForBreakType maps meal and rest", () => {
+    expect(maxMinutesForBreakType("Unpaid Meal", policy)).toBe(30);
+    expect(maxMinutesForBreakType("On-call Meal", policy)).toBe(30);
+    expect(maxMinutesForBreakType("Unpaid Lunch", policy)).toBe(30);
+    expect(maxMinutesForBreakType("Paid Rest", policy)).toBe(15);
+  });
+});
+
+describe("province break rules", () => {
+  const T0 = new Date(2026, 9, 19, 9, 0, 0);
+  const iso = (h: number, m = 0) => new Date(T0.getTime() + (h * 60 + m) * 60000).toISOString();
+  const NOW = T0.getTime() + 12 * 3600000;
+  const brk = (sh: number, sm: number, eh: number, em = 0) => ({ start_time: iso(sh, sm), end_time: iso(eh, em) });
+
+  test("all 10 provinces, 3 territories and Federal are present", () => {
+    expect(PROVINCE_CODES).toHaveLength(14);
+    for (const code of ["ON", "BC", "AB", "QC", "MB", "SK", "NS", "NB", "NL", "PE", "YT", "NT", "NU", "FED"]) {
+      expect(PROVINCE_BREAK_RULES[code]).toBeDefined();
+    }
+  });
+
+  test("Ontario rule keeps the existing 5h/30min behaviour", () => {
+    expect(PROVINCE_BREAK_RULES.ON.meal_threshold_minutes).toBe(300);
+    expect(PROVINCE_BREAK_RULES.ON.meal_minutes).toBe(30);
+    expect(PROVINCE_BREAK_RULES.ON.split_allowed).toBe(true);
+    expect(checkMealBreakComplianceForRule({ clock_in: iso(0), clock_out: iso(6) }, [], NOW, PROVINCE_BREAK_RULES.ON)).not.toBeNull();
+  });
+
+  test("Alberta records a second meal for shifts over 10 hours", () => {
+    expect(PROVINCE_BREAK_RULES.AB.second_meal_threshold_minutes).toBe(600);
+    // 11h shift with one 30m meal at 5h: second span is 5h30 without a meal, so it violates
+    const v = checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(11) }, [brk(5, 0, 5, 30)], NOW, PROVINCE_BREAK_RULES.AB);
+    expect(v).not.toBeNull();
+  });
+
+  test("Newfoundland requires 60 minutes, so a 30-minute break is not enough", () => {
+    expect(PROVINCE_BREAK_RULES.NL.meal_minutes).toBe(60);
+    const v = checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(6) }, [brk(3, 0, 3, 30)], NOW, PROVINCE_BREAK_RULES.NL);
+    expect(v).not.toBeNull();
+    expect(v!.message).toContain("60-minute");
+    expect(checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(6) }, [brk(3, 0, 4, 0)], NOW, PROVINCE_BREAK_RULES.NL)).toBeNull();
+  });
+
+  test("New Brunswick has no express statutory meal break, so nothing violates", () => {
+    expect(PROVINCE_BREAK_RULES.NB.meal_threshold_minutes).toBeNull();
+    expect(checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(9) }, [], NOW, PROVINCE_BREAK_RULES.NB)).toBeNull();
+  });
+
+  test("non-split provinces need one single break of full length", () => {
+    const v = checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(6) }, [brk(2, 0, 2, 15), brk(4, 0, 4, 15)], NOW, PROVINCE_BREAK_RULES.BC);
+    expect(v).not.toBeNull();
+  });
+
+  test("Saskatchewan meal is only owed on shifts over 6 hours", () => {
+    expect(PROVINCE_BREAK_RULES.SK.min_shift_minutes_for_meal).toBe(360);
+    expect(checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(5, 30) }, [], NOW, PROVINCE_BREAK_RULES.SK)).toBeNull();
+    expect(checkMealBreakComplianceForRule(
+      { clock_in: iso(0), clock_out: iso(7) }, [], NOW, PROVINCE_BREAK_RULES.SK)).not.toBeNull();
+  });
+});
+
+describe("audit CSV unpaid-prefix deduction", () => {
+  const T0 = new Date(2026, 9, 19, 9, 0, 0);
+  const iso = (h: number, m = 0) => new Date(T0.getTime() + (h * 60 + m) * 60000).toISOString();
+  const NOW = T0.getTime() + 72 * 3600000;
+  const base = { log_id: "x", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca", worksite_name: "Depot", anomaly_flag: "Normal Shift" };
+
+  test("new Unpaid Meal deducts like legacy Unpaid Lunch; on-call meal does not deduct", () => {
+    const csv = buildAuditCsv([
+      { ...base, clock_in: iso(0), clock_out: iso(8), breaks: [
+        { break_type: "Unpaid Meal", start_time: iso(4), end_time: iso(4, 30) },
+        { break_type: "On-call Meal", start_time: iso(6), end_time: iso(6, 30) },
+      ] } as any,
+    ], NOW);
+    const row = csv.split("\n")[1];
+    // 8h gross - 30m unpaid = 7.5 paid hours; the 30m on-call meal stays counted as paid pending review
+    expect(row).toContain("7.5");
+    expect(row).toContain("Unpaid Meal 30m; On-call Meal 30m");
   });
 });
