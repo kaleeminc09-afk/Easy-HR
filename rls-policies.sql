@@ -85,7 +85,7 @@ BEGIN
     NEW.id,
     COALESCE(NEW.raw_user_meta_data->>'full_name', split_part(NEW.email, '@', 1)),
     NEW.email,
-    COALESCE(NEW.raw_user_meta_data->>'role', 'employee')
+    'employee' -- SECURITY: never trust signup metadata for role; managers are promoted by an admin after signup
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
