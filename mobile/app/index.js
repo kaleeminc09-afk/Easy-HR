@@ -300,6 +300,34 @@ export default function App() {
     }
   };
 
+  // GPS exception submit: the Out of Range box references this handler
+  // but it was never defined, so tapping Submit used to throw. It files
+  // the same time_exceptions row the QR scan now files (see scan.js).
+  const handleExceptionSubmit = async () => {
+    if (!outOfRangeData || !session?.user) return;
+    setSubmittingException(true);
+    try {
+      const { error } = await supabase.from('time_exceptions').insert([{
+        user_id: session.user.id,
+        worksite_id: outOfRangeData.worksite?.id || null,
+        attempted_at: new Date().toISOString(),
+        latitude: outOfRangeData.latitude,
+        longitude: outOfRangeData.longitude,
+        distance_meters: outOfRangeData.distance,
+        reason_note: exceptionNote,
+        status: 'pending',
+      }]);
+      if (error) throw new Error(error.message);
+      setOutOfRangeData(null);
+      setExceptionNote('');
+      setStatusMessage('Exception request sent to your manager.');
+    } catch (e) {
+      setStatusMessage('❌ Could not send exception: ' + e.message);
+    } finally {
+      setSubmittingException(false);
+    }
+  };
+
   // Supervised breaks: the employee never picks paid vs unpaid.
   // One button; chooseBreakType (shared with logic.ts) picks the type
   // from the business policy and this shift's breaks so far.

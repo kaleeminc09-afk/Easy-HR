@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import * as Location from 'expo-location';
 import { colors, spacing, radius, fontFamily, buttons } from '../lib/theme';
 
 const QR_PREFIX = 'northshift-site:';
@@ -13,6 +14,17 @@ export function parseWorksiteQr(data) {
   const id = data.slice(QR_PREFIX.length).trim();
   return id.length > 0 ? id : null;
 }
+
+// Same haversine formula as the GPS clock-in flow in index.js.
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371e3;
+  const p1 = (lat1 * Math.PI) / 180;
+  const p2 = (lat2 * Math.PI) / 180;
+  const dp = ((lat2 - lat1) * Math.PI) / 180;
+  const dl = ((lon2 - lon1) * Math.PI) / 180;
+  const a = Math.sin(dp / 2) * Math.sin(dp / 2) + Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) * Math.sin(dl / 2);
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+};
 
 export default function ScanScreen() {
   const [permission, requestPermission] = useCameraPermissions();
@@ -45,8 +57,41 @@ export default function ScanScreen() {
     setBusy(true);
     try {
       const { data: site, error: siteErr } = await supabase
-        .from('worksites').select('id, name').eq('id', worksiteId).maybeSingle();
+        .from('worksites').select('id, name, latitude, longitude, radius_meters').eq('id', worksiteId).maybeSingle();
       if (siteErr || !site) throw new Error('That worksite could not be found. Ask your manager to reprint the code.');
+
+      // Audit item 6 fix: a QR code is just a picture — without this check
+      // a photo of a worksite code clocked someone in from anywhere. The
+      // GPS flow already enforces the radius and files exceptions, so QR
+      // now does the same, before any clock-in or clock-out happens.
+      if (site.latitude == null || site.longitude == null) {
+        setResult({ ok: false, title: 'Worksite location not set', message: 'This worksite has no location saved. Ask your manager to set it, then scan again.' });
+        return;
+      }
+      const { status: locStatus } = await Location.requestForegroundPermissionsAsync();
+      if (locStatus !== 'granted') {
+        setResult({ ok: false, title: 'Location permission needed', message: 'QR clock-in needs your location to confirm you are at the worksite. Allow location access and scan again.' });
+        return;
+      }
+      const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = currentLocation.coords;
+      const distance = calculateDistance(latitude, longitude, site.latitude, site.longitude);
+      // A missing radius means no limit was set (same as the GPS flow,
+      // where distance > null is false) — the manager sets the radius.
+      if (site.radius_meters != null && distance > site.radius_meters) {
+        await supabase.from('time_exceptions').insert([{
+          user_id: session.user.id,
+          worksite_id: site.id,
+          attempted_at: new Date().toISOString(),
+          latitude,
+          longitude,
+          distance_meters: Math.round(distance),
+          reason_note: 'QR scan outside worksite radius',
+          status: 'pending',
+        }]);
+        setResult({ ok: false, title: 'Too far from this worksite', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). An exception was filed for your manager. Move within range and scan again.` });
+        return;
+      }
 
       const { data: open } = await supabase
         .from('time_logs')

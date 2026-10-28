@@ -53,9 +53,14 @@ export default function TeamStatusScreen() {
 
   const fetchStatus = useCallback(async () => {
     try {
+      // Audit item 6 fix: team-status now requires a signed-in user, so
+      // send the session token — the old code sent the publishable anon
+      // key, which is why the function answered anyone at all.
+      const { data: { session: liveSession } } = await supabase.auth.getSession();
+      if (!liveSession) { setLoading(false); setRefreshing(false); return; }
       const res = await fetch(`${SUPABASE_URL}/functions/v1/team-status`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json' },
+        headers: { 'Authorization': `Bearer ${liveSession.access_token}`, 'Content-Type': 'application/json' },
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
