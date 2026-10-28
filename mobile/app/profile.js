@@ -291,7 +291,7 @@ export default function ProfileScreen() {
             <View style={styles.sectionCard}>
               {message ? <Text style={styles.message}>{message}</Text> : null}
               <TouchableOpacity style={styles.primaryButton} onPress={handleSave} disabled={saving}>
-                {saving ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
+                {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Save Changes</Text>}
               </TouchableOpacity>
               <TouchableOpacity style={styles.signOutButton} onPress={handleSignOut}>
                 <Text style={styles.signOutButtonText}>Sign Out</Text>
@@ -307,7 +307,7 @@ export default function ProfileScreen() {
           <Field label="New password" value={newPassword} onChangeText={setNewPassword} placeholder="At least 8 characters" secureTextEntry autoCapitalize="none" />
           <Field label="Confirm new password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Repeat the new password" secureTextEntry autoCapitalize="none" />
           <TouchableOpacity style={styles.primaryButton} onPress={handleChangePassword} disabled={pwSaving}>
-            {pwSaving ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Change Password</Text>}
+            {pwSaving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Change Password</Text>}
           </TouchableOpacity>
         </View>
 

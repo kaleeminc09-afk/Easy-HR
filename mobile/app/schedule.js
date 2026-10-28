@@ -342,7 +342,7 @@ export default function ScheduleScreen() {
                 <Text style={styles.label}>Notes (optional)</Text>
                 <TextInput style={styles.input} value={formNotes} onChangeText={setFormNotes} placeholder="e.g. Delivery day — arrive 15 min early" placeholderTextColor={colors.inputPlaceholder} />
                 <TouchableOpacity style={styles.primaryButton} onPress={createShift} disabled={creating}>
-                  {creating ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>{formEmployee ? 'Create Shift' : 'Post Open Shift'}</Text>}
+                  {creating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{formEmployee ? 'Create Shift' : 'Post Open Shift'}</Text>}
                 </TouchableOpacity>
               </View>
             )}
@@ -398,7 +398,7 @@ export default function ScheduleScreen() {
 
                       {!isManager && s.status === 'open' && (
                         <TouchableOpacity style={styles.smallPrimary} onPress={() => claimShift(s)} disabled={busyId === s.id}>
-                          {busyId === s.id ? <ActivityIndicator size="small" color="#0A0E1A" /> : <Text style={styles.smallPrimaryText}>Claim This Shift</Text>}
+                          {busyId === s.id ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Text style={styles.smallPrimaryText}>Claim This Shift</Text>}
                         </TouchableOpacity>
                       )}
                       {!isManager && s.status === 'claim_pending' && s.claimed_by === myId && (

@@ -181,7 +181,7 @@ export default function BreakPolicyScreen() {
         </View>
 
         <TouchableOpacity style={styles.primaryButton} onPress={save} disabled={saving || !myBusinessId}>
-          {saving ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Break Policy</Text>}
+          {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Save Break Policy</Text>}
         </TouchableOpacity>
         {!myBusinessId ? <Text style={styles.cardText}>No business is linked to your account, so this policy cannot be saved yet.</Text> : null}
       </ScrollView>
@@ -216,7 +216,7 @@ const styles = StyleSheet.create({
   toggleBox: { color: colors.textPrimary, fontSize: 18 },
   toggleText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, flex: 1 },
   primaryButton: { backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center', minHeight: 56, justifyContent: 'center' },
-  primaryButtonText: { color: '#0A0E1A', fontFamily: fontFamily.semibold, fontSize: 15 },
+  primaryButtonText: { color: '#FFFFFF', fontFamily: fontFamily.semibold, fontSize: 15 },
   deniedContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: spacing.xl, gap: spacing.md },
   deniedTitle: { color: colors.danger, fontFamily: fontFamily.bold, fontSize: 20 },
   deniedText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 14, textAlign: 'center' },

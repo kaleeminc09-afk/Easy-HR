@@ -1,34 +1,38 @@
-// NorthShift — Midnight Executive theme tokens (toned down).
+// NorthShift — Sand theme tokens (approved 2026-10-28).
+// Sand background, warm-white cards, warm-ink text, NorthShift Teal
+// primary buttons, Sora as the company-name/wordmark font only.
+// Body text stays Inter — the approved font change was the wordmark
+// standing apart from regular text, not a new body typeface.
 // Single source of truth for colors, spacing, radius and type.
 // Import: `import { colors, spacing, radius, type } from '../lib/theme';`
 
 export const colors = {
-  // Surfaces — brighter dark navy, never pure black
-  background: '#121A2B',
-  backgroundSecondary: '#182238',
-  surface: 'rgba(255, 255, 255, 0.10)',
-  surfaceBorder: 'rgba(255, 255, 255, 0.16)',
+  // Surfaces — sand background, warm-white cards, warm sand borders
+  background: '#F4EDE0',
+  backgroundSecondary: '#EDE3D2',
+  surface: '#FFFDF7',
+  surfaceBorder: '#DDD2BC',
 
-  // Accent — electric cyan, used sparingly (primary actions, active states)
-  accent: '#00D4FF',
-  accentSoft: 'rgba(0, 212, 255, 0.12)',
-  accentBorder: 'rgba(0, 212, 255, 0.35)',
+  // Accent — NorthShift Teal, used sparingly (primary actions, active states)
+  accent: '#0F766E',
+  accentSoft: 'rgba(15, 118, 110, 0.10)',
+  accentBorder: 'rgba(15, 118, 110, 0.35)',
 
-  // Semantic
-  warning: '#FFB800',
-  warningSoft: 'rgba(255, 184, 0, 0.12)',
-  success: '#34D399',
-  danger: '#F87171',
+  // Semantic — darkened for readability on the light sand background
+  warning: '#B45309',
+  warningSoft: 'rgba(180, 83, 9, 0.10)',
+  success: '#15803D',
+  danger: '#DC2626',
 
-  // Text
-  textPrimary: '#F2F5F9',
-  textSecondary: '#B8C0CE',
-  textMuted: '#8A94A6',
+  // Text — warm ink on sand
+  textPrimary: '#1C1917',
+  textSecondary: '#57534E',
+  textMuted: '#78716C',
 
-  // Inputs
-  inputBackground: 'rgba(255, 255, 255, 0.08)',
-  inputBorder: 'rgba(255, 255, 255, 0.20)',
-  inputPlaceholder: '#8A94A6',
+  // Inputs — white fields with warm sand borders
+  inputBackground: '#FFFFFF',
+  inputBorder: '#DDD2BC',
+  inputPlaceholder: '#A8A29E',
 };
 
 export const spacing = {
@@ -42,12 +46,15 @@ export const spacing = {
 
 // Inter — loaded once in app/_layout.tsx via @expo-google-fonts/inter.
 // Use these instead of fontWeight-only styling so the typeface is consistent.
+// brand is Sora (via @expo-google-fonts/sora) and is used ONLY for the
+// "NorthShift" company name, so the wordmark stands apart from body text.
 export const fontFamily = {
   regular: 'Inter_400Regular',
   medium: 'Inter_500Medium',
   semibold: 'Inter_600SemiBold',
   bold: 'Inter_700Bold',
   extrabold: 'Inter_800ExtraBold',
+  brand: 'Sora_800ExtraBold',
 };
 
 export const radius = {
@@ -57,19 +64,19 @@ export const radius = {
   pill: 999,
 };
 
-// Toned down: restrained elevation, no heavy glows.
+// Light theme: soft warm shadows, no heavy glows.
 export const elevation = {
   card: {
-    shadowColor: '#000',
+    shadowColor: '#1C1917',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
+    shadowOpacity: 0.12,
     shadowRadius: 8,
     elevation: 3,
   },
   raised: {
-    shadowColor: '#000',
+    shadowColor: '#1C1917',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.18,
     shadowRadius: 12,
     elevation: 5,
   },
@@ -77,7 +84,7 @@ export const elevation = {
   accentGlow: {
     shadowColor: colors.accent,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.25,
     shadowRadius: 16,
     elevation: 6,
   },
@@ -116,7 +123,7 @@ export const buttons = {
     ...elevation.accentGlow,
   },
   primaryText: {
-    color: colors.background,
+    color: '#FFFFFF',
     fontSize: 16,
     fontFamily: fontFamily.semibold,
   },
@@ -151,7 +158,7 @@ export const buttons = {
     fontFamily: fontFamily.semibold,
   },
   dangerArmedText: {
-    color: colors.background,
+    color: '#FFFFFF',
     fontSize: 16,
     fontFamily: fontFamily.semibold,
   },
@@ -164,7 +171,7 @@ export const buttons = {
     justifyContent: 'center' as const,
   },
   compactText: {
-    color: colors.background,
+    color: '#FFFFFF',
     fontSize: 13,
     fontFamily: fontFamily.bold,
   },
@@ -183,15 +190,15 @@ export const buttons = {
     fontSize: 13,
     fontFamily: fontFamily.bold,
   },
-  // Glass nav buttons — translucent surface with a light border, for
+  // Glass nav buttons — translucent white surface with a warm border, for
   // secondary navigation. JS-only glass: no native blur module, so
-  // this stays rebuild-free. Primary actions stay solid cyan so they pop.
+  // this stays rebuild-free. Primary actions stay solid teal so they pop.
   glass: {
     minHeight: 44,
     borderRadius: radius.sm,
-    backgroundColor: 'rgba(255, 255, 255, 0.10)',
+    backgroundColor: 'rgba(255, 255, 255, 0.65)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.22)',
+    borderColor: '#DDD2BC',
     paddingVertical: 8,
     paddingHorizontal: 12,
     alignItems: 'center' as const,

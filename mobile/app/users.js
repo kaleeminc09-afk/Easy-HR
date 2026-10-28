@@ -203,7 +203,7 @@ export default function UsersScreen() {
           <TextInput style={styles.input} value={renameDraft} onChangeText={setRenameDraft} placeholder="Business name" autoCapitalize="words" placeholderTextColor={colors.inputPlaceholder} />
           <Text style={styles.usageText}>Account #{accountNumber || '—'} — this never changes, even on a rename.</Text>
           <TouchableOpacity style={styles.limitButton} onPress={handleRenameBusiness} disabled={renaming}>
-            {renaming ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.limitButtonText}>Save Business Name</Text>}
+            {renaming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.limitButtonText}>Save Business Name</Text>}
           </TouchableOpacity>
         </View>
         {users.map((u) => (
@@ -280,7 +280,7 @@ export default function UsersScreen() {
                   ))}
                 </View>
                 <TouchableOpacity style={styles.empSave} onPress={() => saveEmployment(u.id)} disabled={savingEmp}>
-                  {savingEmp ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.empSaveText}>Save Employment Details</Text>}
+                  {savingEmp ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.empSaveText}>Save Employment Details</Text>}
                 </TouchableOpacity>
               </View>
             )}

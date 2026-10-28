@@ -281,7 +281,7 @@ export default function TimeOffScreen() {
                 {formDays > 0 ? `This request is ${formDays} business day${formDays === 1 ? '' : 's'}.` : 'Pick a weekday range to see the day count.'}
               </Text>
               <TouchableOpacity style={styles.primaryButton} onPress={submitRequest} disabled={submitting}>
-                {submitting ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Send Request</Text>}
+                {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Send Request</Text>}
               </TouchableOpacity>
             </View>
 

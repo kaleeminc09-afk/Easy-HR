@@ -8,14 +8,15 @@ import {
   Inter_700Bold,
   Inter_800ExtraBold,
 } from '@expo-google-fonts/inter';
+import { Sora_800ExtraBold } from '@expo-google-fonts/sora';
 import { colors } from '../lib/theme';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 SplashScreen.preventAutoHideAsync();
 
-// Midnight Executive motion — one shared transition for every screen.
+// Sand theme motion — one shared transition for every screen.
 // slide_from_right = the native push feel; 220ms keeps it snappy, not floaty.
-// contentStyle kills the white flash visible behind dark screens mid-transition.
+// contentStyle kills the flash visible behind sand screens mid-transition.
 // headerShown: false because every screen renders its own custom header.
 const screenOptions = {
   headerShown: false,
@@ -32,6 +33,7 @@ export default function RootLayout() {
     Inter_600SemiBold,
     Inter_700Bold,
     Inter_800ExtraBold,
+    Sora_800ExtraBold,
   });
 
   useEffect(() => {

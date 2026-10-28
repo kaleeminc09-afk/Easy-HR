@@ -140,7 +140,7 @@ export default function PaymentScreen() {
 
           <TouchableOpacity style={styles.primaryButton} onPress={handleSubscribe} disabled={processing}>
             {processing
-              ? <ActivityIndicator color="#0A0E1A" />
+              ? <ActivityIndicator color="#FFFFFF" />
               : <Text style={styles.primaryButtonText}>Subscribe — ${planInfo.price}/mo</Text>}
           </TouchableOpacity>
 

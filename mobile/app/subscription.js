@@ -196,7 +196,7 @@ export default function SubscriptionScreen() {
           <Text style={styles.accountNumber}>{accountNumber || '—'}</Text>
           {bizMessage ? <Text style={styles.bizMessage}>{bizMessage}</Text> : null}
           <TouchableOpacity style={styles.primaryButton} onPress={saveBusiness} disabled={savingBiz || !businessId}>
-            {savingBiz ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Save Business Name</Text>}
+            {savingBiz ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Save Business Name</Text>}
           </TouchableOpacity>
         </View>
       </ScrollView>

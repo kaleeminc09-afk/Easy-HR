@@ -511,7 +511,7 @@ export default function App() {
           {statusMessage ? <Text style={styles.authMessage}>{statusMessage}</Text> : null}
 
           <TouchableOpacity style={styles.authPrimaryButton} onPress={handleLogin} disabled={authLoading}>
-            {authLoading ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.authPrimaryButtonText}>Sign In</Text>}
+            {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>Sign In</Text>}
           </TouchableOpacity>
 
           <View style={styles.authDivider}>
@@ -596,7 +596,7 @@ export default function App() {
               numberOfLines={3}
             />
             <TouchableOpacity style={styles.empPrimaryButton} onPress={handleExceptionSubmit} disabled={submittingException}>
-              {submittingException ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
+              {submittingException ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
             </TouchableOpacity>
             <TouchableOpacity style={styles.empGhostButton} onPress={() => setOutOfRangeData(null)}>
               <Text style={styles.empGhostButtonText}>Cancel</Text>
@@ -693,7 +693,7 @@ export default function App() {
                   activeOpacity={0.9}
                   disabled={locationChecking}
                 >
-                  {locationChecking ? <ActivityIndicator color="#0A0E1A" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
+                  {locationChecking ? <ActivityIndicator color="#FFFFFF" size="large" /> : <Text style={styles.empCircleButtonText}>CLOCK{'\n'}IN</Text>}
                 </TouchableOpacity>
               </Animated.View>
             )}
@@ -724,7 +724,7 @@ const styles = StyleSheet.create({
   empScanButtonText: { ...buttons.secondaryText },
   empBrandRow: { flexDirection: 'row', alignItems: 'center' },
   empBrandLogo: { width: 30, height: 30, borderRadius: 9, marginRight: 8 },
-  authTitle: { ...type.title, color: colors.textPrimary, textAlign: 'center' },
+  authTitle: { ...type.title, fontFamily: fontFamily.brand, color: colors.textPrimary, textAlign: 'center' },
   authSubtitle: { ...type.body, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.xs, marginBottom: spacing.xl },
   authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
   authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, fontFamily: fontFamily.regular, color: colors.textPrimary, marginBottom: spacing.md },
@@ -743,7 +743,7 @@ const styles = StyleSheet.create({
   // --- NorthShift employee theme (time tracker home) ---
   empContainer: { flex: 1, backgroundColor: colors.background },
   empHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
-  empBrand: { fontSize: 18, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  empBrand: { fontSize: 18, fontFamily: fontFamily.brand, color: colors.textPrimary },
   empEmail: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   roleBadge: { alignSelf: 'flex-start', marginTop: 2, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 2, paddingHorizontal: 8, fontSize: 11, fontFamily: fontFamily.semibold, color: colors.accent, overflow: 'hidden' },
   empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
@@ -783,13 +783,13 @@ const styles = StyleSheet.create({
   empProgressFill: { height: '100%', backgroundColor: colors.accent, borderRadius: 4 },
   empCircleButton: { width: 168, height: 168, borderRadius: 84, backgroundColor: colors.accent, justifyContent: 'center', alignItems: 'center', marginTop: spacing.xl, ...elevation.accentGlow },
   empCircleButtonDisabled: { opacity: 0.6 },
-  empCircleButtonText: { color: '#0A0E1A', fontSize: 20, fontFamily: fontFamily.extrabold, textAlign: 'center', letterSpacing: 1 },
+  empCircleButtonText: { color: '#FFFFFF', fontSize: 20, fontFamily: fontFamily.extrabold, textAlign: 'center', letterSpacing: 1 },
   empBreakRow: { flexDirection: 'row', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
   empOnCallRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: spacing.xl, width: '100%', maxWidth: 400 },
   empOnCallBox: { color: colors.textPrimary, fontSize: 18 },
   empOnCallText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13, flex: 1 },
   empBreakButton: { flex: 1, backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center', minHeight: 56, justifyContent: 'center' },
-  empBreakButtonText: { color: '#0A0E1A', fontFamily: fontFamily.semibold, fontSize: 15 },
+  empBreakButtonText: { color: '#FFFFFF', fontFamily: fontFamily.semibold, fontSize: 15 },
   empBreakPolicyText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 12, marginTop: spacing.sm, textAlign: 'center', width: '100%', maxWidth: 400 },
   empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
   empChipText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },

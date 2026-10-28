@@ -219,7 +219,7 @@ export default function DocumentsScreen() {
                 ))}
               </View>
               <TouchableOpacity style={styles.primaryButton} onPress={pickAndUpload} disabled={uploading}>
-                {uploading ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Pick a File to Upload</Text>}
+                {uploading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Pick a File to Upload</Text>}
               </TouchableOpacity>
               <Text style={styles.cardText}>PDF, photo, or Word document, up to 10 MB. {selectedUser === myId ? 'Goes into your file.' : `Goes into ${nameOf(selectedUser)}'s file.`}</Text>
             </View>
