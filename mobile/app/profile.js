@@ -69,6 +69,10 @@ export default function ProfileScreen() {
   const [worksiteName, setWorksiteName] = useState('');
 
   const [saving, setSaving] = useState(false);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMessage, setPwMessage] = useState('');
   const [message, setMessage] = useState('');
   const [setupMissing, setSetupMissing] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -154,6 +158,23 @@ export default function ProfileScreen() {
     }).eq('id', session.user.id);
     setMessage(error ? 'Could not save. Check your connection and try again.' : 'Profile updated.');
     setSaving(false);
+  };
+
+  // Change password for the signed-in account (e.g. after a business
+  // handover). Supabase keeps this session signed in; on a handover,
+  // also sign out on any device the previous owner used.
+  const handleChangePassword = async () => {
+    if (newPassword.length < 8) { setPwMessage('Use at least 8 characters for the new password.'); return; }
+    if (newPassword !== confirmPassword) { setPwMessage('The two passwords do not match.'); return; }
+    setPwSaving(true); setPwMessage('');
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) {
+      setPwMessage('Could not change the password. Please try again.');
+    } else {
+      setPwMessage('Password changed. Use the new password next time you sign in.');
+      setNewPassword(''); setConfirmPassword('');
+    }
+    setPwSaving(false);
   };
 
   const handleSignOut = async () => {
@@ -278,6 +299,17 @@ export default function ProfileScreen() {
             </View>
           </>
         )}
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Change password</Text>
+          <Text style={styles.sectionNote}>Use this after a business handover so only the new owner can sign in. This session stays signed in — sign out on any device the previous owner used.</Text>
+          {pwMessage ? <Text style={styles.message}>{pwMessage}</Text> : null}
+          <Field label="New password" value={newPassword} onChangeText={setNewPassword} placeholder="At least 8 characters" secureTextEntry autoCapitalize="none" />
+          <Field label="Confirm new password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Repeat the new password" secureTextEntry autoCapitalize="none" />
+          <TouchableOpacity style={styles.primaryButton} onPress={handleChangePassword} disabled={pwSaving}>
+            {pwSaving ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.primaryButtonText}>Change Password</Text>}
+          </TouchableOpacity>
+        </View>
 
         <View style={styles.sectionCard}>
           <View style={styles.dangerZone}>

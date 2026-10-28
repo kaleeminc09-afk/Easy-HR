@@ -15,6 +15,9 @@ export default function UsersScreen() {
   const [message, setMessage] = useState('');
   const [employeeLimit, setEmployeeLimit] = useState(null);
   const [businessName, setBusinessName] = useState('');
+  const [businessId, setBusinessId] = useState(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const [renaming, setRenaming] = useState(false);
   const [accountNumber, setAccountNumber] = useState('');
   const [worksites, setWorksites] = useState([]);
   const [editingId, setEditingId] = useState(null);
@@ -31,8 +34,9 @@ export default function UsersScreen() {
     if (!me || me.role !== 'admin') { setLoading(false); return; }
     setIsAdmin(true);
     if (me.business_id) {
+      setBusinessId(me.business_id);
       const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', me.business_id).single();
-      if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
+      if (biz) { setBusinessName(biz.business_name || ''); setRenameDraft(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
     }
     const { data: sub } = await supabase.from('subscriptions').select('employee_limit').eq('owner_id', session.user.id).maybeSingle();
     if (sub) setEmployeeLimit(sub.employee_limit);
@@ -48,6 +52,24 @@ export default function UsersScreen() {
       .select('id, full_name, role, created_at, job_title, department, start_date, employment_type, primary_worksite_id, employee_number, vacation_days_entitlement')
       .order('created_at', { ascending: true });
     if (!error) setUsers(data || []);
+  };
+
+  // Business rename (admin only; the screen already gates on admin).
+  // The account number and all history stay exactly the same — only
+  // the displayed name changes, which is what a sale/handover needs.
+  const handleRenameBusiness = async () => {
+    const name = (renameDraft || '').trim();
+    if (!businessId) { setMessage('No business linked to this account.'); return; }
+    if (!name) { setMessage('Enter a business name first.'); return; }
+    setRenaming(true); setMessage('');
+    const { error } = await supabase.from('businesses').update({ business_name: name }).eq('id', businessId);
+    if (error) {
+      setMessage('Could not rename the business. Please try again.');
+    } else {
+      setBusinessName(name);
+      setMessage('Business renamed. Your account number and all history stay the same.');
+    }
+    setRenaming(false);
   };
 
   const changeRole = async (userId, newRole) => {
@@ -176,6 +198,14 @@ export default function UsersScreen() {
             </Link>
           </View>
         )}
+        <View style={styles.usageCard}>
+          <Text style={styles.usageText}>Business name</Text>
+          <TextInput style={styles.input} value={renameDraft} onChangeText={setRenameDraft} placeholder="Business name" autoCapitalize="words" placeholderTextColor={colors.inputPlaceholder} />
+          <Text style={styles.usageText}>Account #{accountNumber || '—'} — this never changes, even on a rename.</Text>
+          <TouchableOpacity style={styles.limitButton} onPress={handleRenameBusiness} disabled={renaming}>
+            {renaming ? <ActivityIndicator color="#0A0E1A" /> : <Text style={styles.limitButtonText}>Save Business Name</Text>}
+          </TouchableOpacity>
+        </View>
         {users.map((u) => (
           <View key={u.id} style={styles.userCard}>
             <View style={styles.userInfo}>
@@ -275,6 +305,7 @@ const styles = StyleSheet.create({
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
   usageCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
   usageText: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.textPrimary, marginBottom: spacing.xs },
+  input: { fontFamily: fontFamily.regular, width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginVertical: spacing.sm },
   progressTrack: { height: 8, backgroundColor: colors.inputBackground, borderRadius: 4, overflow: 'hidden' },
   progressFill: { height: 8, backgroundColor: colors.accent, borderRadius: 4 },
   limitCard: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg },
