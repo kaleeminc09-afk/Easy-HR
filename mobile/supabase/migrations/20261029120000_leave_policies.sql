@@ -19,13 +19,13 @@ ALTER TABLE public.leave_policies ENABLE ROW LEVEL SECURITY;
 
 -- leave_policies (tenant-scoped; deliberately NOT the global is_manager())
 DROP POLICY IF EXISTS "leave_policies_select_same_business" ON public.leave_policies;
-CREATE POLICY "leave_policies_select_same_business"
+CREATE POLICY "leave_policies_select_same_business" ON public.leave_policies
   FOR SELECT TO public USING (
     EXISTS (SELECT 1 FROM public.profiles
       WHERE profiles.id = auth.uid()
         AND profiles.business_id = leave_policies.business_id));
 DROP POLICY IF EXISTS "leave_policies_write_same_business_manager" ON public.leave_policies;
-CREATE POLICY "leave_policies_write_same_business_manager"
+CREATE POLICY "leave_policies_write_same_business_manager" ON public.leave_policies
   FOR ALL TO public
   USING (
     EXISTS (SELECT 1 FROM public.profiles
