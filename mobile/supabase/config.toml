@@ -418,3 +418,6 @@ enabled = true
 # also checks the session itself, so this gateway check is defence in depth.
 [functions.team-status]
 verify_jwt = true
+
+[functions.invite-employee]
+verify_jwt = true

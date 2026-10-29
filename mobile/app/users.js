@@ -3,6 +3,8 @@ import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
+
+const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 export default function UsersScreen() {
@@ -23,6 +25,10 @@ export default function UsersScreen() {
   const [editingId, setEditingId] = useState(null);
   const [savingEmp, setSavingEmp] = useState(false);
   const [empForm, setEmpForm] = useState({ job_title: '', department: '', employee_number: '', start_date: '', employment_type: '', primary_worksite_id: '', vacation_days_entitlement: '10' });
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteFirst, setInviteFirst] = useState('');
+  const [inviteLast, setInviteLast] = useState('');
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => { init(); }, []);
 
@@ -52,6 +58,36 @@ export default function UsersScreen() {
       .select('id, full_name, role, created_at, job_title, department, start_date, employment_type, primary_worksite_id, employee_number, vacation_days_entitlement')
       .order('created_at', { ascending: true });
     if (!error) setUsers(data || []);
+  };
+
+  // Invite-link onboarding: admin sends a Supabase invite email. The
+  // employee taps the link, lands in the app signed in, and sets their
+  // password on the Profile screen. Role/business are forced server-side.
+  const handleInvite = async () => {
+    const email = inviteEmail.trim().toLowerCase();
+    if (!email.includes('@')) { setMessage('Enter a valid email to invite.'); return; }
+    setInviting(true);
+    setMessage('');
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { setMessage('Sign in again, then retry the invite.'); return; }
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/invite-employee`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${session.access_token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, first_name: inviteFirst.trim(), last_name: inviteLast.trim() }),
+      });
+      const out = await res.json().catch(() => ({}));
+      if (!res.ok) { setMessage(out.error || 'Invite failed. Try again.'); return; }
+      setMessage(`Invite sent to ${email}. They tap the link in the email, open the app, then set their password on the Profile screen.`);
+      setInviteEmail('');
+      setInviteFirst('');
+      setInviteLast('');
+      await loadUsers();
+    } catch (e) {
+      setMessage('Invite failed. Check your connection and try again.');
+    } finally {
+      setInviting(false);
+    }
   };
 
   // Business rename (admin only; the screen already gates on admin).
@@ -204,6 +240,16 @@ export default function UsersScreen() {
           <Text style={styles.usageText}>Account #{accountNumber || '—'} — this never changes, even on a rename.</Text>
           <TouchableOpacity style={styles.limitButton} onPress={handleRenameBusiness} disabled={renaming}>
             {renaming ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.limitButtonText}>Save Business Name</Text>}
+          </TouchableOpacity>
+        </View>
+        <View style={styles.usageCard}>
+          <Text style={styles.usageText}>Invite employee</Text>
+          <Text style={styles.message}>Send a sign-in link to a new employee. They open the app from the email, then set their password on the Profile screen.</Text>
+          <TextInput style={styles.input} value={inviteEmail} onChangeText={setInviteEmail} placeholder="Employee email" placeholderTextColor={colors.inputPlaceholder} autoCapitalize="none" keyboardType="email-address" />
+          <TextInput style={styles.input} value={inviteFirst} onChangeText={setInviteFirst} placeholder="First name (optional)" placeholderTextColor={colors.inputPlaceholder} autoCapitalize="words" />
+          <TextInput style={styles.input} value={inviteLast} onChangeText={setInviteLast} placeholder="Last name (optional)" placeholderTextColor={colors.inputPlaceholder} autoCapitalize="words" />
+          <TouchableOpacity style={styles.limitButton} onPress={handleInvite} disabled={inviting}>
+            {inviting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.limitButtonText}>Send Invite</Text>}
           </TouchableOpacity>
         </View>
         {users.map((u) => (
