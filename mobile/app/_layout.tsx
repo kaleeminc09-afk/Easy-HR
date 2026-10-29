@@ -46,12 +46,16 @@ export default function RootLayout() {
   // Invite-link accept: an invited employee taps the Supabase invite email,
   // which redirects to northshift://invite carrying session tokens. Sign them
   // in from those tokens and land on Profile, where Change Password sets
-  // their first password. Any other link is left alone.
+  // their first password. Password-recovery links work the same way and land
+  // on Reset Password, where the new password is set. Any other link is
+  // left alone.
   useEffect(() => {
     const handleUrl = async (url: string | null) => {
       if (!url) return;
       const isInvite = url.startsWith('northshift://invite') || url.includes('type=invite');
-      if (!isInvite) return;
+      const isRecovery = url.startsWith('northshift://reset-password') || url.includes('type=recovery');
+      const target = isInvite ? '/profile' : isRecovery ? '/reset-password' : null;
+      if (!target) return;
       try {
         const hash = url.split('#')[1] || '';
         const hashParams = new URLSearchParams(hash);
@@ -59,16 +63,16 @@ export default function RootLayout() {
         const refresh_token = hashParams.get('refresh_token');
         if (access_token && refresh_token) {
           const { error } = await supabase.auth.setSession({ access_token, refresh_token });
-          if (!error) { router.replace('/profile'); return; }
+          if (!error) { router.replace(target); return; }
         }
         const query = url.split('?')[1]?.split('#')[0] || '';
         const code = new URLSearchParams(query).get('code');
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (!error) router.replace('/profile');
+          if (!error) router.replace(target);
         }
       } catch {
-        // Not a usable invite link; leave the session alone.
+        // Not a usable invite/recovery link; leave the session alone.
       }
     };
     Linking.getInitialURL().then(handleUrl);

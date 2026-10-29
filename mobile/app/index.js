@@ -24,7 +24,8 @@ export default function App() {
   const [lastName, setLastName] = useState('');
   const [profileIncomplete, setProfileIncomplete] = useState(false);
   const [authError, setAuthError] = useState('');
-  const [authMode, setAuthMode] = useState('signin'); // signin | create
+  const [authMode, setAuthMode] = useState('signin'); // signin | create | forgot
+  const [showPassword, setShowPassword] = useState(false);
 
   // Time Tracker State
   const [activeSession, setActiveSession] = useState(null);
@@ -121,6 +122,28 @@ export default function App() {
     }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setAuthError(error.message);
+    setAuthLoading(false);
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthLoading(true);
+    setAuthError('');
+    setStatusMessage('');
+    if (!email.includes('@')) {
+      setAuthError('Enter the email address on your account.');
+      setAuthLoading(false);
+      return;
+    }
+    // Supabase sends the link only if the account exists; the message
+    // below stays neutral either way so it never confirms an address.
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: 'northshift://reset-password',
+    });
+    if (error) {
+      setAuthError(error.message);
+    } else {
+      setStatusMessage('If an account exists for that email, a reset link is on its way. Check your inbox (and spam folder).');
+    }
     setAuthLoading(false);
   };
 
@@ -513,6 +536,7 @@ export default function App() {
             autoCapitalize="none"
             keyboardType="email-address"
           />
+          {authMode !== 'forgot' && (<>
           <Text style={styles.authLabel}>Password</Text>
           <TextInput
             style={styles.authInput}
@@ -520,14 +544,28 @@ export default function App() {
             placeholderTextColor={colors.inputPlaceholder}
             value={password}
             onChangeText={setPassword}
-            secureTextEntry
+            secureTextEntry={!showPassword}
           />
+          {authMode === 'signin' && (
+            <View style={styles.authAuxRow}>
+              <TouchableOpacity onPress={() => { setAuthMode('forgot'); setAuthError(''); setStatusMessage(''); }}>
+                <Text style={styles.authAuxLink}>Forgot password?</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                <Text style={styles.authAuxLink}>{showPassword ? 'Hide' : 'Show'}</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          </>)}
+          {authMode === 'forgot' && (
+            <Text style={styles.authMessage}>Enter the email on your account and we will send you a link to choose a new password.</Text>
+          )}
 
           {authError ? <Text style={styles.authError}>{authError}</Text> : null}
           {statusMessage ? <Text style={styles.authMessage}>{statusMessage}</Text> : null}
 
-          <TouchableOpacity style={styles.authPrimaryButton} onPress={authMode === 'create' ? handleSignUp : handleLogin} disabled={authLoading}>
-            {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>{authMode === 'create' ? 'Create Account' : 'Sign In'}</Text>}
+          <TouchableOpacity style={styles.authPrimaryButton} onPress={authMode === 'create' ? handleSignUp : authMode === 'forgot' ? handleForgotPassword : handleLogin} disabled={authLoading}>
+            {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>{authMode === 'create' ? 'Create Account' : authMode === 'forgot' ? 'Send reset link' : 'Sign In'}</Text>}
           </TouchableOpacity>
 
           {authMode === 'signin' && (<>
@@ -542,8 +580,8 @@ export default function App() {
           </TouchableOpacity>
           </>)}
 
-          <TouchableOpacity style={styles.authSecondaryButton} onPress={() => { setAuthMode(authMode === 'create' ? 'signin' : 'create'); setAuthError(''); setStatusMessage(''); }} disabled={authLoading}>
-            <Text style={styles.authSecondaryButtonText}>{authMode === 'create' ? 'Already have an account? Sign in' : 'New here? Create account'}</Text>
+          <TouchableOpacity style={styles.authSecondaryButton} onPress={() => { setAuthMode(authMode === 'forgot' ? 'signin' : authMode === 'create' ? 'signin' : 'create'); setAuthError(''); setStatusMessage(''); }} disabled={authLoading}>
+            <Text style={styles.authSecondaryButtonText}>{authMode === 'forgot' ? 'Back to sign in' : authMode === 'create' ? 'Already have an account? Sign in' : 'New here? Create account'}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -748,6 +786,8 @@ const styles = StyleSheet.create({
   authLabel: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
   authInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, fontFamily: fontFamily.regular, color: colors.textPrimary, marginBottom: spacing.md },
   authError: { color: colors.danger, fontSize: 13, fontFamily: fontFamily.regular, textAlign: 'center', marginBottom: spacing.sm },
+  authAuxRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  authAuxLink: { color: colors.primary, fontSize: 13, fontFamily: fontFamily.medium },
   authMessage: { color: colors.textSecondary, fontSize: 13, fontFamily: fontFamily.regular, textAlign: 'center', marginBottom: spacing.sm },
   authPrimaryButton: { ...buttons.primary, marginTop: spacing.sm },
   authPrimaryButtonText: { ...buttons.primaryText },
