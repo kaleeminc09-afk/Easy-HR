@@ -28,6 +28,8 @@ import {
   plannedVsActual,
   vacationDaysUsed,
   vacationBalance,
+  leaveDaysUsed,
+  leaveTypeBalance,
   sanitizeFileName,
   buildStoragePath,
   zonedTimeToUtc,
@@ -669,5 +671,20 @@ describe("audit CSV unpaid-prefix deduction", () => {
     // 8h gross - 30m unpaid = 7.5 paid hours; the 30m on-call meal stays counted as paid pending review
     expect(row).toContain("7.5");
     expect(row).toContain("Unpaid Meal 30m; On-call Meal 30m");
+  });
+});
+
+describe("leaveTypeBalance", () => {
+  test("counts approved days per type, capped and unlimited", () => {
+    const reqs = [
+      { type: "Sick", start_date: "2026-10-19", end_date: "2026-10-20", status: "approved" }, // 2
+      { type: "Sick", start_date: "2026-10-21", end_date: "2026-10-21", half_day: true, status: "approved" }, // 0.5
+      { type: "Sick", start_date: "2026-10-22", end_date: "2026-10-22", status: "pending" }, // ignored
+      { type: "Personal", start_date: "2026-10-19", end_date: "2026-10-19", status: "approved" }, // other type
+    ];
+    expect(leaveDaysUsed(reqs, "Sick", 2026)).toBe(2.5);
+    expect(leaveTypeBalance(4, reqs, "Sick", 2026)).toEqual({ cap: 4, used: 2.5, remaining: 1.5 });
+    expect(leaveTypeBalance(null, reqs, "Sick", 2026)).toEqual({ cap: null, used: 2.5, remaining: null });
+    expect(leaveTypeBalance(4, reqs, "Personal", 2026)).toEqual({ cap: 4, used: 1, remaining: 3 });
   });
 });

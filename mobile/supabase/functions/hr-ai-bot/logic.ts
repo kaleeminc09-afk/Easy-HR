@@ -660,15 +660,49 @@ export function dateRangesOverlap(
 
 /** Approved vacation business days attributed to a calendar year
  *  (by the request's start date). */
-export function vacationDaysUsed(requests: TimeOffLike[], year: number): number {
+/** Approved business days of one leave type attributed to a calendar
+ * year (by the request's start date). Pending/denied requests never count
+ * — the same rule the vacation balance has always used. */
+export function leaveDaysUsed(requests: TimeOffLike[], type: string, year: number): number {
   let used = 0;
   for (const r of requests) {
-    if (r.status !== "approved" || r.type !== "Vacation") continue;
+    if (r.status !== "approved" || r.type !== type) continue;
     if (new Date(dateOnlyMs(r.start_date)).getUTCFullYear() !== year) continue;
     used += countBusinessDays(r.start_date, r.end_date, !!r.half_day);
   }
   return +used.toFixed(1);
 }
+
+export function vacationDaysUsed(requests: TimeOffLike[], year: number): number {
+  return leaveDaysUsed(requests, "Vacation", year);
+}
+
+/** Balance for one capped leave type. cap null = no annual limit, so
+ * remaining is null and only used is meaningful. */
+export function leaveTypeBalance(cap: number | null, requests: TimeOffLike[], type: string, year: number): { cap: number | null; used: number; remaining: number | null } {
+  const used = leaveDaysUsed(requests, type, year);
+  return cap == null
+    ? { cap: null, used, remaining: null }
+    : { cap, used, remaining: +(cap - used).toFixed(1) };
+}
+
+// Per-business leave policy. Vacation is not here (see the migration
+// note): it stays per employee on profiles.vacation_days_entitlement.
+export interface LeavePolicy {
+  sick_days: number | null;
+  personal_days: number | null;
+  sick_offered: boolean;
+  personal_offered: boolean;
+  other_offered: boolean;
+}
+
+export const DEFAULT_LEAVE_POLICY: LeavePolicy = {
+  sick_days: null,
+  personal_days: null,
+  sick_offered: true,
+  personal_offered: true,
+  other_offered: true,
+};
 
 export interface VacationBalance {
   entitlement: number;

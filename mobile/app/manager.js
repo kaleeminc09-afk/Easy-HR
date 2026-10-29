@@ -426,6 +426,7 @@ export default function ManagerDashboard() {
             ['Time Off', '/timeoff'],
             ['Reports', '/reports'],
             ['Break Policy', '/break-policy'],
+            ['Leave Policy', '/leave-policy'],
             ['Schedule', '/schedule'],
             ['QR Codes', '/qrcodes'],
             ['Profile', '/profile'],

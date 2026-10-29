@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
-import { countBusinessDays, dateRangesOverlap, vacationBalance } from '../supabase/functions/hr-ai-bot/logic';
+import { countBusinessDays, dateRangesOverlap, vacationBalance, leaveTypeBalance } from '../supabase/functions/hr-ai-bot/logic';
 
 const TYPES = ['Vacation', 'Sick', 'Personal', 'Unpaid', 'Other'];
 
@@ -43,6 +43,7 @@ export default function TimeOffScreen() {
 
   // Request form
   const [formType, setFormType] = useState('Vacation');
+  const [leavePolicy, setLeavePolicy] = useState(null); // null = defaults: all types offered, no sick/personal cap
   const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [formStart, setFormStart] = useState(todayStr());
   const [formEnd, setFormEnd] = useState(todayStr());
@@ -54,6 +55,19 @@ export default function TimeOffScreen() {
   const year = new Date().getFullYear();
   const balance = vacationBalance(entitlement, mine, year);
   const formDays = countBusinessDays(formStart, formEnd, formHalf && formStart === formEnd);
+  // Vacation is always offered, capped per employee by their profile
+  // entitlement. Sick/Personal/Other follow the business policy; Unpaid
+  // is always offered and never capped. A missing policy = defaults.
+  const offeredTypes = ['Vacation',
+    ...(leavePolicy?.sick_offered !== false ? ['Sick'] : []),
+    ...(leavePolicy?.personal_offered !== false ? ['Personal'] : []),
+    'Unpaid',
+    ...(leavePolicy?.other_offered !== false ? ['Other'] : [])];
+  const sickBal = leaveTypeBalance(leavePolicy?.sick_days ?? null, mine, 'Sick', year);
+  const personalBal = leaveTypeBalance(leavePolicy?.personal_days ?? null, mine, 'Personal', year);
+  const otherLeaveLine = (label, bal) => bal.cap == null
+    ? `${label} · no annual limit (${bal.used} used this year)`
+    : `${label} · ${bal.remaining} of ${bal.cap} days left this year (${bal.used} used)`;
 
   useEffect(() => { init(); }, []);
 
@@ -65,6 +79,12 @@ export default function TimeOffScreen() {
     if (me) { setMyRole(me.role || 'employee'); setBusinessId(me.business_id || null); }
     const { data: ent } = await supabase.from('profiles').select('vacation_days_entitlement').eq('id', session.user.id).single();
     if (ent && ent.vacation_days_entitlement != null) setEntitlement(Number(ent.vacation_days_entitlement));
+    if (me?.business_id) {
+      // Policy table may not exist yet (migration not run) or RLS may
+      // deny it — either way the defaults below apply, never a block.
+      const { data: pol } = await supabase.from('leave_policies').select('*').eq('business_id', me.business_id).maybeSingle();
+      if (pol) setLeavePolicy(pol);
+    }
     const { data: ppl } = await supabase.from('profiles').select('id, full_name').order('full_name', { ascending: true });
     if (ppl) setPeople(ppl);
     await loadRequests(session.user.id, me?.role);
@@ -117,9 +137,20 @@ export default function TimeOffScreen() {
       setMessage(`That overlaps your ${clash.type.toLowerCase()} request (${fmtDate(clash.start_date)} to ${fmtDate(clash.end_date)}).`);
       return;
     }
+    if (!offeredTypes.includes(formType)) {
+      setMessage(`Your business doesn't offer ${formType.toLowerCase()} leave.`);
+      return;
+    }
     if (formType === 'Vacation' && formDays > balance.remaining) {
       setMessage(`You have ${balance.remaining} vacation days left this year, but this request is ${formDays}. Ask your manager if you need more.`);
       return;
+    }
+    if (formType === 'Sick' || formType === 'Personal') {
+      const bal = formType === 'Sick' ? sickBal : personalBal;
+      if (bal.cap != null && formDays > (bal.remaining ?? 0)) {
+        setMessage(`You have ${bal.remaining} ${formType.toLowerCase()} days left this year, but this request is ${formDays}. Ask your manager if you need more.`);
+        return;
+      }
     }
     setSubmitting(true);
     setMessage('');
@@ -248,6 +279,12 @@ export default function TimeOffScreen() {
                   <Text style={styles.balanceLabel}>Remaining</Text>
                 </View>
               </View>
+                {leavePolicy?.sick_offered !== false && (
+                  <Text style={styles.cardText}>{otherLeaveLine('Sick', sickBal)}</Text>
+                )}
+                {leavePolicy?.personal_offered !== false && (
+                  <Text style={styles.cardText}>{otherLeaveLine('Personal', personalBal)}</Text>
+                )}
             </View>
 
             <View style={styles.card}>
@@ -259,7 +296,7 @@ export default function TimeOffScreen() {
               </TouchableOpacity>
               {typePickerOpen && (
                 <View style={styles.typeList}>
-                  {TYPES.map((t) => (
+                  {offeredTypes.map((t) => (
                     <TouchableOpacity key={t} style={styles.typeOption} onPress={() => { setFormType(t); setTypePickerOpen(false); }}>
                       <Text style={[styles.typeOptionText, formType === t && styles.typeOptionTextActive]}>{formType === t ? '✓ ' : ''}{t}</Text>
                     </TouchableOpacity>
