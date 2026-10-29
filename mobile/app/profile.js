@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
-  content: { padding: spacing.lg, alignItems: 'center', gap: spacing.lg },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, alignItems: 'center', gap: spacing.lg },
   card: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center', ...elevation.card },
   sectionCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
   sectionTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.md },

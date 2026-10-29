@@ -24,6 +24,7 @@ export default function App() {
   const [lastName, setLastName] = useState('');
   const [profileIncomplete, setProfileIncomplete] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [authMode, setAuthMode] = useState('signin'); // signin | create
 
   // Time Tracker State
   const [activeSession, setActiveSession] = useState(null);
@@ -110,6 +111,11 @@ export default function App() {
   const handleLogin = async () => {
     setAuthLoading(true);
     setAuthError('');
+    if (!email.includes('@') || password.length < 6) {
+      setAuthError('Enter your email and password (at least 6 characters).');
+      setAuthLoading(false);
+      return;
+    }
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) setAuthError(error.message);
     setAuthLoading(false);
@@ -118,6 +124,11 @@ export default function App() {
   const handleSignUp = async () => {
     setAuthLoading(true);
     setAuthError('');
+    if (!email.includes('@') || password.length < 6) {
+      setAuthError('Enter an email and a password (at least 6 characters) to create an account.');
+      setAuthLoading(false);
+      return;
+    }
     const fn = firstName.trim();
     const ln = lastName.trim();
     const composedName = `${fn} ${ln}`.trim();
@@ -467,9 +478,10 @@ export default function App() {
         <View style={styles.authCard}>
           <Image source={require('../assets/images/icon.png')} style={styles.authLogo} />
           <Text style={styles.authTitle}>NorthShift</Text>
-          <Text style={styles.authSubtitle}>Welcome back. Sign in to continue.</Text>
+          <Text style={styles.authSubtitle}>{authMode === 'create' ? 'Create your NorthShift account.' : 'Welcome back. Sign in to continue.'}</Text>
 
-          <Text style={styles.authLabel}>First name (new accounts)</Text>
+          {authMode === 'create' && (<>
+          <Text style={styles.authLabel}>First name</Text>
           <TextInput
             style={styles.authInput}
             placeholder="First name"
@@ -478,7 +490,7 @@ export default function App() {
             onChangeText={setFirstName}
             autoCapitalize="words"
           />
-          <Text style={styles.authLabel}>Last name (new accounts)</Text>
+          <Text style={styles.authLabel}>Last name</Text>
           <TextInput
             style={styles.authInput}
             placeholder="Last name"
@@ -487,6 +499,7 @@ export default function App() {
             onChangeText={setLastName}
             autoCapitalize="words"
           />
+          </>)}
           <Text style={styles.authLabel}>Email</Text>
           <TextInput
             style={styles.authInput}
@@ -510,10 +523,11 @@ export default function App() {
           {authError ? <Text style={styles.authError}>{authError}</Text> : null}
           {statusMessage ? <Text style={styles.authMessage}>{statusMessage}</Text> : null}
 
-          <TouchableOpacity style={styles.authPrimaryButton} onPress={handleLogin} disabled={authLoading}>
-            {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>Sign In</Text>}
+          <TouchableOpacity style={styles.authPrimaryButton} onPress={authMode === 'create' ? handleSignUp : handleLogin} disabled={authLoading}>
+            {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>{authMode === 'create' ? 'Create Account' : 'Sign In'}</Text>}
           </TouchableOpacity>
 
+          {authMode === 'signin' && (<>
           <View style={styles.authDivider}>
             <View style={styles.authDividerLine} />
             <Text style={styles.authDividerText}>or</Text>
@@ -523,9 +537,10 @@ export default function App() {
           <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
             <Text style={styles.authBiometricButtonText}>Sign in with biometrics</Text>
           </TouchableOpacity>
+          </>)}
 
-          <TouchableOpacity style={styles.authSecondaryButton} onPress={handleSignUp} disabled={authLoading}>
-            <Text style={styles.authSecondaryButtonText}>New here? Create account</Text>
+          <TouchableOpacity style={styles.authSecondaryButton} onPress={() => { setAuthMode(authMode === 'create' ? 'signin' : 'create'); setAuthError(''); setStatusMessage(''); }} disabled={authLoading}>
+            <Text style={styles.authSecondaryButtonText}>{authMode === 'create' ? 'Already have an account? Sign in' : 'New here? Create account'}</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -664,6 +679,7 @@ export default function App() {
                     <Text style={styles.empOnCallBox}>{onCallBreak ? '☑' : '☐'}</Text>
                     <Text style={styles.empOnCallText}>I must stay available during this break</Text>
                   </TouchableOpacity>
+                  <Text style={styles.empBreakPolicyText}>If ticked, this break is recorded as an on-call meal: paid only if your business policy allows it, and your manager reviews it.</Text>
                   <View style={styles.empBreakRow}>
                     <TouchableOpacity style={styles.empBreakButton} onPress={handleStartBreak}>
                       <Text style={styles.empBreakButtonText}>Start Break</Text>
@@ -754,7 +770,7 @@ const styles = StyleSheet.create({
   empAssistantButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12 },
   empNavButton: { ...buttons.glass },
   empNavButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 12 },
-  empContent: { padding: spacing.lg, alignItems: 'center', flexGrow: 1 },
+  empContent: { padding: spacing.lg, paddingBottom: spacing.xxl, alignItems: 'center', flexGrow: 1 },
   profileNudge: { width: '100%', maxWidth: 420, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, marginBottom: spacing.lg },
   profileNudgeTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: spacing.xs },
   profileNudgeText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary, marginBottom: spacing.sm },

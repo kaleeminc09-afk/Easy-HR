@@ -6,7 +6,7 @@ import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { countBusinessDays, dateRangesOverlap, vacationBalance } from '../supabase/functions/hr-ai-bot/logic';
 
-const TYPES = ['Vacation', 'Sick', 'Personal', 'Unpaid'];
+const TYPES = ['Vacation', 'Sick', 'Personal', 'Unpaid', 'Other'];
 
 function todayStr() {
   const d = new Date();
@@ -43,6 +43,7 @@ export default function TimeOffScreen() {
 
   // Request form
   const [formType, setFormType] = useState('Vacation');
+  const [typePickerOpen, setTypePickerOpen] = useState(false);
   const [formStart, setFormStart] = useState(todayStr());
   const [formEnd, setFormEnd] = useState(todayStr());
   const [formHalf, setFormHalf] = useState(false);
@@ -247,19 +248,24 @@ export default function TimeOffScreen() {
                   <Text style={styles.balanceLabel}>Remaining</Text>
                 </View>
               </View>
-              <Text style={styles.cardText}>Approved vacation days count against the balance. Sick, personal, and unpaid days do not.</Text>
             </View>
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>Request Time Off</Text>
               <Text style={styles.label}>Type</Text>
-              <View style={styles.chipRow}>
-                {TYPES.map((t) => (
-                  <TouchableOpacity key={t} style={[styles.chip, formType === t && styles.chipActive]} onPress={() => setFormType(t)}>
-                    <Text style={[styles.chipText, formType === t && styles.chipTextActive]}>{t}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
+              <TouchableOpacity style={styles.typeButton} onPress={() => setTypePickerOpen(!typePickerOpen)}>
+                <Text style={styles.typeButtonText}>{formType}</Text>
+                <Text style={styles.typeButtonText}>{typePickerOpen ? '▴' : '▾'}</Text>
+              </TouchableOpacity>
+              {typePickerOpen && (
+                <View style={styles.typeList}>
+                  {TYPES.map((t) => (
+                    <TouchableOpacity key={t} style={styles.typeOption} onPress={() => { setFormType(t); setTypePickerOpen(false); }}>
+                      <Text style={[styles.typeOptionText, formType === t && styles.typeOptionTextActive]}>{formType === t ? '✓ ' : ''}{t}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               <View style={styles.dateRow}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.label}>Start date</Text>
@@ -321,7 +327,13 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
-  content: { padding: spacing.lg, gap: spacing.lg },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.lg },
+  typeButton: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  typeButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 15 },
+  typeList: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginBottom: spacing.md, overflow: 'hidden' },
+  typeOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  typeOptionText: { color: colors.textPrimary, fontFamily: fontFamily.regular, fontSize: 15 },
+  typeOptionTextActive: { color: colors.accent, fontFamily: fontFamily.semibold },
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
   section: { gap: spacing.sm },
   sectionTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },

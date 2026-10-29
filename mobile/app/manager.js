@@ -459,6 +459,36 @@ export default function ManagerDashboard() {
         </View>
       )}
 
+      {filter === 'AI' ? (
+        <KeyboardAvoidingView style={styles.chatWrapper} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <FlatList
+            data={messages}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.chatList}
+            renderItem={({ item }) => (
+              <View style={[styles.messageBubble, item.role === 'user' ? styles.userBubble : styles.botBubble]}>
+                <Text style={[styles.messageText, item.role === 'user' ? styles.userText : styles.botText]}>
+                  {item.content}
+                </Text>
+              </View>
+            )}
+          />
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.chatInput}
+              placeholder="Ask about geo-exceptions..."
+              placeholderTextColor={colors.inputPlaceholder}
+              value={inputText}
+              onChangeText={setInputText}
+              editable={!isChatLoading}
+            />
+            <TouchableOpacity style={styles.sendButton} onPress={() => sendMessage(inputText)} disabled={isChatLoading}>
+              {isChatLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendButtonText}>Send</Text>}
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      ) : (
+        <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[3]}>
       <View style={styles.otCard}>
         <Text style={styles.otTitle}>Overtime Watch · This Week</Text>
         {otWatch.length === 0 ? (
@@ -569,37 +599,7 @@ export default function ManagerDashboard() {
         </View>
       </View>
 
-      {/* RENDER CHAT OR DASHBOARD CONTENT */}
-      {filter === 'AI' ? (
-        <KeyboardAvoidingView style={styles.chatWrapper} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <FlatList
-            data={messages}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.chatList}
-            renderItem={({ item }) => (
-              <View style={[styles.messageBubble, item.role === 'user' ? styles.userBubble : styles.botBubble]}>
-                <Text style={[styles.messageText, item.role === 'user' ? styles.userText : styles.botText]}>
-                  {item.content}
-                </Text>
-              </View>
-            )}
-          />
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.chatInput}
-              placeholder="Ask about geo-exceptions..."
-              placeholderTextColor={colors.inputPlaceholder}
-              value={inputText}
-              onChangeText={setInputText}
-              editable={!isChatLoading}
-            />
-            <TouchableOpacity style={styles.sendButton} onPress={() => sendMessage(inputText)} disabled={isChatLoading}>
-              {isChatLoading ? <ActivityIndicator color="#fff" /> : <Text style={styles.sendButtonText}>Send</Text>}
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
-      ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent}>
+
           {filter === 'EXCEPTIONS' ? (
             excErrorMsg ? (
               <View style={styles.emptyCard}>
@@ -671,7 +671,7 @@ export default function ManagerDashboard() {
                       <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
-                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+                      <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
                       {(() => {
                         const logBreaks = breaks.filter(b => b.time_log_id === log.id);
                         const notes = [];
@@ -743,7 +743,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   title: { fontSize: 20, fontFamily: fontFamily.brand, color: colors.textPrimary },
   brandRow: { flexDirection: 'row', alignItems: 'center' },
-  otCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginHorizontal: spacing.lg, marginBottom: spacing.md },
+  otCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
   otTitle: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 15, marginBottom: spacing.sm },
   otClear: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13 },
   otRow: { marginBottom: spacing.md },
@@ -770,7 +770,7 @@ const styles = StyleSheet.create({
   adminCardText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   adminCardButton: { ...buttons.compact },
   adminCardButtonText: { ...buttons.compactText },
-  filterBar: { flexDirection: 'row', paddingHorizontal: spacing.lg, paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  filterBar: { flexDirection: 'row', paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
   aiTabActive: { backgroundColor: colors.accent, borderColor: colors.accent },

@@ -448,7 +448,7 @@ const styles = StyleSheet.create({
   weekButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   weekLabel: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
   weekToday: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12, marginTop: 2 },
-  content: { padding: spacing.lg, gap: spacing.lg },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.lg },
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
   card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
   cardTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },

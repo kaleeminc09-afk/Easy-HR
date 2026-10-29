@@ -201,7 +201,7 @@ const styles = StyleSheet.create({
   livePill: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 6, paddingHorizontal: 10 },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.success, marginRight: 6 },
   liveText: { color: colors.accent, fontFamily: fontFamily.bold, fontSize: 11, letterSpacing: 1 },
-  content: { padding: spacing.lg, flexGrow: 1 },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, flexGrow: 1 },
   statsRow: { flexDirection: 'row', gap: spacing.md, marginBottom: spacing.lg },
   statCard: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, alignItems: 'center' },
   statCount: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 28, marginTop: spacing.xs },
