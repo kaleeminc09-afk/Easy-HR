@@ -1,4 +1,4 @@
-// Easy HR — unit tests for the bot's core logic (logic.ts).
+// NorthShift — unit tests for the bot's core logic (logic.ts).
 // Run with: npm test   (from the mobile/ folder)
 
 import {

@@ -1,4 +1,4 @@
-// Easy HR — pure, testable logic for hr-ai-bot.
+// NorthShift — pure, testable logic for hr-ai-bot.
 //
 // This module has NO Deno or Supabase imports on purpose: every function here is
 // deterministic and unit-testable with plain Jest (see logic.test.ts).

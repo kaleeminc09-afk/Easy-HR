@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "Easy HR",
-    "slug": "easy-hr",
+    "name": "NorthShift",
+    "slug": "northshift",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "easyhr",
+    "scheme": "northshift",
     "userInterfaceStyle": "automatic",
     "updates": {
       "fallbackToCacheTimeout": 0,
@@ -16,10 +16,10 @@
     ],
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.easyhr.app"
+      "bundleIdentifier": "com.northshift.app"
     },
     "android": {
-      "package": "com.easyhr.app",
+      "package": "com.northshift.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0A0E1A"
@@ -38,7 +38,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Allow Easy HR to access your location for geo-fenced clock-ins."
+          "locationAlwaysAndWhenInUsePermission": "Allow NorthShift to access your location for geo-fenced clock-ins."
         }
       ],
       [

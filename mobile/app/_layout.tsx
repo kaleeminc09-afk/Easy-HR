@@ -44,13 +44,13 @@ export default function RootLayout() {
   }, [loaded]);
 
   // Invite-link accept: an invited employee taps the Supabase invite email,
-  // which redirects to easyhr://invite carrying session tokens. Sign them
+  // which redirects to northshift://invite carrying session tokens. Sign them
   // in from those tokens and land on Profile, where Change Password sets
   // their first password. Any other link is left alone.
   useEffect(() => {
     const handleUrl = async (url: string | null) => {
       if (!url) return;
-      const isInvite = url.startsWith('easyhr://invite') || url.includes('type=invite');
+      const isInvite = url.startsWith('northshift://invite') || url.includes('type=invite');
       if (!isInvite) return;
       try {
         const hash = url.split('#')[1] || '';

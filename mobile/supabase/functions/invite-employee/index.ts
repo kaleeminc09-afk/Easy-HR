@@ -14,7 +14,7 @@ const json = (body: unknown, status = 200) =>
 
 // Invite-link onboarding: a manager or admin invites a new employee by
 // email. Supabase sends the invite email; the link opens the app
-// (easyhr://invite) and signs the employee in, and they set their password
+// (northshift://invite) and signs the employee in, and they set their password
 // on the Profile screen. The service-role key never leaves this function,
 // and the caller can NOT choose the invitee's role or business: every
 // invite lands as an employee in the inviter's own business, which matches
@@ -59,7 +59,7 @@ serve(async (req) => {
     });
     const { data: invited, error: invErr } = await admin.auth.admin.inviteUserByEmail(email, {
       data: { full_name, first_name, last_name, role: "employee" },
-      redirectTo: "easyhr://invite",
+      redirectTo: "northshift://invite",
     });
     if (invErr) {
       const msg = invErr.message || "Invite failed.";
