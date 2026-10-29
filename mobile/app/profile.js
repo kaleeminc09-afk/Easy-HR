@@ -8,12 +8,19 @@ import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '.
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
+// Directory fields stay on profiles (managers may read these).
+// Date of birth, home address, and emergency contacts live on
+// profile_private (owner-only): managers physically cannot select them.
 const PROFILE_FIELDS = [
   'full_name', 'first_name', 'last_name', 'role', 'business_id',
-  'phone', 'date_of_birth', 'address_line', 'city', 'province', 'postal_code',
+  'phone',
+  'job_title', 'department', 'start_date', 'employment_type', 'primary_worksite_id', 'employee_number',
+].join(', ');
+
+const PRIVATE_FIELDS = [
+  'date_of_birth', 'address_line', 'city', 'province', 'postal_code',
   'emergency_contact_1_name', 'emergency_contact_1_relationship', 'emergency_contact_1_phone',
   'emergency_contact_2_name', 'emergency_contact_2_relationship', 'emergency_contact_2_phone',
-  'job_title', 'department', 'start_date', 'employment_type', 'primary_worksite_id', 'employee_number',
 ].join(', ');
 
 function InfoRow({ label, value }) {
@@ -99,17 +106,19 @@ export default function ProfileScreen() {
       setLastName(ln);
       setRole(data.role || 'employee');
       setPhone(data.phone || '');
-      setDob(data.date_of_birth || '');
-      setAddressLine(data.address_line || '');
-      setCity(data.city || '');
-      setProvince(data.province || '');
-      setPostalCode(data.postal_code || '');
-      setEc1Name(data.emergency_contact_1_name || '');
-      setEc1Relationship(data.emergency_contact_1_relationship || '');
-      setEc1Phone(data.emergency_contact_1_phone || '');
-      setEc2Name(data.emergency_contact_2_name || '');
-      setEc2Relationship(data.emergency_contact_2_relationship || '');
-      setEc2Phone(data.emergency_contact_2_phone || '');
+      const { data: priv } = await supabase.from('profile_private').select(PRIVATE_FIELDS).eq('user_id', session.user.id).maybeSingle();
+      const pv = priv || {};
+      setDob(pv.date_of_birth || '');
+      setAddressLine(pv.address_line || '');
+      setCity(pv.city || '');
+      setProvince(pv.province || '');
+      setPostalCode(pv.postal_code || '');
+      setEc1Name(pv.emergency_contact_1_name || '');
+      setEc1Relationship(pv.emergency_contact_1_relationship || '');
+      setEc1Phone(pv.emergency_contact_1_phone || '');
+      setEc2Name(pv.emergency_contact_2_name || '');
+      setEc2Relationship(pv.emergency_contact_2_relationship || '');
+      setEc2Phone(pv.emergency_contact_2_phone || '');
       setJobTitle(data.job_title || '');
       setDepartment(data.department || '');
       setStartDate(data.start_date || '');
@@ -144,6 +153,10 @@ export default function ProfileScreen() {
       last_name: lastName.trim(),
       full_name: `${firstName.trim()} ${lastName.trim()}`,
       phone: phone.trim() || null,
+    }).eq('id', session.user.id);
+    if (error) { setMessage('Could not save. Check your connection and try again.'); setSaving(false); return; }
+    const { error: privError } = await supabase.from('profile_private').upsert([{
+      user_id: session.user.id,
       date_of_birth: dob.trim() || null,
       address_line: addressLine.trim() || null,
       city: city.trim() || null,
@@ -155,8 +168,9 @@ export default function ProfileScreen() {
       emergency_contact_2_name: ec2Name.trim() || null,
       emergency_contact_2_relationship: ec2Relationship.trim() || null,
       emergency_contact_2_phone: ec2Phone.trim() || null,
-    }).eq('id', session.user.id);
-    setMessage(error ? 'Could not save. Check your connection and try again.' : 'Profile updated.');
+      updated_at: new Date().toISOString(),
+    }], { onConflict: 'user_id' });
+    setMessage(privError ? 'Basic profile saved, but date of birth, address and emergency contacts could not be saved — the database update may not have run yet.' : 'Profile updated.');
     setSaving(false);
   };
 

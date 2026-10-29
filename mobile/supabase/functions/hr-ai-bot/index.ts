@@ -954,7 +954,7 @@ Deno.serve(async (req) => {
         } else if (fn === "get_employee_profile") {
           const { data: profs, error: pErr } = await supabase
             .from("profiles")
-            .select("id, full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id, emergency_contact_1_name, emergency_contact_1_relationship, emergency_contact_1_phone, emergency_contact_2_name, emergency_contact_2_relationship, emergency_contact_2_phone")
+            .select("id, full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id")
             .ilike("full_name", `%${args.employee_name}%`)
             .limit(5);
           if (pErr) {
@@ -972,13 +972,9 @@ Deno.serve(async (req) => {
                 const { data: ws } = await supabase.from("worksites").select("name").eq("id", p.primary_worksite_id).maybeSingle();
                 siteName = ws?.name;
               }
-              const contacts = [1, 2]
-                .map((i: number) => ({
-                  name: p[`emergency_contact_${i}_name`] || undefined,
-                  relationship: p[`emergency_contact_${i}_relationship`] || undefined,
-                  phone: p[`emergency_contact_${i}_phone`] || undefined,
-                }))
-                .filter((c: any) => c.name || c.phone);
+              // Emergency contacts are owner-only (profile_private) and are
+              // deliberately NOT returned for another employee, even to
+              // managers asking the brain.
               output = {
                 name: p.full_name,
                 role: p.role,
@@ -989,7 +985,6 @@ Deno.serve(async (req) => {
                 employee_number: p.employee_number || undefined,
                 primary_worksite: siteName,
                 phone: p.phone || undefined,
-                emergency_contacts: contacts,
               };
             }
           }
@@ -1203,13 +1198,21 @@ Deno.serve(async (req) => {
         } else if (fn === "get_my_profile") {
           const { data: p, error } = await supabase
             .from("profiles")
-            .select("full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id, emergency_contact_1_name, emergency_contact_1_relationship, emergency_contact_1_phone, emergency_contact_2_name, emergency_contact_2_relationship, emergency_contact_2_phone")
+            .select("full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id")
             .eq("id", effectiveUserId)
             .single();
+          // Own emergency contacts live on profile_private (owner-only);
+          // the brain reads them with the service role for the caller only.
+          const { data: myPriv } = await supabase
+            .from("profile_private")
+            .select("emergency_contact_1_name, emergency_contact_1_relationship, emergency_contact_1_phone, emergency_contact_2_name, emergency_contact_2_relationship, emergency_contact_2_phone")
+            .eq("user_id", effectiveUserId)
+            .maybeSingle();
+          const merged: any = { ...(p || {}), ...(myPriv || {}) };
           if (error || !p) {
             output = { error: "Could not load your profile." };
           } else {
-            const row: any = p;
+            const row: any = merged;
             let siteName: string | undefined;
             if (row.primary_worksite_id) {
               const { data: ws } = await supabase.from("worksites").select("name").eq("id", row.primary_worksite_id).maybeSingle();

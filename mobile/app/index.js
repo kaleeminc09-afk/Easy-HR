@@ -62,8 +62,11 @@ export default function App() {
   useEffect(() => {
     if (!session) { setBusinessName(''); return; }
     (async () => {
-      const { data } = await supabase.from('profiles').select('business_id, phone, emergency_contact_1_phone, role').eq('id', session.user.id).single();
-      if (data) { setProfileIncomplete(!data.phone || !data.emergency_contact_1_phone); setMyRole(data.role || 'employee'); setMyBusinessId(data.business_id || null); }
+      const { data } = await supabase.from('profiles').select('business_id, phone, role').eq('id', session.user.id).single();
+      // Emergency contact 1 lives on profile_private now (owner-only);
+      // a missing row/table just means the nudge shows until it is saved.
+      const { data: priv } = await supabase.from('profile_private').select('emergency_contact_1_phone').eq('user_id', session.user.id).maybeSingle();
+      if (data) { setProfileIncomplete(!data.phone || !priv?.emergency_contact_1_phone); setMyRole(data.role || 'employee'); setMyBusinessId(data.business_id || null); }
       if (data && data.business_id) {
         const { data: pol } = await supabase.from('break_policies').select('*').eq('business_id', data.business_id).maybeSingle();
         if (pol) {
