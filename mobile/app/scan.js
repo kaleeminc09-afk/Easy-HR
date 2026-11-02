@@ -57,8 +57,20 @@ export default function ScanScreen() {
     setBusy(true);
     try {
       const { data: site, error: siteErr } = await supabase
-        .from('worksites').select('id, name, latitude, longitude, radius_meters').eq('id', worksiteId).maybeSingle();
+        .from('worksites').select('id, name, latitude, longitude, radius_meters, business_id').eq('id', worksiteId).maybeSingle();
       if (siteErr || !site) throw new Error('That worksite could not be found. Ask your manager to reprint the code.');
+
+      // Worksite tenancy: a site claimed by another business is not yours,
+      // even if you are standing inside its radius. Denied before any
+      // location read or clock-in. Unclaimed (null) sites are legacy rows
+      // from before scoping and still work; claim them from QR Codes.
+      // No exception row is filed here: this needs no GPS, and a foreign
+      // QR is usually a wrong-code mistake, not a dispute to review.
+      const { data: prof } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
+      if (site.business_id && site.business_id !== prof?.business_id) {
+        setResult({ ok: false, title: 'Not your worksite', message: 'This location belongs to another business. Scan the code posted at your own worksite.' });
+        return;
+      }
 
       // Audit item 6 fix: a QR code is just a picture — without this check
       // a photo of a worksite code clocked someone in from anywhere. The

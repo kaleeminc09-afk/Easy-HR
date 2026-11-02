@@ -24,8 +24,9 @@ export default function WorksiteQrScreen() {
   const [saving, setSaving] = useState(false);
   const [formMessage, setFormMessage] = useState('');
 
+  const [myBusinessId, setMyBusinessId] = useState(null);
   const loadSites = async () => {
-    const { data, error } = await supabase.from('worksites').select('id, name').order('name');
+    const { data, error } = await supabase.from('worksites').select('id, name, business_id').order('name');
     if (error) setError(error.message);
     else setSites(data || []);
     setLoading(false);
@@ -35,8 +36,9 @@ export default function WorksiteQrScreen() {
     (async () => {
       const { data: { session } } = await supabase.auth.getSession();
       if (session) {
-        const { data: prof } = await supabase.from('profiles').select('role').eq('id', session.user.id).single();
+        const { data: prof } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
         setCanAdd(prof?.role === 'manager' || prof?.role === 'admin');
+        setMyBusinessId(prof?.business_id || null);
       }
       await loadSites();
     })();
@@ -67,8 +69,9 @@ export default function WorksiteQrScreen() {
     if (rad !== null && (Number.isNaN(rad) || rad < 0)) { setFormMessage('Radius must be a whole number of metres, or blank for no limit.'); return; }
     setSaving(true);
     setFormMessage('');
+    if (!myBusinessId) { setFormMessage('Your account has no business yet — complete onboarding first.'); return; }
     const { error } = await supabase.from('worksites').insert([{
-      name: siteName.trim(), latitude: la, longitude: lo, radius_meters: rad, address: address.trim() || null,
+      name: siteName.trim(), latitude: la, longitude: lo, radius_meters: rad, address: address.trim() || null, business_id: myBusinessId,
     }]);
     setSaving(false);
     if (error) { setFormMessage('Could not save the location — the database update may not have run yet. ' + error.message); return; }
@@ -129,13 +132,22 @@ export default function WorksiteQrScreen() {
             </View>
           )}
           {sites.length === 0 && <Text style={styles.emptyText}>No worksites configured yet.</Text>}
-          {sites.map((site) => (
+          {sites.filter((site) => !site.business_id || site.business_id === myBusinessId).map((site) => (
             <View key={site.id} style={styles.card}>
               <View style={styles.qrWrap}>
                 <QRCode value={qrPayload(site.id)} size={210} />
               </View>
               <Text style={styles.siteName}>{site.name}</Text>
               <Text style={styles.siteHint}>Scan with NorthShift to clock in / out</Text>
+              {canAdd && !site.business_id && (
+                <TouchableOpacity style={styles.claimButton} onPress={async () => {
+                  const { error } = await supabase.from('worksites').update({ business_id: myBusinessId }).eq('id', site.id);
+                  if (error) setError(error.message);
+                  else await loadSites();
+                }}>
+                  <Text style={styles.claimButtonText}>Claim for my business</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ))}
         </ScrollView>
@@ -168,4 +180,6 @@ const styles = StyleSheet.create({
   formInput: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 15, fontFamily: fontFamily.regular, color: colors.textPrimary, marginBottom: spacing.md },
   formSecondary: { borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', marginBottom: spacing.md, minHeight: 52, justifyContent: 'center' },
   formSecondaryText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 15 },
+  claimButton: { borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', marginTop: spacing.md, minHeight: 52, justifyContent: 'center', alignSelf: 'stretch' },
+  claimButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 15 },
 });

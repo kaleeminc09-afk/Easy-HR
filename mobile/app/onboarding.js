@@ -102,6 +102,7 @@ export default function OnboardingScreen() {
       longitude: lo,
       radius_meters: rad,
       address: address.trim() || null,
+      business_id: businessId,
     }]);
     setSaving(false);
     if (error) {

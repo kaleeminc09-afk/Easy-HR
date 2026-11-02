@@ -152,6 +152,18 @@ async function aiChat(body, token) {
       check('creator profile links business + becomes admin', ephProf?.business_id === cb.data.business_id && ephProf?.role === 'admin', JSON.stringify(ephProf));
       const cb2 = await callFn('create-business', signUp.session.access_token, { business_name: 'Second Co' });
       check('second create-business call gets 409', cb2.status === 409, `HTTP ${cb2.status} ${cb2.data.error || ''}`);
+      // Tenancy policy check with zero side effects: a foreign business_id
+      // that does not exist would fail on the FK alone, so the assertion
+      // is on the ERROR MESSAGE — RLS denial proves the policy fired,
+      // an FK error would prove it did not. (An own-business insert is
+      // deliberately not tested here: it would leave a junk QR card no
+      // API can delete, since worksites have no delete policy.)
+      const foreign = await dbEph.from('worksites').insert([{
+        name: 'Checklist Foreign Site', latitude: 43.65, longitude: -79.38,
+        radius_meters: 100, business_id: '00000000-0000-0000-0000-000000000000',
+      }]);
+      check('inserting a worksite for another business is denied by RLS', !!foreign.error && /row-level security/i.test(foreign.error.message || ''),
+        foreign.error ? foreign.error.message : 'insert unexpectedly succeeded');
       const { error: delBizErr } = await dbEph.from('businesses').delete().eq('id', cb.data.business_id);
       if (delBizErr) console.log(`    ⚠️ Could not delete test business 'Checklist Test Co (delete me)' — remove it from the Table Editor when convenient.`);
     }
