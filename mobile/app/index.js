@@ -68,6 +68,10 @@ export default function App() {
       // a missing row/table just means the nudge shows until it is saved.
       const { data: priv } = await supabase.from('profile_private').select('emergency_contact_1_phone').eq('user_id', session.user.id).maybeSingle();
       if (data) { setProfileIncomplete(!data.phone || !priv?.emergency_contact_1_phone); setMyRole(data.role || 'employee'); setMyBusinessId(data.business_id || null); }
+      // No business yet means a brand-new owner (invited employees
+      // already carry a business_id): send them to onboarding instead
+      // of an empty home screen.
+      if (data && !data.business_id) { router.replace('/onboarding'); return; }
       if (data && data.business_id) {
         const { data: pol } = await supabase.from('break_policies').select('*').eq('business_id', data.business_id).maybeSingle();
         if (pol) {

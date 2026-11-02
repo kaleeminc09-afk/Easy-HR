@@ -143,6 +143,18 @@ async function aiChat(body, token) {
   if (signUp?.session) {
     const { data: prof } = await dbEph.from('profiles').select('role').eq('id', signUp.user.id).single();
     check('signup claiming manager still lands as employee', prof?.role === 'employee', `role=${prof?.role}`);
+    // Owner onboarding, exercised end to end on the throwaway account so
+    // the standing bots keep their roles: create -> link + admin -> 409.
+    const cb = await callFn('create-business', signUp.session.access_token, { business_name: 'Checklist Test Co (delete me)' });
+    check('ephemeral owner creates a business', cb.status === 200 && !!cb.data.business_id, `HTTP ${cb.status} ${cb.data.error || ''}`);
+    if (cb.status === 200) {
+      const { data: ephProf } = await dbEph.from('profiles').select('business_id, role').eq('id', signUp.user.id).single();
+      check('creator profile links business + becomes admin', ephProf?.business_id === cb.data.business_id && ephProf?.role === 'admin', JSON.stringify(ephProf));
+      const cb2 = await callFn('create-business', signUp.session.access_token, { business_name: 'Second Co' });
+      check('second create-business call gets 409', cb2.status === 409, `HTTP ${cb2.status} ${cb2.data.error || ''}`);
+      const { error: delBizErr } = await dbEph.from('businesses').delete().eq('id', cb.data.business_id);
+      if (delBizErr) console.log(`    ⚠️ Could not delete test business 'Checklist Test Co (delete me)' — remove it from the Table Editor when convenient.`);
+    }
     const del = await callFn('delete-my-account', signUp.session.access_token);
     check('ephemeral account self-deletes (cleanup)', del.status === 200, `HTTP ${del.status} ${del.data.error || ''}`);
     if (del.status !== 200) console.log(`    ⚠️ Manually delete ${ephEmail} from Supabase Auth when convenient.`);

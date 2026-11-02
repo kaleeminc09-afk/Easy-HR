@@ -421,3 +421,6 @@ verify_jwt = true
 
 [functions.invite-employee]
 verify_jwt = true
+
+[functions.create-business]
+verify_jwt = true
