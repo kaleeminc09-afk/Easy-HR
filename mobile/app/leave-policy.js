@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
@@ -15,6 +15,14 @@ import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '.
 // it does not delete existing requests of that type.
 export default function LeavePolicyScreen() {
   const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [loading, setLoading] = useState(true);
   const [isManager, setIsManager] = useState(false);
   const [myBusinessId, setMyBusinessId] = useState(null);
@@ -91,11 +99,9 @@ export default function LeavePolicyScreen() {
         <View style={styles.deniedContainer}>
           <Text style={styles.deniedTitle}>Managers only</Text>
           <Text style={styles.deniedText}>You need a manager or admin account to set the leave policy.</Text>
-          <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleBack}>
+            <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -104,11 +110,9 @@ export default function LeavePolicyScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href="/manager" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Back</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Leave Policy</Text>
         <View style={{ width: 80 }} />
       </View>

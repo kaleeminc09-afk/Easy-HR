@@ -21,6 +21,14 @@ const BILLING_WIRED = false;
 
 export default function PaymentScreen() {
   const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const { plan: planParam } = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -82,11 +90,9 @@ export default function PaymentScreen() {
           <View style={styles.deniedBadge}><Text style={styles.deniedBadgeText}>!</Text></View>
           <Text style={styles.deniedTitle}>Admins only</Text>
           <Text style={styles.deniedText}>Billing is managed by administrators.</Text>
-          <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleBack}>
+            <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );

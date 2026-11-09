@@ -14,6 +14,14 @@ const PLANS = {
 
 export default function SubscriptionScreen() {
   const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [plan, setPlan] = useState('starter');
@@ -91,11 +99,9 @@ export default function SubscriptionScreen() {
           <View style={styles.deniedBadge}><Text style={styles.deniedBadgeText}>!</Text></View>
           <Text style={styles.deniedTitle}>Admins only</Text>
           <Text style={styles.deniedText}>Subscription details are visible to administrators.</Text>
-          <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleBack}>
+            <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -111,11 +117,9 @@ export default function SubscriptionScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href="/manager" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Dashboard</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Dashboard</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Subscription</Text>
         <View style={{ width: 110 }} />
       </View>

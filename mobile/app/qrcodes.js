@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
-import { Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import * as Location from 'expo-location';
 import { colors, spacing, radius, fontFamily } from '../lib/theme';
@@ -10,6 +10,15 @@ import { colors, spacing, radius, fontFamily } from '../lib/theme';
 export const qrPayload = (worksiteId) => `northshift-site:${worksiteId}`;
 
 export default function WorksiteQrScreen() {
+  const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [sites, setSites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -82,11 +91,9 @@ export default function WorksiteQrScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href="/" asChild>
-          <TouchableOpacity style={styles.backButton}>
-            <Text style={styles.backButtonText}>&larr; Back</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Text style={styles.backButtonText}>&larr; Back</Text>
+        </TouchableOpacity>
         <Text style={styles.title}>Worksite QR Codes</Text>
         <View style={styles.headerSpacer} />
       </View>

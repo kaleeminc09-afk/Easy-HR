@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, radius, spacing, type } from '../lib/theme';
@@ -13,6 +13,15 @@ type ChatMessage = { id: string; role: 'user' | 'bot'; content: string };
 
 export default function EmployeeChatScreen() {
   const [session, setSession] = useState<any>(null);
+  const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [loading, setLoading] = useState(true);
   const [coords, setCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
@@ -123,11 +132,9 @@ export default function EmployeeChatScreen() {
           <Text style={styles.title}>Assistant</Text>
           <Text style={styles.subtitle}>Shift questions, exceptions & blockers</Text>
         </View>
-        <Link href="/" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Time Tracker</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Time Tracker</Text>
+        </TouchableOpacity>
       </View>
 
       <KeyboardAvoidingView style={styles.chatWrapper} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>

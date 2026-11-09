@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { weekStartMs, plannedVsActual } from '../supabase/functions/hr-ai-bot/logic';
@@ -16,6 +16,14 @@ function fmtHours(h) {
 
 export default function ReportsScreen() {
   const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [loading, setLoading] = useState(true);
   const [isManager, setIsManager] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
@@ -91,11 +99,9 @@ export default function ReportsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href="/manager" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Back</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Reports</Text>
         <View style={{ width: 80 }} />
       </View>

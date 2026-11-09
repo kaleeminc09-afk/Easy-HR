@@ -11,15 +11,20 @@ import { supabase } from '../lib/supabase';
 import { colors, fontFamily, radius, spacing } from '../lib/theme';
 
 const LINKS = [
-  { label: 'Clock In', href: '/', managerOnly: false },
-  { label: 'Schedule', href: '/schedule', managerOnly: false },
-  { label: 'Time Off', href: '/timeoff', managerOnly: false },
-  { label: 'Team', href: '/team', managerOnly: false },
-  { label: 'Documents', href: '/documents', managerOnly: false },
-  { label: 'Reports', href: '/reports', managerOnly: false },
-  { label: '✦ Assistant', href: '/EmployeeChatScreen', managerOnly: false },
-  { label: 'Manager Board', href: '/manager-board', managerOnly: true },
-  { label: 'Manager Portal', href: '/manager', managerOnly: true },
+  { label: 'Clock In', href: '/', managerOnly: false, adminOnly: false },
+  { label: 'Schedule', href: '/schedule', managerOnly: false, adminOnly: false },
+  { label: 'Time Off', href: '/timeoff', managerOnly: false, adminOnly: false },
+  { label: 'Team', href: '/team', managerOnly: false, adminOnly: false },
+  { label: 'Documents', href: '/documents', managerOnly: false, adminOnly: false },
+  { label: 'Reports', href: '/reports', managerOnly: false, adminOnly: false },
+  { label: '✦ Assistant', href: '/EmployeeChatScreen', managerOnly: false, adminOnly: false },
+  { label: 'Profile', href: '/profile', managerOnly: false, adminOnly: false },
+  { label: 'Manager Board', href: '/manager-board', managerOnly: true, adminOnly: false },
+  { label: 'Manager Portal', href: '/manager', managerOnly: true, adminOnly: false },
+  { label: 'Break Policy', href: '/break-policy', managerOnly: true, adminOnly: false },
+  { label: 'Leave Policy', href: '/leave-policy', managerOnly: true, adminOnly: false },
+  { label: 'QR Codes', href: '/qrcodes', managerOnly: true, adminOnly: false },
+  { label: 'Subscription', href: '/subscription', managerOnly: false, adminOnly: true },
 ];
 
 export default function WebSidebar() {
@@ -44,7 +49,7 @@ export default function WebSidebar() {
   return (
     <View style={styles.sidebar}>
       <Text style={styles.title}>NorthShift</Text>
-      {LINKS.filter((l) => !l.managerOnly || (roleLoaded && isManager)).map((l) => {
+      {LINKS.filter((l) => (!l.managerOnly || (roleLoaded && isManager)) && (!l.adminOnly || (roleLoaded && role === 'admin'))).map((l) => {
         const active = pathname === l.href;
         return (
           <TouchableOpacity

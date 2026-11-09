@@ -414,9 +414,11 @@ export default function ManagerDashboard() {
           </View>
           {businessName ? <Text style={styles.subtitle}>{businessName} · Manager Portal</Text> : <Text style={styles.subtitle}>Manager Portal · Time Audits & Exceptions</Text>}
         </View>
-        <TouchableOpacity style={styles.navButton} onPress={() => setMenuOpen(!menuOpen)}>
-          <Text style={styles.navButtonText}>☰ Menu</Text>
-        </TouchableOpacity>
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity style={styles.navButton} onPress={() => setMenuOpen(!menuOpen)}>
+            <Text style={styles.navButtonText}>☰ Menu</Text>
+          </TouchableOpacity>
+        )}
       </View>
       {menuOpen && (
         <View style={styles.menuPanel}>

@@ -9,6 +9,14 @@ import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '.
 
 export default function UsersScreen() {
   const router = useRouter();
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A deep link with no history falls back
+  // to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [users, setUsers] = useState([]);
@@ -189,11 +197,9 @@ export default function UsersScreen() {
           <View style={styles.deniedBadge}><Text style={styles.deniedBadgeText}>!</Text></View>
           <Text style={styles.deniedTitle}>Admins only</Text>
           <Text style={styles.deniedText}>You need an administrator account to manage users.</Text>
-          <Link href="/manager" asChild>
-            <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity style={styles.primaryButton} onPress={handleBack}>
+            <Text style={styles.primaryButtonText}>← Back to Dashboard</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -202,11 +208,9 @@ export default function UsersScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href="/manager" asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Dashboard</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Dashboard</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Manage Users</Text>
         <View style={{ width: 110 }} />
       </View>

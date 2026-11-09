@@ -640,9 +640,11 @@ export default function App() {
           <Text style={styles.empEmail}>{businessName || session.user.email}</Text>
           {(myRole === 'manager' || myRole === 'admin') && (<Text style={styles.roleBadge}>Manager</Text>)}
         </View>
-        <TouchableOpacity style={styles.empNavButton} onPress={() => setMenuOpen(!menuOpen)}>
-          <Text style={styles.empNavButtonText}>☰ Menu</Text>
-        </TouchableOpacity>
+        {Platform.OS !== 'web' && (
+          <TouchableOpacity style={styles.empNavButton} onPress={() => setMenuOpen(!menuOpen)}>
+            <Text style={styles.empNavButtonText}>☰ Menu</Text>
+          </TouchableOpacity>
+        )}
       </View>
       {menuOpen && (
         <View style={styles.menuPanel}>
