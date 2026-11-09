@@ -1,18 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Link, useRouter } from 'expo-router';
+import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput } from '../supabase/functions/hr-ai-bot/logic';
 import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
+const DAY_MS = 24 * 3600 * 1000;
+
+function todayStr() {
+  const d = new Date();
+  const p2 = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
 const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
 export default function ManagerDashboard() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [userRole, setUserRole] = useState('manager');
@@ -26,6 +34,21 @@ export default function ManagerDashboard() {
   const [breaks, setBreaks] = useState([]);
   const [myBusinessId, setMyBusinessId] = useState(null);
   const [breakPolicy, setBreakPolicy] = useState({ ...DEFAULT_BREAK_POLICY, province: 'ON' });
+  // Build Schedule (manager): the shift-create form moved here from
+  // /schedule — the week view there stays shared, creation lives here.
+  const [schedPeople, setSchedPeople] = useState([]);
+  const [schedWorksites, setSchedWorksites] = useState([]);
+  const [showSchedForm, setShowSchedForm] = useState(false);
+  const [schedMessage, setSchedMessage] = useState('');
+  const [schedEmployee, setSchedEmployee] = useState('');
+  const [schedWorksite, setSchedWorksite] = useState('');
+  const [schedDates, setSchedDates] = useState([todayStr()]);
+  const [schedTypedDate, setSchedTypedDate] = useState('');
+  const [schedStart, setSchedStart] = useState('09:00');
+  const [schedEnd, setSchedEnd] = useState('17:00');
+  const [schedNextDay, setSchedNextDay] = useState(false);
+  const [schedNotes, setSchedNotes] = useState('');
+  const [creatingSched, setCreatingSched] = useState(false);
   const [exportDays, setExportDays] = useState(14);
   const [exportMsg, setExportMsg] = useState('');
   const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
@@ -39,6 +62,16 @@ export default function ManagerDashboard() {
   useEffect(() => {
     checkManagerAccessAndFetchData();
   }, []);
+
+  // Deep link from the Schedule screen: tapping a day header there
+  // opens the builder here with that date preselected.
+  useEffect(() => {
+    const d = params.scheduleDate;
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+      setSchedDates([d]);
+      setShowSchedForm(true);
+    }
+  }, [params.scheduleDate]);
 
   const checkManagerAccessAndFetchData = async () => {
     try {
@@ -84,6 +117,10 @@ export default function ManagerDashboard() {
           });
         }
       }
+      const { data: ppl } = await supabase.from('profiles').select('id, full_name').order('full_name', { ascending: true });
+      if (ppl) setSchedPeople(ppl);
+      const { data: ws } = await supabase.from('worksites').select('id, name').order('name', { ascending: true });
+      if (ws) setSchedWorksites(ws);
       await fetchAllManagerData();
     } catch (err) {
       console.error('Authorization error:', err);
@@ -127,6 +164,74 @@ export default function ManagerDashboard() {
       setExcErrorMsg('');
       setExceptions(excData);
     }
+  };
+
+  // Create shifts, one per picked date. Same guards as the old
+  // /schedule form: a clashing date (overlap or approved leave) is
+  // skipped and reported — it does not fail the batch. The overlap
+  // and leave checks come from the shared logic.ts helpers, not a
+  // second copy of the rules.
+  const createSchedShift = async () => {
+    if (schedDates.length === 0) { setSchedMessage('Tap at least one date.'); return; }
+    const dates = [...schedDates].sort();
+    const minD = dates[0];
+    const maxD = dates[dates.length - 1];
+    const rangeStart = new Date(`${minD}T00:00:00`);
+    rangeStart.setDate(rangeStart.getDate() - 1);
+    const rangeEnd = new Date(`${maxD}T00:00:00`);
+    rangeEnd.setDate(rangeEnd.getDate() + 2);
+    const { data: rangeShifts } = await supabase
+      .from('shifts')
+      .select('id, user_id, start_time, end_time, status')
+      .gte('start_time', rangeStart.toISOString())
+      .lt('start_time', rangeEnd.toISOString());
+    const { data: rangeLeaves } = await supabase
+      .from('time_off_requests')
+      .select('user_id, start_date, end_date')
+      .eq('status', 'approved')
+      .lte('start_date', maxD)
+      .gte('end_date', minD);
+    const shifts = rangeShifts || [];
+    const leaves = rangeLeaves || [];
+    const created = [];
+    const skipped = [];
+    setCreatingSched(true);
+    setSchedMessage('');
+    for (const formDate of dates) {
+      const startD = new Date(`${formDate}T${schedStart}:00`);
+      const endD = new Date(`${formDate}T${schedEnd}:00`);
+      if (schedNextDay) endD.setDate(endD.getDate() + 1);
+      const err = validateShiftInput(startD.toISOString(), endD.toISOString());
+      if (err) { skipped.push(`${formDate} (${err})`); continue; }
+      if (schedEmployee) {
+        const clash = shifts.find((s) =>
+          s.user_id === schedEmployee && s.status === 'assigned' &&
+          shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
+        if (clash) { skipped.push(`${formDate} (overlaps an existing shift)`); continue; }
+        const onLeave = leaves.some((l) => l.user_id === schedEmployee && l.start_date <= formDate && l.end_date >= formDate);
+        if (onLeave) { skipped.push(`${formDate} (approved leave)`); continue; }
+      }
+      const { error } = await supabase.from('shifts').insert([{
+        business_id: myBusinessId,
+        user_id: schedEmployee || null,
+        worksite_id: schedWorksite || null,
+        start_time: startD.toISOString(),
+        end_time: endD.toISOString(),
+        status: schedEmployee ? 'assigned' : 'open',
+        notes: schedNotes.trim() || null,
+        created_by: currentUser?.id,
+      }]);
+      if (error) skipped.push(`${formDate} (${error.message})`);
+      else created.push(formDate);
+    }
+    if (created.length > 0) {
+      setSchedMessage((schedEmployee ? 'Shift created for ' : 'Open shift posted for ') + created.join(', ') + (skipped.length > 0 ? `. Skipped: ${skipped.join(', ')}.` : '.'));
+      setShowSchedForm(false);
+      setSchedNotes('');
+    } else {
+      setSchedMessage('Nothing created. Skipped: ' + skipped.join(', ') + '.');
+    }
+    setCreatingSched(false);
   };
 
   const handleUpdateException = async (exceptionId, newStatus) => {
@@ -404,6 +509,8 @@ export default function ManagerDashboard() {
     );
   }
 
+  const schedWeekStart = weekStartMs(Date.now());
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -491,7 +598,76 @@ export default function ManagerDashboard() {
           </View>
         </KeyboardAvoidingView>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[3]}>
+        <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[4]}>
+      <View style={styles.otCard}>
+        <Text style={styles.otTitle}>Build Schedule</Text>
+        <Text style={styles.otClear}>Post shifts for your team. They appear on the shared Schedule week view, where employees can claim open ones.</Text>
+        <TouchableOpacity style={[styles.primaryButton, { marginTop: spacing.md }]} onPress={() => setShowSchedForm(!showSchedForm)}>
+          <Text style={styles.primaryButtonText}>{showSchedForm ? 'Close' : '+ Build Shifts'}</Text>
+        </TouchableOpacity>
+        {showSchedForm && (
+          <View style={{ marginTop: spacing.md }}>
+            <Text style={styles.label}>Employee</Text>
+            <View style={styles.schedChipRow}>
+              <TouchableOpacity style={[styles.filterTab, !schedEmployee && styles.activeFilterTab]} onPress={() => setSchedEmployee('')}>
+                <Text style={[styles.filterText, !schedEmployee && styles.activeFilterText]}>Open shift</Text>
+              </TouchableOpacity>
+              {schedPeople.map((pp) => (
+                <TouchableOpacity key={pp.id} style={[styles.filterTab, schedEmployee === pp.id && styles.activeFilterTab]} onPress={() => setSchedEmployee(pp.id)}>
+                  <Text style={[styles.filterText, schedEmployee === pp.id && styles.activeFilterText]}>{pp.full_name || 'Unnamed'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Worksite</Text>
+            <View style={styles.schedChipRow}>
+              <TouchableOpacity style={[styles.filterTab, !schedWorksite && styles.activeFilterTab]} onPress={() => setSchedWorksite('')}>
+                <Text style={[styles.filterText, !schedWorksite && styles.activeFilterText]}>None</Text>
+              </TouchableOpacity>
+              {schedWorksites.map((w) => (
+                <TouchableOpacity key={w.id} style={[styles.filterTab, schedWorksite === w.id && styles.activeFilterTab]} onPress={() => setSchedWorksite(w.id)}>
+                  <Text style={[styles.filterText, schedWorksite === w.id && styles.activeFilterText]}>{w.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={styles.label}>Dates — tap each date (one shift per date)</Text>
+            <View style={styles.schedChipRow}>
+              {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+                const d = new Date(schedWeekStart + i * DAY_MS);
+                const p2 = (n) => String(n).padStart(2, '0');
+                const dayStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+                const on = schedDates.includes(dayStr);
+                return (
+                  <TouchableOpacity key={dayStr} style={[styles.filterTab, on && styles.activeFilterTab]} onPress={() => setSchedDates(on ? schedDates.filter((x) => x !== dayStr) : [...schedDates, dayStr])}>
+                    <Text style={[styles.filterText, on && styles.activeFilterText]}>{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text style={styles.label}>Or type a date (YYYY-MM-DD) to add it</Text>
+            <TextInput style={styles.reviewNoteInput} value={schedTypedDate} onChangeText={(v) => { setSchedTypedDate(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !schedDates.includes(v)) { setSchedDates([...schedDates, v]); setSchedTypedDate(''); } }} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+            <View style={styles.schedTimeRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>Start (24h)</Text>
+                <TextInput style={styles.reviewNoteInput} value={schedStart} onChangeText={setSchedStart} placeholder="09:00" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>End (24h)</Text>
+                <TextInput style={styles.reviewNoteInput} value={schedEnd} onChangeText={setSchedEnd} placeholder="17:00" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+              </View>
+            </View>
+            <TouchableOpacity style={[styles.filterTab, schedNextDay && styles.activeFilterTab, { alignSelf: 'flex-start', marginBottom: spacing.md }]} onPress={() => setSchedNextDay(!schedNextDay)}>
+              <Text style={[styles.filterText, schedNextDay && styles.activeFilterText]}>Ends next day (overnight)</Text>
+            </TouchableOpacity>
+            <Text style={styles.label}>Notes (optional)</Text>
+            <TextInput style={styles.reviewNoteInput} value={schedNotes} onChangeText={setSchedNotes} placeholder="e.g. Delivery day — arrive 15 min early" placeholderTextColor={colors.inputPlaceholder} />
+            <TouchableOpacity style={[styles.primaryButton, { marginTop: spacing.md }]} onPress={createSchedShift} disabled={creatingSched}>
+              {creatingSched ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{schedEmployee ? 'Create Shift' : 'Post Open Shift'}</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+        {schedMessage ? <Text style={styles.schedMessage}>{schedMessage}</Text> : null}
+      </View>
+
       <View style={styles.otCard}>
         <Text style={styles.otTitle}>Overtime Watch · This Week</Text>
         {otWatch.length === 0 ? (
@@ -747,6 +923,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontFamily: fontFamily.brand, color: colors.textPrimary },
   brandRow: { flexDirection: 'row', alignItems: 'center' },
   otCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  schedChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.sm },
+  schedTimeRow: { flexDirection: 'row', gap: spacing.md },
+  schedMessage: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },
   otTitle: { color: colors.textPrimary, fontFamily: fontFamily.bold, fontSize: 15, marginBottom: spacing.sm },
   otClear: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 13 },
   otRow: { marginBottom: spacing.md },

@@ -38,6 +38,7 @@ export default function App() {
   const [myBusinessId, setMyBusinessId] = useState(null);
   const [breakPolicy, setBreakPolicy] = useState({ ...DEFAULT_BREAK_POLICY, province: 'ON' });
   const [onCallBreak, setOnCallBreak] = useState(false);
+  const [takenBreaks, setTakenBreaks] = useState([]);
   const [locationChecking, setLocationChecking] = useState(false);
 
   // Exception Flow State
@@ -253,8 +254,14 @@ export default function App() {
           .is('end_time', null)
           .maybeSingle();
         setActiveBreak(breakData || null);
+        const { data: takenData } = await supabase
+          .from('time_breaks')
+          .select('break_type, start_time, end_time')
+          .eq('time_log_id', activeData.id);
+        setTakenBreaks(takenData || []);
       } else {
         setActiveBreak(null);
+        setTakenBreaks([]);
       }
 
       const { data: logsData } = await supabase
@@ -433,6 +440,7 @@ export default function App() {
       setStatusMessage('❌ Error starting break: ' + error.message);
     } else {
       setActiveBreak(data);
+      setTakenBreaks((prev) => [...prev, data]);
       setOnCallBreak(false);
       setStatusMessage(`☕ On ${chosen.break_type} · ${chosen.paid ? 'paid' : 'unpaid'} · up to ${chosen.max_minutes} min. ${chosen.reason}`);
     }
@@ -464,6 +472,27 @@ export default function App() {
     }
   };
 
+  // Break-due indicator: when the next meal break is due under the
+  // business policy + province rule, from this shift's clock-in time.
+  // The break flow itself is unchanged (one Start Break button, the
+  // policy picks the type, timer + END BREAK as before).
+  const breakDueInfo = () => {
+    if (!activeSession) return null;
+    const rule = PROVINCE_BREAK_RULES[breakPolicy.province] || PROVINCE_BREAK_RULES.ON;
+    const threshold = rule.meal_threshold_minutes;
+    const hasMeal = takenBreaks.some((b) => /meal|lunch/i.test(b.break_type || ''));
+    const restCount = takenBreaks.filter((b) => /^paid rest/i.test(b.break_type || '')).length;
+    if (threshold == null) return { text: `No statutory meal break in ${rule.name} — breaks follow your business policy.`, urgent: false };
+    if (hasMeal) return { text: `Meal break taken ✓ · Paid rest ${restCount} of ${breakPolicy.rest_max_per_shift} used`, urgent: false };
+    const dueAt = new Date(activeSession.clock_in).getTime() + threshold * 60000;
+    const remainingMs = dueAt - now.getTime();
+    const timeStr = new Date(dueAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+    if (remainingMs <= 0) return { text: `⚠ Meal break due now — ${breakPolicy.meal_minutes} min, unpaid`, urgent: true };
+    const mins = Math.round(remainingMs / 60000);
+    const inStr = mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60}m` : `${mins}m`;
+    return { text: `Meal break due at ${timeStr} (in ${inStr}) — ${breakPolicy.meal_minutes} min, unpaid`, urgent: false };
+  };
+
   const handleClockOut = async () => {
     if (!activeSession) return;
     setStatusMessage('Analyzing shift & clocking out...');
@@ -476,6 +505,23 @@ export default function App() {
     if (durationHours > 12) anomalyFlag = '⚠️ Flagged: Excessive Duration (> 12 Hours)';
     else if (durationHours < 0.05) anomalyFlag = '⚠️ Flagged: Unusually Short Shift (< 3 Mins)';
 
+    // Breaks taken vs policy, for the clock-out summary.
+    const { data: taken } = await supabase
+      .from('time_breaks')
+      .select('break_type, start_time, end_time')
+      .eq('time_log_id', activeSession.id);
+    const breakSummary = (() => {
+      if (!taken || taken.length === 0) {
+        const rule = PROVINCE_BREAK_RULES[breakPolicy.province] || PROVINCE_BREAK_RULES.ON;
+        const dueNote = rule.meal_threshold_minutes != null && durationHours * 60 >= rule.meal_threshold_minutes
+          ? ` A meal break was due after ${rule.meal_threshold_minutes / 60}h.`
+          : '';
+        return 'No breaks taken this shift.' + dueNote;
+      }
+      const mins = (b) => Math.max(0, Math.round(((b.end_time ? new Date(b.end_time).getTime() : Date.now()) - new Date(b.start_time).getTime()) / 60000));
+      return 'Breaks this shift: ' + taken.map((b) => `${b.break_type} ${mins(b)} min`).join(', ') + '.';
+    })();
+
     const { error } = await supabase
       .from('time_logs')
       .update({ clock_out: new Date().toISOString(), ai_anomaly_flag: anomalyFlag })
@@ -486,7 +532,7 @@ export default function App() {
     } else {
       setActiveSession(null);
       setActiveBreak(null);
-      setStatusMessage(`Clocked out! Status: ${anomalyFlag}`);
+      setStatusMessage(`Clocked out! Status: ${anomalyFlag}. ${breakSummary}`);
       fetchTimeData(session.user.id);
     }
   };
@@ -522,6 +568,8 @@ export default function App() {
   }));
   const pressIn = () => { btnScale.value = withSpring(0.94, { damping: 15, stiffness: 400 }); };
   const pressOut = () => { btnScale.value = withSpring(1, { damping: 15, stiffness: 400 }); };
+
+  const dueInfo = activeSession && !activeBreak ? breakDueInfo() : null;
 
   if (loading) {
     return (
@@ -770,6 +818,9 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.empBreakPolicyText}>Meal {breakPolicy.meal_minutes} min unpaid · Rest {breakPolicy.rest_minutes} min paid, max {breakPolicy.rest_max_per_shift} per shift · {(PROVINCE_BREAK_RULES[breakPolicy.province] || PROVINCE_BREAK_RULES.ON).name}</Text>
+                  {dueInfo && (
+                    <Text style={[styles.empBreakPolicyText, dueInfo.urgent && styles.empBreakDueUrgent]}>{dueInfo.text}</Text>
+                  )}
                   <Animated.View style={animatedBtnStyle}>
                     <TouchableOpacity
                       style={styles.empCircleButton}
@@ -893,6 +944,7 @@ const styles = StyleSheet.create({
   empBreakButton: { flex: 1, backgroundColor: colors.accent, borderRadius: radius.md, paddingVertical: 14, alignItems: 'center', minHeight: 56, justifyContent: 'center' },
   empBreakButtonText: { color: '#FFFFFF', fontFamily: fontFamily.semibold, fontSize: 15 },
   empBreakPolicyText: { color: colors.textSecondary, fontFamily: fontFamily.regular, fontSize: 12, marginTop: spacing.sm, textAlign: 'center', width: '100%', maxWidth: 400 },
+  empBreakDueUrgent: { color: colors.warning, fontFamily: fontFamily.semibold },
   empChip: { flex: 1, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, paddingVertical: 12, alignItems: 'center' },
   empChipText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   empMessage: { marginTop: spacing.lg, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', maxWidth: 400, lineHeight: 20 },

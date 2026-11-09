@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
-import { weekStartMs, shiftsOverlap, validateShiftInput, shiftDurationHours } from '../supabase/functions/hr-ai-bot/logic';
+import { weekStartMs, shiftDurationHours } from '../supabase/functions/hr-ai-bot/logic';
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -26,12 +26,6 @@ function dateKey(iso) {
   return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 }
 
-function todayStr() {
-  const d = new Date();
-  const p = (n) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
 export default function ScheduleScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -48,20 +42,10 @@ export default function ScheduleScreen() {
   const [busyId, setBusyId] = useState(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
 
-  // New-shift form (managers)
-  const [showForm, setShowForm] = useState(false);
-  const [formEmployee, setFormEmployee] = useState('');
-  const [formWorksite, setFormWorksite] = useState('');
-  const [formDate, setFormDate] = useState(todayStr());
-  // Tap-specific-dates multi-day: one shift per tapped date, same times.
-  // Tapping one date behaves exactly like the old single-date form.
-  const [formDates, setFormDates] = useState([todayStr()]);
-  const [formTypedDate, setFormTypedDate] = useState('');
-  const [formStart, setFormStart] = useState('09:00');
-  const [formEnd, setFormEnd] = useState('17:00');
-  const [formNextDay, setFormNextDay] = useState(false);
-  const [formNotes, setFormNotes] = useState('');
-  const [creating, setCreating] = useState(false);
+  // Mini month calendar: days with at least one shift are highlighted;
+  // tapping a day jumps the week view to that day's week.
+  const [calMonth, setCalMonth] = useState(() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); });
+  const [monthShifts, setMonthShifts] = useState([]);
 
   const isManager = myRole === 'manager' || myRole === 'admin';
 
@@ -78,6 +62,7 @@ export default function ScheduleScreen() {
 
   useEffect(() => { init(); }, []);
   useEffect(() => { if (myId) loadShifts(); }, [weekOffset, myId]);
+  useEffect(() => { if (myId) loadMonthShifts(calMonth); }, [calMonth, myId]);
 
   const init = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -113,6 +98,18 @@ export default function ScheduleScreen() {
       .lte('start_date', fmtD(weekEnd - DAY_MS))
       .gte('end_date', fmtD(weekStart));
     setLeaves(lv || []);
+    loadMonthShifts(calMonth);
+  };
+
+  const loadMonthShifts = async (monthStart) => {
+    const start = new Date(monthStart);
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    const { data } = await supabase
+      .from('shifts')
+      .select('id, start_time')
+      .gte('start_time', start.toISOString())
+      .lt('start_time', end.toISOString());
+    setMonthShifts(data || []);
   };
 
   const nameOf = (id) => {
@@ -123,55 +120,6 @@ export default function ScheduleScreen() {
   const worksiteOf = (id) => {
     const w = worksites.find((x) => x.id === id);
     return w ? w.name : null;
-  };
-
-  const createShift = async () => {
-    // One shift per tapped date. A clashing date (overlap or approved
-    // leave) is skipped and reported — it does not fail the batch.
-    // Note: clash/leave checks use the loaded week only; dates outside
-    // the current week are created without that check, matching the
-    // old single-date behaviour for typed dates.
-    if (formDates.length === 0) { setMessage('Tap at least one date.'); return; }
-    const created = [];
-    const skipped = [];
-    setCreating(true);
-    setMessage('');
-    for (const formDate of [...formDates].sort()) {
-      const startD = new Date(`${formDate}T${formStart}:00`);
-      const endD = new Date(`${formDate}T${formEnd}:00`);
-      if (formNextDay) endD.setDate(endD.getDate() + 1);
-      const err = validateShiftInput(startD.toISOString(), endD.toISOString());
-      if (err) { skipped.push(`${formDate} (${err})`); continue; }
-      if (formEmployee) {
-        const clash = shifts.find((s) =>
-          s.user_id === formEmployee && s.status === 'assigned' &&
-          shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
-        if (clash) { skipped.push(`${formDate} (overlaps an existing shift)`); continue; }
-        const onLeave = leaves.some((l) => l.user_id === formEmployee && l.start_date <= formDate && l.end_date >= formDate);
-        if (onLeave) { skipped.push(`${formDate} (approved leave)`); continue; }
-      }
-      const { error } = await supabase.from('shifts').insert([{
-        business_id: businessId,
-        user_id: formEmployee || null,
-        worksite_id: formWorksite || null,
-        start_time: startD.toISOString(),
-        end_time: endD.toISOString(),
-        status: formEmployee ? 'assigned' : 'open',
-        notes: formNotes.trim() || null,
-        created_by: myId,
-      }]);
-      if (error) skipped.push(`${formDate} (${error.message})`);
-      else created.push(formDate);
-    }
-    if (created.length > 0) {
-      setMessage((formEmployee ? 'Shift created for ' : 'Open shift posted for ') + created.join(', ') + (skipped.length > 0 ? `. Skipped: ${skipped.join(', ')}.` : '.'));
-      setShowForm(false);
-      setFormNotes('');
-      await loadShifts();
-    } else {
-      setMessage('Nothing created. Skipped: ' + skipped.join(', ') + '.');
-    }
-    setCreating(false);
   };
 
   const claimShift = async (shift) => {
@@ -242,6 +190,28 @@ export default function ScheduleScreen() {
   }
   const todayKey = dateKey(new Date().toISOString());
 
+  const calCells = () => {
+    const y = calMonth.getFullYear(), m = calMonth.getMonth();
+    const firstDow = new Date(y, m, 1).getDay();
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const filled = new Set(monthShifts.map((s) => dateKey(s.start_time)));
+    const todayK = dateKey(new Date().toISOString());
+    const cells = [];
+    for (let i = 0; i < firstDow; i++) cells.push(<View key={`b${i}`} style={styles.calCell} />);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dayMs = new Date(y, m, d).getTime();
+      const key = `${y}-${m}-${d}`;
+      const isFilled = filled.has(key);
+      const isToday = key === todayK;
+      cells.push(
+        <TouchableOpacity key={key} style={[styles.calCell, isFilled && styles.calCellFilled, isToday && styles.calCellToday]} onPress={() => setWeekOffset(Math.round((weekStartMs(dayMs) - weekStartMs(Date.now())) / (7 * DAY_MS)))}>
+          <Text style={[styles.calCellText, isFilled && styles.calCellTextFilled]}>{d}</Text>
+        </TouchableOpacity>
+      );
+    }
+    return cells;
+  };
+
   const badgeFor = (s) => {
     if (s.user_id === myId) return { text: 'YOUR SHIFT', style: styles.badgeMine, textStyle: styles.badgeMineText };
     if (s.status === 'open') return { text: 'OPEN SHIFT', style: styles.badgeOpen, textStyle: styles.badgeOpenText };
@@ -279,6 +249,24 @@ export default function ScheduleScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {message ? <Text style={styles.message}>{message}</Text> : null}
 
+        <View style={styles.card}>
+          <View style={styles.calHeader}>
+            <TouchableOpacity style={styles.weekButton} onPress={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() - 1, 1))}>
+              <Text style={styles.weekButtonText}>‹ Prev</Text>
+            </TouchableOpacity>
+            <Text style={styles.cardTitle}>{calMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</Text>
+            <TouchableOpacity style={styles.weekButton} onPress={() => setCalMonth(new Date(calMonth.getFullYear(), calMonth.getMonth() + 1, 1))}>
+              <Text style={styles.weekButtonText}>Next ›</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.calGrid}>
+            {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((d) => (
+              <View key={d} style={styles.calHeadCell}><Text style={styles.calHeadText}>{d}</Text></View>
+            ))}
+            {calCells()}
+          </View>
+        </View>
+
         {setupMissing ? (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Scheduling is not set up yet</Text>
@@ -286,86 +274,23 @@ export default function ScheduleScreen() {
           </View>
         ) : (
           <>
-            {isManager && (
-              <TouchableOpacity style={styles.addButton} onPress={() => setShowForm(!showForm)}>
-                <Text style={styles.addButtonText}>{showForm ? 'Close' : '+ Add Shift'}</Text>
-              </TouchableOpacity>
-            )}
-
-            {isManager && showForm && (
-              <View style={styles.card}>
-                <Text style={styles.cardTitle}>New Shift</Text>
-                <Text style={styles.label}>Employee</Text>
-                <View style={styles.chipRow}>
-                  <TouchableOpacity style={[styles.chip, !formEmployee && styles.chipActive]} onPress={() => setFormEmployee('')}>
-                    <Text style={[styles.chipText, !formEmployee && styles.chipTextActive]}>Open shift</Text>
-                  </TouchableOpacity>
-                  {people.map((p) => (
-                    <TouchableOpacity key={p.id} style={[styles.chip, formEmployee === p.id && styles.chipActive]} onPress={() => setFormEmployee(p.id)}>
-                      <Text style={[styles.chipText, formEmployee === p.id && styles.chipTextActive]}>{p.full_name || 'Unnamed'}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.label}>Worksite</Text>
-                <View style={styles.chipRow}>
-                  <TouchableOpacity style={[styles.chip, !formWorksite && styles.chipActive]} onPress={() => setFormWorksite('')}>
-                    <Text style={[styles.chipText, !formWorksite && styles.chipTextActive]}>None</Text>
-                  </TouchableOpacity>
-                  {worksites.map((w) => (
-                    <TouchableOpacity key={w.id} style={[styles.chip, formWorksite === w.id && styles.chipActive]} onPress={() => setFormWorksite(w.id)}>
-                      <Text style={[styles.chipText, formWorksite === w.id && styles.chipTextActive]}>{w.name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={styles.label}>Dates — tap each date (one shift per date)</Text>
-                <View style={styles.chipRow}>
-                  {[0, 1, 2, 3, 4, 5, 6].map((i) => {
-                    const d = new Date(weekStart + i * DAY_MS);
-                    const p2 = (n) => String(n).padStart(2, '0');
-                    const dayStr = `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
-                    const on = formDates.includes(dayStr);
-                    return (
-                      <TouchableOpacity key={dayStr} style={[styles.chip, on && styles.chipActive]} onPress={() => setFormDates(on ? formDates.filter((x) => x !== dayStr) : [...formDates, dayStr])}>
-                        <Text style={[styles.chipText, on && styles.chipTextActive]}>{d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <Text style={styles.label}>Or type a date (YYYY-MM-DD) to add it</Text>
-                <TextInput style={styles.input} value={formTypedDate} onChangeText={(v) => { setFormTypedDate(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !formDates.includes(v)) { setFormDates([...formDates, v]); setFormTypedDate(''); } }} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
-                <View style={styles.timeRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>Start (24h)</Text>
-                    <TextInput style={styles.input} value={formStart} onChangeText={setFormStart} placeholder="09:00" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.label}>End (24h)</Text>
-                    <TextInput style={styles.input} value={formEnd} onChangeText={setFormEnd} placeholder="17:00" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
-                  </View>
-                </View>
-                <TouchableOpacity style={[styles.chip, formNextDay && styles.chipActive, { alignSelf: 'flex-start', marginBottom: spacing.md }]} onPress={() => setFormNextDay(!formNextDay)}>
-                  <Text style={[styles.chipText, formNextDay && styles.chipTextActive]}>Ends next day (overnight)</Text>
-                </TouchableOpacity>
-                <Text style={styles.label}>Notes (optional)</Text>
-                <TextInput style={styles.input} value={formNotes} onChangeText={setFormNotes} placeholder="e.g. Delivery day — arrive 15 min early" placeholderTextColor={colors.inputPlaceholder} />
-                <TouchableOpacity style={styles.primaryButton} onPress={createShift} disabled={creating}>
-                  {creating ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>{formEmployee ? 'Create Shift' : 'Post Open Shift'}</Text>}
-                </TouchableOpacity>
-              </View>
-            )}
-
             {shifts.length === 0 && (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>No shifts this week</Text>
-                <Text style={styles.cardText}>{isManager ? 'Tap + Add Shift to post the first one.' : 'Nothing is scheduled for this week yet. Open shifts will appear here when your manager posts them.'}</Text>
+                <Text style={styles.cardText}>{isManager ? 'No shifts posted yet — build them in the Manager Portal.' : 'Nothing is scheduled for this week yet. Open shifts will appear here when your manager posts them.'}</Text>
+                {isManager && (
+                  <TouchableOpacity style={[styles.primaryButton, { marginTop: spacing.md }]} onPress={() => router.push('/manager')}>
+                    <Text style={styles.primaryButtonText}>Build Schedule →</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
 
             {days.map((d) => (
               <View key={d.key} style={styles.dayBlock}>
-                <TouchableOpacity style={styles.dayHeader} onPress={() => { const dd = new Date(d.dayMs); const p2 = (n) => String(n).padStart(2, '0'); const dayStr = `${dd.getFullYear()}-${p2(dd.getMonth() + 1)}-${p2(dd.getDate())}`; setFormDates([dayStr]); setShowForm(true); }}>
+                <TouchableOpacity style={styles.dayHeader} onPress={() => { if (!isManager) return; const dd = new Date(d.dayMs); const p2 = (n) => String(n).padStart(2, '0'); const dayStr = `${dd.getFullYear()}-${p2(dd.getMonth() + 1)}-${p2(dd.getDate())}`; router.push({ pathname: '/manager', params: { scheduleDate: dayStr } }); }}>
                   <Text style={styles.dayTitle}>
-                    {new Date(d.dayMs).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} — tap to schedule
+                    {new Date(d.dayMs).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}{isManager ? ' — tap to schedule' : ''}
                   </Text>
                   {d.key === todayKey && (
                     <View style={styles.todayPill}><Text style={styles.todayPillText}>TODAY</Text></View>
@@ -472,6 +397,15 @@ const styles = StyleSheet.create({
   chipTextActive: { color: colors.accent },
   primaryButton: { ...buttons.primary },
   primaryButtonText: { ...buttons.primaryText },
+  calHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.sm },
+  calGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  calHeadCell: { width: '14.28%', alignItems: 'center', paddingVertical: 6 },
+  calHeadText: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textSecondary },
+  calCell: { width: '14.28%', minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: radius.sm },
+  calCellFilled: { backgroundColor: colors.accentSoft },
+  calCellToday: { borderWidth: 1, borderColor: colors.accent },
+  calCellText: { fontSize: 14, fontFamily: fontFamily.regular, color: colors.textPrimary },
+  calCellTextFilled: { fontFamily: fontFamily.bold, color: colors.accent },
   dayBlock: { gap: spacing.sm },
   dayHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   dayTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
