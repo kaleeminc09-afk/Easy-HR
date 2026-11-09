@@ -200,6 +200,29 @@ export default function App() {
     setStatusMessage('Biometric sign-in arrives in the next update — use your password for now.');
   };
 
+  // Web-only social sign-in (Google for now; Microsoft deferred). Supabase
+  // handles the provider round-trip: the user leaves for Google, Supabase
+  // exchanges the code at its callback, then sends them back to the web
+  // app origin, where detectSessionInUrl (web-only, lib/supabase.js)
+  // picks the session up. The provider must be enabled in the Supabase
+  // dashboard first (Auth -> Providers -> Google) or this errors with
+  // "provider is not enabled". On success the browser navigates away, so
+  // there is no loading reset on that path.
+  const handleOAuthSignIn = async (provider) => {
+    setAuthError('');
+    setAuthLoading(true);
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: window.location.origin },
+    });
+    if (error) {
+      setAuthError(error.message);
+      setAuthLoading(false);
+      return;
+    }
+    if (data?.url) window.location.href = data.url;
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setActiveSession(null);
@@ -580,17 +603,22 @@ export default function App() {
             {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>{authMode === 'create' ? 'Create Account' : authMode === 'forgot' ? 'Send reset link' : 'Sign In'}</Text>}
           </TouchableOpacity>
 
-          {authMode === 'signin' && Platform.OS !== 'web' && (<>
+          {authMode === 'signin' && (<>
           <View style={styles.authDivider}>
             <View style={styles.authDividerLine} />
             <Text style={styles.authDividerText}>or</Text>
             <View style={styles.authDividerLine} />
           </View>
 
-          {/* Web: no biometric sign-in exists yet (phone placeholder only) — hide the dead button on web. */}
-          <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
-            <Text style={styles.authBiometricButtonText}>Sign in with biometrics</Text>
-          </TouchableOpacity>
+          {Platform.OS === 'web' ? (
+            <TouchableOpacity style={styles.authBiometricButton} onPress={() => handleOAuthSignIn('google')} disabled={authLoading}>
+              <Text style={styles.authBiometricButtonText}>Continue with Google</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
+              <Text style={styles.authBiometricButtonText}>Sign in with biometrics</Text>
+            </TouchableOpacity>
+          )}
           </>)}
 
           <TouchableOpacity style={styles.authSecondaryButton} onPress={() => { setAuthMode(authMode === 'forgot' ? 'signin' : authMode === 'create' ? 'signin' : 'create'); setAuthError(''); setStatusMessage(''); }} disabled={authLoading}>
