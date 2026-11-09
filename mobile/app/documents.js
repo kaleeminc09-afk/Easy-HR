@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { supabase } from '../lib/supabase';
@@ -47,6 +47,15 @@ export default function DocumentsScreen() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
 
   const isManager = myRole === 'manager' || myRole === 'admin';
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A manager who came from the employee
+  // home goes back to the employee home, not the Manager Portal.
+  // A deep link with no history falls back to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
 
   useEffect(() => { init(); }, []);
   useEffect(() => { if (selectedUser) loadDocs(selectedUser); }, [selectedUser]);
@@ -176,11 +185,9 @@ export default function DocumentsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href={isManager ? '/manager' : '/'} asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Back</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Documents</Text>
         <View style={{ width: 80 }} />
       </View>

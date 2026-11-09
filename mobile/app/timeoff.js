@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Link } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { countBusinessDays, dateRangesOverlap, vacationBalance, leaveTypeBalance } from '../supabase/functions/hr-ai-bot/logic';
@@ -52,6 +52,15 @@ export default function TimeOffScreen() {
   const [submitting, setSubmitting] = useState(false);
 
   const isManager = myRole === 'manager' || myRole === 'admin';
+
+  // Back means back: return to the screen we came from, not a
+  // role-based destination. A manager who came from the employee
+  // home goes back to the employee home, not the Manager Portal.
+  // A deep link with no history falls back to the employee home.
+  const handleBack = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace('/');
+  };
   const year = new Date().getFullYear();
   const balance = vacationBalance(entitlement, mine, year);
   const formDays = countBusinessDays(formStart, formEnd, formHalf && formStart === formEnd);
@@ -225,11 +234,9 @@ export default function TimeOffScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Link href={isManager ? '/manager' : '/'} asChild>
-          <TouchableOpacity style={styles.navButton}>
-            <Text style={styles.navButtonText}>← Back</Text>
-          </TouchableOpacity>
-        </Link>
+        <TouchableOpacity style={styles.navButton} onPress={handleBack}>
+          <Text style={styles.navButtonText}>← Back</Text>
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>Time Off</Text>
         <View style={{ width: 80 }} />
       </View>
