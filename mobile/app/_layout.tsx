@@ -53,7 +53,15 @@ export default function RootLayout() {
     const handleUrl = async (url: string | null) => {
       if (!url) return;
       const isInvite = url.startsWith('northshift://invite') || url.includes('type=invite');
-      const isRecovery = url.startsWith('northshift://reset-password') || url.includes('type=recovery');
+      // Web (manager web app): a recovery link lands on the web app as
+      // https://app.northshiftapp.com/reset-password?code=... — no
+      // northshift:// scheme and no type=recovery param. Treat any
+      // /reset-password URL carrying a code as a recovery link; the
+      // exchange below signs the user in before the screen renders.
+      // detectSessionInUrl (web only, lib/supabase.js) also picks the
+      // code up, so this is a belt-and-braces path, not the only one.
+      const isRecovery = url.startsWith('northshift://reset-password') || url.includes('type=recovery')
+        || (url.includes('/reset-password') && (url.includes('code=') || url.includes('access_token=')));
       const target = isInvite ? '/profile' : isRecovery ? '/reset-password' : null;
       if (!target) return;
       try {

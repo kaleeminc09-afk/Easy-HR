@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Link, useRouter } from 'expo-router';
@@ -140,8 +140,16 @@ export default function App() {
     }
     // Supabase sends the link only if the account exists; the message
     // below stays neutral either way so it never confirms an address.
+    // Web (manager web app): the reset email must land back on the web
+    // app's own reset page — a northshift:// link does nothing in a
+    // desktop browser. Supabase dashboard must list this URL under
+    // Authentication → Redirect URLs (dashboard step, not code).
+    // Native keeps the northshift:// deep link handled by _layout.tsx.
+    const redirectTo = Platform.OS === 'web'
+      ? `${window.location.origin}/reset-password`
+      : 'northshift://reset-password';
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: 'northshift://reset-password',
+      redirectTo,
     });
     if (error) {
       setAuthError(error.message);
