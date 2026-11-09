@@ -8,17 +8,18 @@ import { colors, fontFamily, spacing, radius, buttons } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 
-// First-run onboarding for a brand-new owner: create the business, add
-// the first worksite, then invite the team. A signed-in user who already
-// has a business never sees this screen (home redirects only when
-// business_id is null, and this screen redirects back if one appears).
-// Invited employees already carry a business_id from the invite, so they
-// skip this too; the note on step 1 is for anyone who landed here by
-// mistake after signing in directly instead of tapping their invite link.
+// First-run onboarding: the user first picks which way they are joining.
+// Owners pick "setting up a business" (business -> worksite -> done).
+// Invited employees pick "I was invited" and are told to open the invite
+// link from their email — they never create a business here. A signed-in
+// user who already has a business never sees this screen (home redirects
+// only when business_id is null, and this screen redirects back if one
+// appears). Invited employees already carry a business_id from the
+// invite, so they skip this too.
 export default function OnboardingScreen() {
   const router = useRouter();
   const [checking, setChecking] = useState(true);
-  const [step, setStep] = useState('business');
+  const [step, setStep] = useState('choose');
   const [businessName, setBusinessName] = useState('');
   const [businessId, setBusinessId] = useState(null);
   const [accountNumber, setAccountNumber] = useState('');
@@ -124,6 +125,26 @@ export default function OnboardingScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
+        {step === 'choose' && (<>
+          <Text style={styles.title}>Welcome to NorthShift</Text>
+          <Text style={styles.body}>How are you joining?</Text>
+          <TouchableOpacity style={buttons.primary} onPress={() => setStep('business')}>
+            <Text style={buttons.primaryText}>I&apos;m setting up a business</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep('invited')}>
+            <Text style={styles.secondaryButtonText}>I was invited to join a business</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={signOut}><Text style={styles.auxLink}>Sign out</Text></TouchableOpacity>
+        </>)}
+        {step === 'invited' && (<>
+          <Text style={styles.title}>You were invited</Text>
+          <Text style={styles.body}>Your manager sent you an invite link by email. Open that link — it connects you to their business and lets you set your password. There is no business to set up here.</Text>
+          <Text style={styles.body}>No link yet? Ask your manager to send it from Manage Users in their app. Once it arrives, open it on this device.</Text>
+          <TouchableOpacity style={styles.secondaryButton} onPress={() => setStep('choose')}>
+            <Text style={styles.secondaryButtonText}>← Back</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={signOut}><Text style={styles.auxLink}>Sign out</Text></TouchableOpacity>
+        </>)}
         {step === 'business' && (<>
           <Text style={styles.title}>Set up your business</Text>
           <Text style={styles.body}>This takes a minute. First, your company name — it shows on your team&apos;s screens and exports.</Text>
@@ -133,7 +154,7 @@ export default function OnboardingScreen() {
           <TouchableOpacity style={buttons.primary} onPress={createBusiness} disabled={saving}>
             {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={buttons.primaryText}>Create business</Text>}
           </TouchableOpacity>
-          <Text style={styles.note}>If your manager invited you, don&apos;t create a business here — open the invite link from your email instead. It connects you to their business.</Text>
+          <TouchableOpacity onPress={() => setStep('choose')}><Text style={styles.auxLink}>← I was invited instead</Text></TouchableOpacity>
           <TouchableOpacity onPress={signOut}><Text style={styles.auxLink}>Sign out</Text></TouchableOpacity>
         </>)}
         {step === 'worksite' && (<>

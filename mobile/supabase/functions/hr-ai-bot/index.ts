@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -157,6 +157,20 @@ const managerTools = [
   {
     type: "function",
     function: {
+      name: "get_break_policy",
+      description: "Shows the business break policy and when the next meal break is due. Use for 'when is my meal break due', 'how long is my break', 'when is Asha's meal break due'. Managers may pass an employee name; otherwise it answers for the caller.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "Manager only: whose break is due. Omit to ask about yourself." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "get_employee_profile",
       description: "Looks up an employee's profile: job title, department, start date, employment type, employee number, primary worksite, phone, and emergency contacts. Use for 'what's Asha's job title', 'who is the emergency contact for Ben'. Never includes home address or date of birth.",
       parameters: {
@@ -237,6 +251,14 @@ const employeeTools = [
     function: {
       name: "get_team_status",
       description: "Lists who is currently clocked in (online) and who is on break right now. Use when anyone asks who's working, who's online, who's on break, or for a team status snapshot.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_break_policy",
+      description: "Shows your break policy and when your next meal break is due. Use for 'when is my meal break due', 'how long is my break'.",
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
@@ -375,6 +397,7 @@ SCHEDULE:
 OVERTIME & COMPLIANCE:
 - "who's close to overtime" → get_overtime_status. "any break violations" → get_break_violations.
 - Quote the returned numbers exactly — never estimate hours yourself. Ontario overtime starts past 44 hours in a week (Mon-Sun); the warning level is 40.
+- Break questions ("when is my meal break due", "how long is my break", "when is Asha's meal break due") → get_break_policy. It reports the business policy, the province rule, and the due time from today's clock-in — quote its numbers, never estimate.
 
 PROFILES:
 - Job title, department, start date, phone, or emergency contact questions → get_employee_profile.
@@ -386,7 +409,15 @@ WRITE ACTIONS - you can change data, not just read it:
 - Approve or deny time off → review_time_off with the employee's name.
 - If a write tool returns an error or a list to choose from, relay it and ask - never invent a person, worksite, date, or time.
 - After any successful write, say plainly what changed: who, what, and when, using the tool's own result. Then stop — call no further tools.
-- NEVER say a shift was created or a request approved/denied unless the write tool returned success. If it returned success: false, relay the error plainly and do not soften it.`;
+- NEVER say a shift was created or a request approved/denied unless the write tool returned success. If it returned success: false, relay the error plainly and do not soften it.
+- Create a shift refuses a time that overlaps an existing shift or falls on approved leave — relay that refusal plainly and offer another time.
+
+APP GUIDE — where things live (web app, right-hand toolbar; phone app, ☰ Menu):
+- Clock In is the home screen. Schedule is the shared week view — everyone sees shifts and claims open ones there.
+- Build Schedule lives in the Manager Portal (the "Build Schedule" section at the top) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
+- Break Policy, Leave Policy, QR Codes, and Manager Board are manager-only; Subscription is admin-only.
+- Onboarding: a new owner signs up, creates the business, adds a location, then invites the team by email from Manage Users. An invited employee opens the invite link from their email and sets a password — they never create a business. If someone signed up directly without an invite, point them at the "I was invited" choice on the setup screen.
+- Billing is a stub: every plan starts with a free first month (Starter $25/mo, Growth $59/mo, Business $119/mo); checkout opens at launch and nothing is charged today. NEVER say a payment went through, a card was charged, or a subscription is active — if asked, say billing is not wired up yet and the first month is free.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
@@ -418,6 +449,10 @@ CAPABILITIES:
 - Never tell the employee a claim or request went through unless the tool returned success: true. If a tool returns success: false, say plainly that it did not work and why.
 - Shift results include a ready-made "when" label in local time — use it word-for-word for the date and times instead of converting timestamps yourself. When you list open shifts, introduce them as open shifts the employee can claim (for example: "There is 1 open shift you can claim:") - never show a bare list of times with no explanation.
 - Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
+- Break questions ("when is my meal break due", "how long is my break") → get_break_policy. It knows the business policy, the province rule, and today's clock-in time — quote its due time, never estimate.
+- Where things live: on the web app the sections are in the right-hand toolbar; on the phone they are in the ☰ Menu. Schedule is the shared week view — open shifts there are yours to claim.
+- If you were invited, open the invite link from your email to join your manager's business — do not create a business on the setup screen.
+- Billing: the first month is free on every plan and checkout is not wired up yet — never say a payment went through or a card was charged.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -651,6 +686,54 @@ Deno.serve(async (req) => {
               lastReadSummary = status.online.length === 0 && status.on_break.length === 0
                 ? "Nobody is clocked in right now."
                 : `Currently clocked in: ${status.online.map((m: any) => m.name).join(", ")}.${status.on_break.length ? ` On break: ${status.on_break.map((m: any) => m.name).join(", ")}.` : ""}`;
+            }
+          }
+        } else if (fn === "get_break_policy") {
+          let targetId = effectiveUserId;
+          let targetName = callerName;
+          let resolveErr: string | null = null;
+          if (effectiveRole === "manager" && args.employee_name) {
+            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const m = matchByName(emps || [], (p: any) => p.full_name || "", String(args.employee_name).trim());
+            if (m.kind !== "one") resolveErr = m.kind === "many" ? `More than one team member matches "${args.employee_name}". Use the full name.` : `No team member matches "${args.employee_name}".`;
+            else { targetId = m.value.id; targetName = m.value.full_name; }
+          }
+          if (resolveErr) {
+            output = { error: resolveErr };
+          } else {
+            const { data: pol } = await supabase.from("break_policies").select("*").eq("business_id", callerBusinessId).maybeSingle();
+            const policy = {
+              province: pol?.province || "ON",
+              meal_minutes: pol?.meal_minutes,
+              rest_minutes: pol?.rest_minutes,
+              rest_max_per_shift: pol?.rest_max_per_shift,
+              meal_paid_if_available: pol?.meal_paid_if_available,
+            };
+            const rule = PROVINCE_BREAK_RULES[policy.province] || PROVINCE_BREAK_RULES.ON;
+            const { data: active } = await supabase.from("time_logs").select("id, clock_in").eq("user_id", targetId).is("clock_out", null).maybeSingle();
+            let taken: any[] = [];
+            if (active) {
+              const { data: tb } = await supabase.from("time_breaks").select("break_type, start_time, end_time").eq("time_log_id", active.id);
+              taken = tb || [];
+            }
+            const due = breakDueInfo(active?.clock_in || null, policy, taken);
+            output = {
+              employee: targetName,
+              province: rule.name,
+              meal_minutes: due.meal_minutes,
+              meal_paid_if_available: policy.meal_paid_if_available ?? true,
+              rest_minutes: due.rest_minutes,
+              rest_max_per_shift: due.rest_max_per_shift,
+              meal_threshold_minutes: due.threshold_minutes,
+              clock_in: active?.clock_in || null,
+              meal_break_due_at: due.due_at_ms ? new Date(due.due_at_ms).toISOString() : null,
+              has_meal_break: due.has_meal,
+              rest_breaks_used: due.rest_used,
+              breaks_taken: taken.map((b: any) => ({ break_type: b.break_type, start_time: b.start_time, end_time: b.end_time })),
+            };
+            if (due.due_at_ms) {
+              const dueTime = new Date(due.due_at_ms).toLocaleTimeString("en-US", { timeZone: callerTz, hour: "numeric", minute: "2-digit" });
+              lastReadSummary = `${targetName}'s meal break is due at ${dueTime} (${due.meal_minutes} min).`;
             }
           }
         } else if (fn === "clock_out_employee") {
@@ -1026,8 +1109,23 @@ Deno.serve(async (req) => {
                 .eq("user_id", targetId)
                 .lt("start_time", new Date(endMs).toISOString())
                 .gt("end_time", new Date(startMs).toISOString());
-              const conflict = (existing || []).find((s: any) => shiftsOverlap(startMs, endMs, Date.parse(s.start_time), Date.parse(s.end_time)));
+              // shiftsOverlap takes two { start_time, end_time } objects —
+              // the old four-number call always returned false, so this
+              // guard never fired and overlapping shifts could be created.
+              const conflict = (existing || []).find((s: any) => shiftsOverlap(
+                { start_time: new Date(startMs).toISOString(), end_time: new Date(endMs).toISOString() },
+                { start_time: s.start_time, end_time: s.end_time },
+              ));
               if (conflict) failure = `${targetName} already has a shift then (${fmtWhen(conflict.start_time, conflict.end_time, callerTz)}). Pick a different time or delete that shift first.`;
+            }
+            if (!failure && targetId) {
+              const { data: leaves } = await supabase.from("time_off_requests")
+                .select("start_date, end_date")
+                .eq("user_id", targetId)
+                .eq("status", "approved")
+                .lte("start_date", args.date)
+                .gte("end_date", args.date);
+              if (isDateOnLeave(leaves || [], args.date)) failure = `${targetName} is on approved leave on ${args.date}. Pick a different date.`;
             }
             if (failure) {
               output = { success: false, error: failure };

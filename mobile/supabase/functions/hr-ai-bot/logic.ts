@@ -321,6 +321,60 @@ export function maxMinutesForBreakType(
   return p.rest_minutes;
 }
 
+// ---- Break-due info (clock screen + bot share this) ----
+// When the next meal break is due for an open shift, from the shift's
+// clock-in time, the business policy, and the province rule.
+export interface BreakDueInfo {
+  threshold_minutes: number | null;
+  meal_minutes: number;
+  rest_minutes: number;
+  rest_max_per_shift: number;
+  has_meal: boolean;
+  rest_used: number;
+  due_at_ms: number | null; // clock-in + threshold; null when no meal is owed
+}
+
+export function breakDueInfo(
+  clockInIso: string | null | undefined,
+  policy: (BreakPolicy & { province?: string }) | null | undefined,
+  breaksTaken: Array<string | { break_type?: string | null }>,
+): BreakDueInfo {
+  // Nullish coalescing, not spread: the bot passes policy rows whose
+  // fields may be undefined, and spreading undefined would clobber the
+  // defaults with undefined.
+  const p = {
+    meal_minutes: policy?.meal_minutes ?? DEFAULT_BREAK_POLICY.meal_minutes,
+    rest_minutes: policy?.rest_minutes ?? DEFAULT_BREAK_POLICY.rest_minutes,
+    rest_max_per_shift: policy?.rest_max_per_shift ?? DEFAULT_BREAK_POLICY.rest_max_per_shift,
+    meal_paid_if_available: policy?.meal_paid_if_available ?? DEFAULT_BREAK_POLICY.meal_paid_if_available,
+  };
+  const rule = PROVINCE_BREAK_RULES[policy?.province || "ON"] || PROVINCE_BREAK_RULES.ON;
+  const threshold = rule.meal_threshold_minutes;
+  const types = breaksTaken.map((b) => (typeof b === "string" ? b : b.break_type || ""));
+  const hasMeal = types.some((t) => /meal|lunch/i.test(t));
+  const restUsed = types.filter((t) => /^paid rest/i.test(t)).length;
+  const mealMinutes = Math.max(p.meal_minutes, rule.meal_minutes || 0);
+  const clockMs = clockInIso ? Date.parse(clockInIso) : NaN;
+  return {
+    threshold_minutes: threshold,
+    meal_minutes: mealMinutes,
+    rest_minutes: p.rest_minutes,
+    rest_max_per_shift: p.rest_max_per_shift,
+    has_meal: hasMeal,
+    rest_used: restUsed,
+    due_at_ms: !hasMeal && threshold != null && !Number.isNaN(clockMs) ? clockMs + threshold * 60000 : null,
+  };
+}
+
+// Is a date inside any approved leave range (inclusive)? Same guard the
+// schedule builder and the bot's create_shift use before posting a shift.
+export function isDateOnLeave(
+  leaves: Array<{ start_date: string; end_date: string }>,
+  date: string,
+): boolean {
+  return (leaves || []).some((l) => l.start_date <= date && l.end_date >= date);
+}
+
 // ---- Ontario ESA meal-break compliance ----
 // An employee must not work more than 5 consecutive hours without a
 // 30-minute eating period. The 30 minutes may be split into two periods

@@ -36,6 +36,8 @@ import {
   formatFileSize,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
+  breakDueInfo,
+  isDateOnLeave,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -686,5 +688,52 @@ describe("leaveTypeBalance", () => {
     expect(leaveTypeBalance(4, reqs, "Sick", 2026)).toEqual({ cap: 4, used: 2.5, remaining: 1.5 });
     expect(leaveTypeBalance(null, reqs, "Sick", 2026)).toEqual({ cap: null, used: 2.5, remaining: null });
     expect(leaveTypeBalance(4, reqs, "Personal", 2026)).toEqual({ cap: 4, used: 1, remaining: 3 });
+  });
+});
+
+describe("breakDueInfo", () => {
+  const CLOCK_IN = "2026-11-09T13:00:00.000Z"; // 8:00 AM Toronto (EST)
+  const policy = { province: "ON", meal_minutes: 30, rest_minutes: 15, rest_max_per_shift: 2 };
+
+  test("Ontario: meal due 5h after clock-in", () => {
+    const d = breakDueInfo(CLOCK_IN, policy, []);
+    expect(d.threshold_minutes).toBe(300);
+    expect(d.meal_minutes).toBe(30);
+    expect(d.due_at_ms).toBe(Date.parse(CLOCK_IN) + 300 * 60000);
+    expect(d.has_meal).toBe(false);
+  });
+
+  test("meal already taken means nothing due; rest count tracked", () => {
+    const d = breakDueInfo(CLOCK_IN, policy, [{ break_type: "Unpaid Meal" }, { break_type: "Paid Rest" }]);
+    expect(d.due_at_ms).toBeNull();
+    expect(d.has_meal).toBe(true);
+    expect(d.rest_used).toBe(1);
+  });
+
+  test("New Brunswick has no statutory meal threshold", () => {
+    const d = breakDueInfo(CLOCK_IN, { province: "NB" }, []);
+    expect(d.threshold_minutes).toBeNull();
+    expect(d.due_at_ms).toBeNull();
+  });
+
+  test("no open shift means nothing due; meal minutes never below the provincial minimum", () => {
+    expect(breakDueInfo(null, policy, []).due_at_ms).toBeNull();
+    expect(breakDueInfo(CLOCK_IN, { province: "ON", meal_minutes: 15 }, []).meal_minutes).toBe(30);
+  });
+});
+
+describe("isDateOnLeave", () => {
+  const leaves = [{ start_date: "2026-11-10", end_date: "2026-11-12" }];
+
+  test("inside the range and both boundaries count", () => {
+    expect(isDateOnLeave(leaves, "2026-11-10")).toBe(true);
+    expect(isDateOnLeave(leaves, "2026-11-11")).toBe(true);
+    expect(isDateOnLeave(leaves, "2026-11-12")).toBe(true);
+  });
+
+  test("outside the range and empty list do not count", () => {
+    expect(isDateOnLeave(leaves, "2026-11-09")).toBe(false);
+    expect(isDateOnLeave(leaves, "2026-11-13")).toBe(false);
+    expect(isDateOnLeave([], "2026-11-11")).toBe(false);
   });
 });
