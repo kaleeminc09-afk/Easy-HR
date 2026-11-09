@@ -1,6 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Platform, StyleSheet, View } from 'react-native';
 import { Stack, SplashScreen, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
+import WebSidebar from '../components/WebSidebar';
+import WebAssistant from '../components/WebAssistant';
 import { supabase } from '../lib/supabase';
 import {
   useFonts,
@@ -30,6 +33,18 @@ const screenOptions = {
 
 export default function RootLayout() {
   const router = useRouter();
+  const [session, setSession] = useState<any>(null);
+
+  // Session for the web shell: the toolbar and floating Assistant
+  // only render on web while signed in. Mirrors the session
+  // subscription in app/index.js.
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
   const [loaded] = useFonts({
     Inter_400Regular,
     Inter_500Medium,
@@ -89,9 +104,37 @@ export default function RootLayout() {
   }, []);
 
   if (!loaded) return null;
+
+  // Web shell: a signed-in web session gets the right toolbar and the
+  // floating Assistant next to the Stack. Native, and web with no
+  // session (sign-in / reset-password screens), render exactly as
+  // before — the shell only wraps authenticated web use.
+  if (Platform.OS === 'web' && session) {
+    return (
+      <SafeAreaProvider>
+        <View style={styles.webShell}>
+          <View style={styles.webContent}>
+            <Stack screenOptions={screenOptions} />
+            <WebAssistant />
+          </View>
+          <WebSidebar />
+        </View>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <Stack screenOptions={screenOptions} />
     </SafeAreaProvider>
   );
 }
+
+const styles = StyleSheet.create({
+  // Row layout: the app content flexes, the toolbar holds a fixed
+  // 220px on the right. WebAssistant anchors to webContent, so the
+  // floating button and its panel sit over the content, clear of
+  // the toolbar.
+  webShell: { flex: 1, flexDirection: 'row', backgroundColor: colors.background },
+  webContent: { flex: 1 },
+});
