@@ -580,13 +580,14 @@ export default function App() {
             {authLoading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.authPrimaryButtonText}>{authMode === 'create' ? 'Create Account' : authMode === 'forgot' ? 'Send reset link' : 'Sign In'}</Text>}
           </TouchableOpacity>
 
-          {authMode === 'signin' && (<>
+          {authMode === 'signin' && Platform.OS !== 'web' && (<>
           <View style={styles.authDivider}>
             <View style={styles.authDividerLine} />
             <Text style={styles.authDividerText}>or</Text>
             <View style={styles.authDividerLine} />
           </View>
 
+          {/* Web: no biometric sign-in exists yet (phone placeholder only) — hide the dead button on web. */}
           <TouchableOpacity style={styles.authBiometricButton} onPress={handleBiometric}>
             <Text style={styles.authBiometricButtonText}>Sign in with biometrics</Text>
           </TouchableOpacity>
