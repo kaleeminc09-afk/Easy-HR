@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -169,6 +169,10 @@ export default function SubscriptionScreen() {
               <Text style={styles.primaryButtonText}>Change Plan</Text>
             </TouchableOpacity>
           </Link>
+
+          <TouchableOpacity style={styles.supportLine} onPress={() => Linking.openURL('mailto:support@northshiftapp.com')}>
+            <Text style={styles.supportText}>Questions about billing? <Text style={styles.supportLink}>Email support@northshiftapp.com</Text></Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.allPlansCard}>
@@ -233,6 +237,9 @@ const styles = StyleSheet.create({
   renewText: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: spacing.sm },
   feature: { fontFamily: fontFamily.regular, fontSize: 14, color: colors.textPrimary, marginTop: spacing.xs },
   primaryButton: { ...buttons.primary, marginTop: spacing.xl },
+  supportLine: { marginTop: spacing.md, alignItems: 'center' },
+  supportText: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center' },
+  supportLink: { color: colors.accent, fontFamily: fontFamily.semibold },
   primaryButtonText: { ...buttons.primaryText },
   allPlansCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg },
   planRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },

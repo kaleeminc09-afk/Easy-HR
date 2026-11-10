@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image } from 'react-native';
+import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -545,6 +545,9 @@ export default function ManagerDashboard() {
               <Text style={styles.menuItemText}>{label}</Text>
             </TouchableOpacity>
           ))}
+          <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Linking.openURL('mailto:support@northshiftapp.com'); }}>
+            <Text style={styles.menuItemText}>Support</Text>
+          </TouchableOpacity>
         </View>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -328,6 +328,14 @@ export default function ProfileScreen() {
           <Field label="Confirm new password" value={confirmPassword} onChangeText={setConfirmPassword} placeholder="Repeat the new password" secureTextEntry autoCapitalize="none" />
           <TouchableOpacity style={styles.primaryButton} onPress={handleChangePassword} disabled={pwSaving}>
             {pwSaving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryButtonText}>Change Password</Text>}
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Contact support</Text>
+          <Text style={styles.sectionNote}>Questions about the app or your plan? Email us and we will get back to you.</Text>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('mailto:support@northshiftapp.com')}>
+            <Text style={styles.primaryButtonText}>Email support@northshiftapp.com</Text>
           </TouchableOpacity>
         </View>
 

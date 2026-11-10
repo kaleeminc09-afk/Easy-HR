@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Image, Platform, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Link, useRouter } from 'expo-router';
@@ -737,6 +737,9 @@ export default function App() {
               <Text style={styles.menuItemText}>{label}</Text>
             </TouchableOpacity>
           ))}
+          <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Linking.openURL('mailto:support@northshiftapp.com'); }}>
+            <Text style={styles.menuItemText}>Support</Text>
+          </TouchableOpacity>
         </View>
       )}
 

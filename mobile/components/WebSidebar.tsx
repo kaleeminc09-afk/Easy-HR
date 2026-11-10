@@ -8,7 +8,7 @@
 // installed via react-native-qrcode-svg) — no new dependencies.
 // Break Policy + Leave Policy sit under a "Policies" section label.
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { supabase } from '../lib/supabase';
@@ -106,6 +106,14 @@ const ICONS = {
       <Path d="M1 10h22" />
     </Svg>
   ),
+  // Support: question mark in a circle.
+  help: (c) => (
+    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Circle cx="12" cy="12" r="9" />
+      <Path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+      <Path d="M12 17h.01" />
+    </Svg>
+  ),
 };
 
 const LINKS = [
@@ -125,6 +133,10 @@ const LINKS = [
   { label: 'Leave Policy', href: '/leave-policy', managerOnly: true, adminOnly: false, icon: 'calendarCheck' },
   { label: 'QR Codes', href: '/qrcodes', managerOnly: true, adminOnly: false, icon: 'qr' },
   { label: 'Subscription', href: '/subscription', managerOnly: false, adminOnly: true, icon: 'card' },
+  // Support opens the user's mail app — not a route, so mailto: true
+  // branches the press handler to Linking instead of router.push.
+  // Visible to everyone, above Sign out.
+  { label: 'Support', href: 'mailto:support@northshiftapp.com', managerOnly: false, adminOnly: false, icon: 'help', mailto: true },
 ];
 
 export default function WebSidebar() {
@@ -157,7 +169,7 @@ export default function WebSidebar() {
             {l.section ? <Text style={styles.sectionLabel}>{l.section}</Text> : null}
             <TouchableOpacity
               style={[styles.link, active && styles.linkActive]}
-              onPress={() => router.push(l.href)}
+              onPress={() => (l.mailto ? Linking.openURL(l.href) : router.push(l.href))}
             >
               <View style={styles.linkRow}>
                 {l.icon ? <View style={styles.iconWrap}>{ICONS[l.icon](iconColor)}</View> : null}
