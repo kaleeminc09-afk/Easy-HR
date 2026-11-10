@@ -424,3 +424,15 @@ verify_jwt = true
 
 [functions.create-business]
 verify_jwt = true
+
+# Billing (Stripe): checkout + portal need a caller JWT; the webhook is
+# called by Stripe, so it must NOT verify a JWT — authenticity comes
+# from the Stripe-Signature header instead.
+[functions.create-checkout-session]
+verify_jwt = true
+
+[functions.create-portal-session]
+verify_jwt = true
+
+[functions.stripe-webhook]
+verify_jwt = false

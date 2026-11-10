@@ -3,21 +3,18 @@ import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { startCheckout, openBillingUrl } from '../lib/billing';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 // Plans mirror the Subscription screen. First month free, month-to-month.
+// Billing runs through Stripe Checkout (hosted page): the app sends only
+// the plan slug, Stripe collects the card, and the webhook records the
+// subscription. No card data ever touches this screen.
 const PLANS = {
   starter: { name: 'Starter', price: 25, limit: 5 },
   growth: { name: 'Growth', price: 49, limit: 15 },
   business: { name: 'Business', price: 99, limit: 40 },
 };
-
-// RevenueCat integration point (post-launch):
-//  1. `npx expo install react-native-purchases`
-//  2. Configure products in App Store Connect / Play Console, link in RevenueCat.
-//  3. Replace handleSubscribe's stub with Purchases.purchasePackage() and
-//     write the resulting entitlement back to public.subscriptions.
-const BILLING_WIRED = false;
 
 export default function PaymentScreen() {
   const router = useRouter();
@@ -60,16 +57,14 @@ export default function PaymentScreen() {
   };
 
   const handleSubscribe = async () => {
-    if (!BILLING_WIRED) {
-      setMessage('Checkout opens at launch — your free trial is already active. Nothing is charged today.');
-      return;
-    }
     setProcessing(true);
     setMessage('');
     try {
-      // RevenueCat purchase flow goes here (see BILLING_WIRED note above).
+      const { url, error } = await startCheckout(supabase, plan);
+      if (error) { setMessage(error); return; }
+      openBillingUrl(url);
     } catch (e) {
-      setMessage('Payment failed: ' + e.message);
+      setMessage('Checkout could not start. Check your connection and try again.');
     } finally {
       setProcessing(false);
     }
@@ -150,7 +145,7 @@ export default function PaymentScreen() {
               : <Text style={styles.primaryButtonText}>Subscribe — ${planInfo.price}/mo</Text>}
           </TouchableOpacity>
 
-          <Text style={styles.secureNote}>Processed securely through the App Store / Google Play</Text>
+          <Text style={styles.secureNote}>Processed securely by Stripe — your card details never touch NorthShift</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

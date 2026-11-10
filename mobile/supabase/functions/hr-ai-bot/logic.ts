@@ -907,3 +907,70 @@ export function zonedTimeToUtc(dateStr: string, timeStr: string, timeZone: strin
   const utc = guess - offsetAt(guess - offsetAt(guess));
   return utc;
 }
+
+// ---------- Billing state (Stripe) ----------
+
+export type BillingState = "trialing" | "active" | "grace" | "locked";
+
+export interface BillingSubscriptionLike {
+  status?: string | null;
+  trial_end?: string | null;
+  current_period_end?: string | null;
+  grace_until?: string | null;
+}
+
+export interface BillingStateResult {
+  state: BillingState;
+  trialEndsAtMs: number | null;
+  graceEndsAtMs: number | null;
+  /** Whole days left in the trial (trialing) or the grace window (grace); 0 otherwise. */
+  daysLeft: number;
+}
+
+const BILLING_DAY_MS = 86400000;
+const TRIAL_DAYS = 30;
+const GRACE_DAYS = 7;
+
+/**
+ * Billing state for one business, from its creation date and its
+ * subscriptions row (both nullable). Pure — the app screens share this
+ * with the webhook's server-side view of the same facts.
+ *
+ * - No subscription row: the trial runs 30 days from business creation.
+ * - trialing + now < trial end: trialing.
+ * - active: paid and current. A canceled subscription stays active
+ *   until its current period ends.
+ * - past_due / unpaid: grace until grace_until (set by the webhook on
+ *   invoice.payment_failed, +7 days); without one, 7 days from now.
+ * - Otherwise: locked — trial over, no active subscription.
+ */
+export function getBillingState(
+  input: { businessCreatedAt: string | null; subscription: BillingSubscriptionLike | null },
+  nowMs: number = Date.now(),
+): BillingStateResult {
+  const trialEndFromSub = input.subscription?.trial_end ? new Date(input.subscription.trial_end).getTime() : NaN;
+  const createdMs = input.businessCreatedAt ? new Date(input.businessCreatedAt).getTime() : NaN;
+  const trialEndsAtMs = Number.isFinite(trialEndFromSub)
+    ? trialEndFromSub
+    : Number.isFinite(createdMs) ? createdMs + TRIAL_DAYS * BILLING_DAY_MS : null;
+  const status = input.subscription?.status || null;
+  const graceMs = input.subscription?.grace_until ? new Date(input.subscription.grace_until).getTime() : NaN;
+  const periodEndMs = input.subscription?.current_period_end ? new Date(input.subscription.current_period_end).getTime() : NaN;
+
+  const days = (endMs: number | null) =>
+    endMs == null ? 0 : Math.max(0, Math.ceil((endMs - nowMs) / BILLING_DAY_MS));
+
+  if (status === "active") return { state: "active", trialEndsAtMs, graceEndsAtMs: null, daysLeft: 0 };
+  if (status === "canceled") {
+    if (Number.isFinite(periodEndMs) && nowMs < periodEndMs) return { state: "active", trialEndsAtMs, graceEndsAtMs: null, daysLeft: 0 };
+    return { state: "locked", trialEndsAtMs, graceEndsAtMs: null, daysLeft: 0 };
+  }
+  if (status === "past_due" || status === "unpaid") {
+    const graceEndsAtMs = Number.isFinite(graceMs) ? graceMs : nowMs + GRACE_DAYS * BILLING_DAY_MS;
+    if (nowMs < graceEndsAtMs) return { state: "grace", trialEndsAtMs, graceEndsAtMs, daysLeft: days(graceEndsAtMs) };
+    return { state: "locked", trialEndsAtMs, graceEndsAtMs, daysLeft: 0 };
+  }
+  // trialing, incomplete, or no subscription row yet.
+  if (trialEndsAtMs != null && nowMs < trialEndsAtMs) return { state: "trialing", trialEndsAtMs, graceEndsAtMs: null, daysLeft: days(trialEndsAtMs) };
+  return { state: "locked", trialEndsAtMs, graceEndsAtMs: null, daysLeft: 0 };
+}

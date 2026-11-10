@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { fetchBillingState } from '../lib/billing';
 import * as Location from 'expo-location';
 import { colors, spacing, radius, fontFamily } from '../lib/theme';
 
@@ -33,6 +34,9 @@ export default function WorksiteQrScreen() {
   const [saving, setSaving] = useState(false);
   const [formMessage, setFormMessage] = useState('');
   const [notice, setNotice] = useState('');
+  // Billing: trial / active / grace / locked. Only gates NEW locations —
+  // never viewing, printing, or downloading QR codes.
+  const [billing, setBilling] = useState({ state: 'trialing', daysLeft: 30 });
 
   // Web-only: refs to each rendered QR (react-native-svg Svg instance).
   // On web, Svg.toDataURL(cb, { width, height }) returns the QR as a
@@ -55,6 +59,8 @@ export default function WorksiteQrScreen() {
         const { data: prof } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
         setCanAdd(prof?.role === 'manager' || prof?.role === 'admin');
         setMyBusinessId(prof?.business_id || null);
+        const b = await fetchBillingState(supabase, prof?.business_id || null);
+        setBilling(b);
       }
       await loadSites();
     })();
@@ -78,6 +84,8 @@ export default function WorksiteQrScreen() {
 
   const saveWorksite = async () => {
     if (!siteName.trim()) { setFormMessage('Enter a location name.'); return; }
+    // Trial lock: no NEW locations once the trial is over and unpaid.
+    if (billing.state === 'locked') { setFormMessage('Your trial ended — subscribe to add locations.'); return; }
     const la = parseFloat(lat);
     const lo = parseFloat(lng);
     if (Number.isNaN(la) || Number.isNaN(lo)) { setFormMessage('A location needs coordinates — use your current location or enter them.'); return; }
@@ -188,10 +196,13 @@ export default function WorksiteQrScreen() {
         <ScrollView contentContainerStyle={styles.content}>
           <Text style={styles.intro}>Print the code for each worksite and post it at the entrance. Staff scan it to clock in and out. If a worksite has a radius set, they must be inside it.</Text>
           {notice ? <Text style={styles.noticeText}>{notice}</Text> : null}
-          {canAdd && !showForm && (
+          {canAdd && !showForm && billing.state !== 'locked' && (
             <TouchableOpacity style={styles.addButton} onPress={() => setShowForm(true)}>
               <Text style={styles.addButtonText}>Add location</Text>
             </TouchableOpacity>
+          )}
+          {canAdd && billing.state === 'locked' && (
+            <Text style={styles.lockNote}>Your trial ended — subscribe to add locations.</Text>
           )}
           {canAdd && showForm && (
             <View style={styles.formCard}>
@@ -278,6 +289,7 @@ const styles = StyleSheet.create({
   formSecondaryText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 15 },
   claimButton: { borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', marginTop: spacing.md, minHeight: 52, justifyContent: 'center', alignSelf: 'stretch' },
   noticeText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 14, textAlign: 'center', marginBottom: spacing.md },
+  lockNote: { color: colors.danger, fontFamily: fontFamily.semibold, fontSize: 14, textAlign: 'center', marginBottom: spacing.md },
   webActions: { flexDirection: 'row', marginTop: spacing.md, alignSelf: 'stretch' },
   webActionButton: { flex: 1, borderWidth: 1, borderColor: colors.accent, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', minHeight: 52, justifyContent: 'center' },
   webActionButtonSecond: { marginLeft: spacing.sm },

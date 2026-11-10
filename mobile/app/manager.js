@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { fetchBillingState } from '../lib/billing';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
 import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput } from '../supabase/functions/hr-ai-bot/logic';
 import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
@@ -34,6 +35,9 @@ export default function ManagerDashboard() {
   const [breaks, setBreaks] = useState([]);
   const [myBusinessId, setMyBusinessId] = useState(null);
   const [breakPolicy, setBreakPolicy] = useState({ ...DEFAULT_BREAK_POLICY, province: 'ON' });
+  // Billing: trial / active / grace / locked. Only gates NEW setup work
+  // (schedules, locations, invites) — never clock-in, viewing, or export.
+  const [billing, setBilling] = useState({ state: 'trialing', daysLeft: 30 });
   // Build Schedule (manager): the shift-create form moved here from
   // /schedule — the week view there stays shared, creation lives here.
   const [schedPeople, setSchedPeople] = useState([]);
@@ -105,6 +109,8 @@ export default function ManagerDashboard() {
       }
       if (profBiz && profBiz.business_id) {
         setMyBusinessId(profBiz.business_id);
+        const b = await fetchBillingState(supabase, profBiz.business_id);
+        setBilling(b);
         const { data: pol } = await supabase.from('break_policies').select('*').eq('business_id', profBiz.business_id).maybeSingle();
         if (pol) {
           const rule = PROVINCE_BREAK_RULES[pol.province] || PROVINCE_BREAK_RULES.ON;
@@ -172,6 +178,9 @@ export default function ManagerDashboard() {
   // and leave checks come from the shared logic.ts helpers, not a
   // second copy of the rules.
   const createSchedShift = async () => {
+    // Trial lock: no NEW schedules once the trial is over and unpaid.
+    // Clock-in, viewing, and exports are never blocked.
+    if (billing.state === 'locked') { setSchedMessage('Your trial ended — subscribe to keep posting shifts. Clock-in and reports keep working.'); return; }
     if (schedDates.length === 0) { setSchedMessage('Tap at least one date.'); return; }
     const dates = [...schedDates].sort();
     const minD = dates[0];
@@ -602,6 +611,22 @@ export default function ManagerDashboard() {
         </KeyboardAvoidingView>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[4]}>
+      {billing.state === 'grace' && (
+        <View style={styles.billingBannerWarn}>
+          <Text style={styles.billingBannerText}>Payment failed — setup locks in {billing.daysLeft} day{billing.daysLeft === 1 ? '' : 's'}. </Text>
+          <Link href="/subscription" asChild>
+            <TouchableOpacity><Text style={styles.billingBannerLink}>Update your card →</Text></TouchableOpacity>
+          </Link>
+        </View>
+      )}
+      {billing.state === 'locked' && (
+        <View style={styles.billingBannerLock}>
+          <Text style={styles.billingBannerText}>Your free trial ended — subscribe to keep setting up schedules, locations, and invites. Clock-in, viewing, and exports keep working. </Text>
+          <Link href="/subscription" asChild>
+            <TouchableOpacity><Text style={styles.billingBannerLink}>See plans →</Text></TouchableOpacity>
+          </Link>
+        </View>
+      )}
       <View style={styles.otCard}>
         <Text style={styles.otTitle}>Build Schedule</Text>
         <Text style={styles.otClear}>Post shifts for your team. They appear on the shared Schedule week view, where employees can claim open ones.</Text>
@@ -926,6 +951,10 @@ const styles = StyleSheet.create({
   title: { fontSize: 20, fontFamily: fontFamily.brand, color: colors.textPrimary },
   brandRow: { flexDirection: 'row', alignItems: 'center' },
   otCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  billingBannerWarn: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  billingBannerLock: { backgroundColor: 'rgba(220, 38, 38, 0.08)', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  billingBannerText: { fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.semibold },
+  billingBannerLink: { fontSize: 13, color: colors.accent, fontFamily: fontFamily.semibold, marginTop: spacing.xs },
   schedChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginVertical: spacing.sm },
   schedTimeRow: { flexDirection: 'row', gap: spacing.md },
   schedMessage: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginTop: spacing.sm },

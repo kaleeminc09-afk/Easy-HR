@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, Link } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { fetchBillingState, startCheckout, startPortal, openBillingUrl } from '../lib/billing';
+import { getBillingState } from '../supabase/functions/hr-ai-bot/logic';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 // First month free on every plan — no permanent free tier.
@@ -14,6 +16,7 @@ const PLANS = {
 
 export default function SubscriptionScreen() {
   const router = useRouter();
+  const { checkout } = useLocalSearchParams();
 
   // Back means back: return to the screen we came from, not a
   // role-based destination. A deep link with no history falls back
@@ -25,8 +28,11 @@ export default function SubscriptionScreen() {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [plan, setPlan] = useState('starter');
-  const [status, setStatus] = useState('trialing');
   const [periodEnd, setPeriodEnd] = useState(null);
+  const [trialEnd, setTrialEnd] = useState(null);
+  const [billing, setBilling] = useState({ state: 'trialing', daysLeft: 30, hasStripeCustomer: false });
+  const [checkoutMsg, setCheckoutMsg] = useState('');
+  const [busyPlan, setBusyPlan] = useState(null);
   const [employeeCount, setEmployeeCount] = useState(0);
   const [businessId, setBusinessId] = useState(null);
   const [businessName, setBusinessName] = useState('');
@@ -37,6 +43,9 @@ export default function SubscriptionScreen() {
   useEffect(() => { init(); }, []);
 
   const init = async () => {
+    // Stripe returns here after Checkout: ?checkout=success / cancelled.
+    if (checkout === 'success') setCheckoutMsg('Subscription started — welcome aboard. Your card is on file; the first charge lands after your free month.');
+    else if (checkout === 'cancelled') setCheckoutMsg('Checkout cancelled — nothing was charged. Your free trial keeps running.');
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
     const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
@@ -45,26 +54,37 @@ export default function SubscriptionScreen() {
 
     const { data: sub } = await supabase
       .from('subscriptions')
-      .select('plan, status, current_period_end')
+      .select('plan, status, current_period_end, trial_end, grace_until, stripe_customer_id')
       .eq('owner_id', session.user.id)
       .maybeSingle();
     if (sub) {
       setPlan(sub.plan || 'starter');
-      setStatus(sub.status || 'trialing');
       setPeriodEnd(sub.current_period_end);
+      setTrialEnd(sub.trial_end);
     }
 
+    let businessCreatedAt = null;
     if (me.business_id) {
       const { data: biz } = await supabase
         .from('businesses')
-        .select('id, business_name, account_number')
+        .select('id, business_name, account_number, created_at')
         .eq('id', me.business_id)
         .single();
       if (biz) {
         setBusinessId(biz.id);
         setBusinessName(biz.business_name || '');
         setAccountNumber(biz.account_number || '');
+        businessCreatedAt = biz.created_at || null;
       }
+      // Billing state for the banners + buttons (trial / grace / locked).
+      const b = await fetchBillingState(supabase, me.business_id);
+      setBilling(b);
+    }
+    // Keep the banner honest even before any Stripe subscription exists:
+    // the trial clock runs from business creation.
+    if (!sub) {
+      const s = getBillingState({ businessCreatedAt, subscription: null });
+      setBilling((prev) => ({ ...prev, state: s.state, daysLeft: s.daysLeft, trialEndsAtMs: s.trialEndsAtMs }));
     }
 
     const { count } = await supabase.from('profiles').select('id', { count: 'exact', head: true });
@@ -82,6 +102,26 @@ export default function SubscriptionScreen() {
       .eq('id', businessId);
     setBizMessage(error ? 'Could not save. Check your connection and try again.' : 'Business name updated.');
     setSavingBiz(false);
+  };
+
+  // Subscribe to a plan via Stripe Checkout (hosted page — the card is
+  // collected there, never here). Only the plan slug crosses the wire.
+  const handleSubscribe = async (planKey) => {
+    setBusyPlan(planKey);
+    setCheckoutMsg('');
+    const { url, error } = await startCheckout(supabase, planKey);
+    setBusyPlan(null);
+    if (error) { setCheckoutMsg(error); return; }
+    openBillingUrl(url);
+  };
+
+  const handleManageBilling = async () => {
+    setBusyPlan('portal');
+    setCheckoutMsg('');
+    const { url, error } = await startPortal(supabase);
+    setBusyPlan(null);
+    if (error) { setCheckoutMsg(error); return; }
+    openBillingUrl(url);
   };
 
   if (loading) {
@@ -109,10 +149,11 @@ export default function SubscriptionScreen() {
 
   const planInfo = PLANS[plan] || PLANS.starter;
   const usagePct = Math.min(100, Math.round((employeeCount / planInfo.limit) * 100));
-  const isTrial = status === 'trialing';
-  const daysLeft = periodEnd
-    ? Math.max(0, Math.ceil((new Date(periodEnd).getTime() - Date.now()) / 86400000))
-    : 30;
+  const isTrial = billing.state === 'trialing';
+  const isGrace = billing.state === 'grace';
+  const isLocked = billing.state === 'locked';
+  const daysLeft = billing.daysLeft;
+  const trialEnds = trialEnd ? new Date(trialEnd) : (billing.trialEndsAtMs ? new Date(billing.trialEndsAtMs) : null);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -125,6 +166,7 @@ export default function SubscriptionScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {checkoutMsg ? <Text style={styles.checkoutMessage}>{checkoutMsg}</Text> : null}
         <View style={styles.planCard}>
           <View style={styles.planHeader}>
             <View>
@@ -132,14 +174,30 @@ export default function SubscriptionScreen() {
               <Text style={styles.planPrice}>{planInfo.price}</Text>
             </View>
             <View style={styles.statusBadge}>
-              <Text style={styles.statusText}>{isTrial ? 'TRIAL' : status.toUpperCase()}</Text>
+              <Text style={styles.statusText}>{billing.state.toUpperCase()}</Text>
             </View>
           </View>
 
           {isTrial && (
             <View style={styles.trialBanner}>
               <Text style={styles.trialText}>
-                First month free — {daysLeft} day{daysLeft === 1 ? '' : 's'} left. Then {planInfo.price} after the trial.
+                First month free — {daysLeft} day{daysLeft === 1 ? '' : 's'} left{trialEnds ? ` (ends ${trialEnds.toLocaleDateString()})` : ''}. Then {planInfo.price} after the trial. Your card is on file — cancel anytime before then and nothing is charged.
+              </Text>
+            </View>
+          )}
+
+          {isGrace && (
+            <View style={styles.warnBanner}>
+              <Text style={styles.trialText}>
+                Payment failed — setup locks in {daysLeft} day{daysLeft === 1 ? '' : 's'}. Update your card from Manage billing. Clock-in and exports keep working.
+              </Text>
+            </View>
+          )}
+
+          {isLocked && (
+            <View style={styles.lockBanner}>
+              <Text style={styles.trialText}>
+                Your free trial ended — subscribe below to keep setting up schedules, locations, and invites. Clock-in, viewing, and exports keep working.
               </Text>
             </View>
           )}
@@ -164,11 +222,13 @@ export default function SubscriptionScreen() {
             <Text key={f} style={styles.feature}>✓ {f}</Text>
           ))}
 
-          <Link href="/payment" asChild>
-            <TouchableOpacity style={styles.primaryButton}>
-              <Text style={styles.primaryButtonText}>Change Plan</Text>
+          {billing.hasStripeCustomer && (
+            <TouchableOpacity style={styles.primaryButton} onPress={handleManageBilling} disabled={busyPlan === 'portal'}>
+              {busyPlan === 'portal'
+                ? <ActivityIndicator color="#FFFFFF" />
+                : <Text style={styles.primaryButtonText}>Manage billing</Text>}
             </TouchableOpacity>
-          </Link>
+          )}
 
           <TouchableOpacity style={styles.supportLine} onPress={() => Linking.openURL('mailto:support@northshiftapp.com')}>
             <Text style={styles.supportText}>Questions about billing? <Text style={styles.supportLink}>Email support@northshiftapp.com</Text></Text>
@@ -177,14 +237,22 @@ export default function SubscriptionScreen() {
 
         <View style={styles.allPlansCard}>
           <Text style={styles.sectionLabel}>All plans</Text>
-          <Text style={styles.trialNote}>Every plan starts with a free first month.</Text>
+          <Text style={styles.trialNote}>Every plan starts with a free first month. Card at signup; charged after day 30 unless you cancel.</Text>
           {Object.entries(PLANS).map(([key, p]) => (
             <View key={key} style={[styles.planRow, key === plan && styles.planRowActive]}>
               <View>
                 <Text style={styles.planRowName}>{p.name} · {p.price}</Text>
                 <Text style={styles.planRowMeta}>Up to {p.limit} employees</Text>
               </View>
-              {key === plan && <Text style={styles.currentTag}>CURRENT</Text>}
+              {key === plan
+                ? <Text style={styles.currentTag}>CURRENT</Text>
+                : (
+                  <TouchableOpacity style={styles.subscribeButton} onPress={() => handleSubscribe(key)} disabled={busyPlan !== null}>
+                    {busyPlan === key
+                      ? <ActivityIndicator color="#FFFFFF" />
+                      : <Text style={styles.subscribeButtonText}>Subscribe</Text>}
+                  </TouchableOpacity>
+                )}
             </View>
           ))}
         </View>
@@ -220,6 +288,7 @@ const styles = StyleSheet.create({
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   content: { padding: spacing.lg, gap: spacing.md },
+  checkoutMessage: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary, textAlign: 'center', backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.md, padding: spacing.md },
   planCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
   planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
   planName: { fontSize: 22, fontFamily: fontFamily.bold, color: colors.textPrimary },
@@ -227,6 +296,8 @@ const styles = StyleSheet.create({
   statusBadge: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   statusText: { ...type.label, color: colors.accent },
   trialBanner: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  warnBanner: { backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
+  lockBanner: { backgroundColor: 'rgba(220, 38, 38, 0.08)', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm },
   trialText: { fontSize: 13, color: colors.textPrimary, fontFamily: fontFamily.semibold, textAlign: 'center' },
   sectionLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.md, marginBottom: spacing.xs },
   trialNote: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginBottom: spacing.sm },
@@ -247,6 +318,8 @@ const styles = StyleSheet.create({
   planRowName: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary },
   planRowMeta: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   currentTag: { ...type.label, color: colors.accent },
+  subscribeButton: { backgroundColor: colors.accent, borderRadius: radius.sm, paddingVertical: 8, paddingHorizontal: 16, minHeight: 44, justifyContent: 'center' },
+  subscribeButtonText: { color: '#FFFFFF', fontFamily: fontFamily.semibold, fontSize: 13 },
   fieldLabel: { ...type.label, color: colors.textSecondary, marginTop: spacing.sm, marginBottom: spacing.xs },
   input: { fontFamily: fontFamily.regular, backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary },
   accountNumber: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.accent, letterSpacing: 1 },

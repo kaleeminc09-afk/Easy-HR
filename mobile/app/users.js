@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { fetchBillingState } from '../lib/billing';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
@@ -37,6 +38,8 @@ export default function UsersScreen() {
   const [inviteFirst, setInviteFirst] = useState('');
   const [inviteLast, setInviteLast] = useState('');
   const [inviting, setInviting] = useState(false);
+  // Billing: trial / active / grace / locked. Only gates NEW invites.
+  const [billing, setBilling] = useState({ state: 'trialing', daysLeft: 30 });
 
   useEffect(() => { init(); }, []);
 
@@ -49,6 +52,8 @@ export default function UsersScreen() {
     setIsAdmin(true);
     if (me.business_id) {
       setBusinessId(me.business_id);
+      const b = await fetchBillingState(supabase, me.business_id);
+      setBilling(b);
       const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', me.business_id).single();
       if (biz) { setBusinessName(biz.business_name || ''); setRenameDraft(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
     }
@@ -74,6 +79,8 @@ export default function UsersScreen() {
   const handleInvite = async () => {
     const email = inviteEmail.trim().toLowerCase();
     if (!email.includes('@')) { setMessage('Enter a valid email to invite.'); return; }
+    // Trial lock: no NEW invites once the trial is over and unpaid.
+    if (billing.state === 'locked') { setMessage('Your trial ended — subscribe to invite more staff.'); return; }
     setInviting(true);
     setMessage('');
     try {

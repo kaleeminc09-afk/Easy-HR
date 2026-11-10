@@ -34,6 +34,7 @@ import {
   buildStoragePath,
   zonedTimeToUtc,
   formatFileSize,
+  getBillingState,
   OT_THRESHOLD_HOURS,
   OT_ALERT_HOURS,
   breakDueInfo,
@@ -735,5 +736,95 @@ describe("isDateOnLeave", () => {
     expect(isDateOnLeave(leaves, "2026-11-09")).toBe(false);
     expect(isDateOnLeave(leaves, "2026-11-13")).toBe(false);
     expect(isDateOnLeave([], "2026-11-11")).toBe(false);
+  });
+});
+
+describe("getBillingState", () => {
+  const NOW = Date.UTC(2026, 10, 10, 12, 0, 0);
+  const DAY = 86400000;
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  test("fresh business with no subscription row is trialing, 30 days", () => {
+    const s = getBillingState({ businessCreatedAt: iso(NOW), subscription: null }, NOW);
+    expect(s.state).toBe("trialing");
+    expect(s.daysLeft).toBe(30);
+  });
+
+  test("business created 25 days ago, no row, is trialing with 5 days left", () => {
+    const s = getBillingState({ businessCreatedAt: iso(NOW - 25 * DAY), subscription: null }, NOW);
+    expect(s.state).toBe("trialing");
+    expect(s.daysLeft).toBe(5);
+  });
+
+  test("business created 31 days ago, no row, is locked", () => {
+    const s = getBillingState({ businessCreatedAt: iso(NOW - 31 * DAY), subscription: null }, NOW);
+    expect(s.state).toBe("locked");
+    expect(s.daysLeft).toBe(0);
+  });
+
+  test("trialing subscription uses its own trial_end, not the business clock", () => {
+    const s = getBillingState(
+      { businessCreatedAt: iso(NOW - 40 * DAY), subscription: { status: "trialing", trial_end: iso(NOW + 3 * DAY) } },
+      NOW,
+    );
+    expect(s.state).toBe("trialing");
+    expect(s.daysLeft).toBe(3);
+  });
+
+  test("trialing subscription past its trial end is locked", () => {
+    const s = getBillingState(
+      { businessCreatedAt: iso(NOW), subscription: { status: "trialing", trial_end: iso(NOW - DAY) } },
+      NOW,
+    );
+    expect(s.state).toBe("locked");
+  });
+
+  test("active subscription is active", () => {
+    const s = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "active", current_period_end: iso(NOW + 10 * DAY) } },
+      NOW,
+    );
+    expect(s.state).toBe("active");
+  });
+
+  test("canceled subscription stays active until the period ends, then locks", () => {
+    const before = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "canceled", current_period_end: iso(NOW + 5 * DAY) } },
+      NOW,
+    );
+    expect(before.state).toBe("active");
+    const after = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "canceled", current_period_end: iso(NOW - DAY) } },
+      NOW,
+    );
+    expect(after.state).toBe("locked");
+  });
+
+  test("past_due with a grace window is grace; once it passes, locked", () => {
+    const inGrace = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "past_due", grace_until: iso(NOW + 4 * DAY) } },
+      NOW,
+    );
+    expect(inGrace.state).toBe("grace");
+    expect(inGrace.daysLeft).toBe(4);
+    const expired = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "past_due", grace_until: iso(NOW - DAY) } },
+      NOW,
+    );
+    expect(expired.state).toBe("locked");
+  });
+
+  test("past_due with no grace_until recorded gets 7 days from now", () => {
+    const s = getBillingState(
+      { businessCreatedAt: iso(NOW - 60 * DAY), subscription: { status: "past_due" } },
+      NOW,
+    );
+    expect(s.state).toBe("grace");
+    expect(s.daysLeft).toBe(7);
+  });
+
+  test("no business date and no subscription is locked, not trialing", () => {
+    const s = getBillingState({ businessCreatedAt: null, subscription: null }, NOW);
+    expect(s.state).toBe("locked");
   });
 });
