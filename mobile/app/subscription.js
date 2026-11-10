@@ -8,8 +8,8 @@ import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '.
 // First month free on every plan — no permanent free tier.
 const PLANS = {
   starter: { name: 'Starter', price: '$25/mo', limit: 5, features: ['Up to 5 employees', 'Geofenced clock in/out', 'Shift logs & exceptions'] },
-  growth: { name: 'Growth', price: '$59/mo', limit: 15, features: ['Up to 15 employees', 'Everything in Starter', 'AI assistant & anomaly review', 'Payroll CSV export'] },
-  business: { name: 'Business', price: '$119/mo', limit: 40, features: ['Up to 40 employees', 'Everything in Growth', 'Priority support'] },
+  growth: { name: 'Growth', price: '$49/mo', limit: 15, features: ['Up to 15 employees', 'Everything in Starter', 'AI assistant & anomaly review', 'Payroll CSV export'] },
+  business: { name: 'Business', price: '$99/mo', limit: 40, features: ['Up to 40 employees', 'Everything in Growth', 'Priority support'] },
 };
 
 export default function SubscriptionScreen() {

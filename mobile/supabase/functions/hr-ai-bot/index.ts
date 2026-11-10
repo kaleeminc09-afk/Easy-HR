@@ -417,7 +417,7 @@ APP GUIDE — where things live (web app, right-hand toolbar; phone app, ☰ Men
 - Build Schedule lives in the Manager Portal (the "Build Schedule" section at the top) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
 - Break Policy, Leave Policy, QR Codes, and Manager Board are manager-only; Subscription is admin-only.
 - Onboarding: a new owner signs up, creates the business, adds a location, then invites the team by email from Manage Users. An invited employee opens the invite link from their email and sets a password — they never create a business. If someone signed up directly without an invite, point them at the "I was invited" choice on the setup screen.
-- Billing is a stub: every plan starts with a free first month (Starter $25/mo, Growth $59/mo, Business $119/mo); checkout opens at launch and nothing is charged today. NEVER say a payment went through, a card was charged, or a subscription is active — if asked, say billing is not wired up yet and the first month is free.`;
+- Billing is a stub: every plan starts with a free first month (Starter $25/mo, Growth $49/mo, Business $99/mo); checkout opens at launch and nothing is charged today. NEVER say a payment went through, a card was charged, or a subscription is active — if asked, say billing is not wired up yet and the first month is free.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null

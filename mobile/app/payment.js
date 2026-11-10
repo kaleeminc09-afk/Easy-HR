@@ -8,8 +8,8 @@ import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '.
 // Plans mirror the Subscription screen. First month free, month-to-month.
 const PLANS = {
   starter: { name: 'Starter', price: 25, limit: 5 },
-  growth: { name: 'Growth', price: 59, limit: 15 },
-  business: { name: 'Business', price: 119, limit: 40 },
+  growth: { name: 'Growth', price: 49, limit: 15 },
+  business: { name: 'Business', price: 99, limit: 40 },
 };
 
 // RevenueCat integration point (post-launch):
