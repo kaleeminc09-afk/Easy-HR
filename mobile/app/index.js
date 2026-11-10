@@ -46,6 +46,11 @@ export default function App() {
   const [exceptionNote, setExceptionNote] = useState('');
   const [submittingException, setSubmittingException] = useState(false);
 
+  // No-worksites state: the business has no locations yet, so clock-in
+  // has nothing to check against. Shown as a guided card (below), never
+  // as a GPS check or an out-of-range exception.
+  const [noWorksites, setNoWorksites] = useState(false);
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
@@ -312,11 +317,33 @@ export default function App() {
     try {
       setLocationChecking(true);
       setOutOfRangeData(null);
+      setNoWorksites(false);
       setStatusMessage('Verifying GPS location...');
 
-      const { data: worksites, error: worksitesError } = await supabase.from('worksites').select('*');
-      if (worksitesError || !worksites || worksites.length === 0) {
-        setStatusMessage('❌ Error: No worksites configured.');
+      // Clock-in only ever considers THIS business's worksites. The old
+      // query read every worksite in the system (no business filter, and
+      // worksite listing is public-readable), so a brand-new business
+      // with zero locations was measured against a stranger's site and
+      // failed with "Out of Range". A user with no business yet is sent
+      // to onboarding on load, so a null id here just means the profile
+      // hasn't loaded — treat it as no locations, never as a free pass.
+      if (!myBusinessId) {
+        setNoWorksites(true);
+        setStatusMessage('No locations set up for your business yet — add your first location so your team can clock in.');
+        setLocationChecking(false);
+        return;
+      }
+      const { data: worksites, error: worksitesError } = await supabase.from('worksites').select('*').eq('business_id', myBusinessId);
+      if (worksitesError) {
+        setStatusMessage('❌ Error: Could not load your locations. Check your connection and try again.');
+        setLocationChecking(false);
+        return;
+      }
+      if (!worksites || worksites.length === 0) {
+        setNoWorksites(true);
+        setStatusMessage((myRole === 'manager' || myRole === 'admin')
+          ? 'No locations set up for your business yet — add your first location so your team can clock in.'
+          : 'Your business has no locations set up yet — ask your manager to add one so you can clock in.');
         setLocationChecking(false);
         return;
       }
@@ -369,6 +396,7 @@ export default function App() {
         setStatusMessage('❌ Insert Error: ' + error.message);
       } else {
         setActiveSession(data);
+        setNoWorksites(false);
         setStatusMessage(`Clocked in at ${nearestWorksite.name}!`);
         fetchTimeData(session.user.id);
       }
@@ -851,6 +879,23 @@ export default function App() {
 
             {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
 
+            {noWorksites && (
+              <View style={styles.empNoSitesCard}>
+                <Text style={styles.empNoSitesText}>
+                  {(myRole === 'manager' || myRole === 'admin')
+                    ? 'Locations live under QR Codes — add the address and radius, post the code at the entrance, and clock-in checks your team against your own sites only.'
+                    : 'Only a manager can add locations. Ask yours to add one, then try clocking in again.'}
+                </Text>
+                {(myRole === 'manager' || myRole === 'admin') && (
+                  <Link href="/qrcodes" asChild>
+                    <TouchableOpacity style={styles.empPrimaryButton}>
+                      <Text style={styles.empPrimaryButtonText}>Add your first location</Text>
+                    </TouchableOpacity>
+                  </Link>
+                )}
+              </View>
+            )}
+
             {Platform.OS !== 'web' && (
               <Link href="/scan" asChild>
                 <TouchableOpacity style={styles.empScanButton}>
@@ -951,6 +996,8 @@ const styles = StyleSheet.create({
   empChipText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
   empMessage: { marginTop: spacing.lg, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textSecondary, textAlign: 'center', maxWidth: 400, lineHeight: 20 },
   empExceptionBox: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.warning, borderRadius: radius.lg, padding: spacing.lg, ...elevation.card },
+  empNoSitesCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.accent, borderRadius: radius.lg, padding: spacing.lg, marginTop: spacing.md, ...elevation.card },
+  empNoSitesText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md, lineHeight: 20 },
   empExceptionTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.warning, marginBottom: spacing.sm, textAlign: 'center' },
   empExceptionText: { fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.md },
   empTextArea: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 14, color: colors.textPrimary, height: 90, textAlignVertical: 'top', marginBottom: spacing.md },
