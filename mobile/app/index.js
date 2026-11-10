@@ -851,11 +851,13 @@ export default function App() {
 
             {statusMessage ? <Text style={styles.empMessage}>{statusMessage}</Text> : null}
 
-            <Link href="/scan" asChild>
-              <TouchableOpacity style={styles.empScanButton}>
-                <Text style={styles.empScanButtonText}>Scan QR to Clock In / Out</Text>
-              </TouchableOpacity>
-            </Link>
+            {Platform.OS !== 'web' && (
+              <Link href="/scan" asChild>
+                <TouchableOpacity style={styles.empScanButton}>
+                  <Text style={styles.empScanButtonText}>Scan QR to Clock In / Out</Text>
+                </TouchableOpacity>
+              </Link>
+            )}
           </>
         )}
       </ScrollView>
