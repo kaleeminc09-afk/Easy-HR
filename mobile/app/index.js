@@ -46,6 +46,7 @@ export default function App() {
   const [outOfRangeData, setOutOfRangeData] = useState(null);
   const [exceptionNote, setExceptionNote] = useState('');
   const [submittingException, setSubmittingException] = useState(false);
+  const [exceptionAwaitingApproval, setExceptionAwaitingApproval] = useState(false);
 
   // No-worksites state: the business has no locations yet, so clock-in
   // has nothing to check against. Shown as a guided card (below), never
@@ -318,6 +319,7 @@ export default function App() {
     try {
       setLocationChecking(true);
       setOutOfRangeData(null);
+      setExceptionAwaitingApproval(false);
       setNoWorksites(false);
       setStatusMessage('Verifying GPS location...');
 
@@ -370,16 +372,41 @@ export default function App() {
         }
       });
 
+      // An approved exception unlocks clock-in: the manager already
+      // reviewed this out-of-range attempt, so it must not loop back
+      // to another exception request. Scope: same worksite, filed
+      // today, approved. A pending one just waits — no duplicate filing.
+      let viaApprovedException = false;
       if (!nearestWorksite || nearestWorksite.distance > nearestWorksite.radius_meters) {
-        setOutOfRangeData({
-          worksite: nearestWorksite,
-          distance: Math.round(nearestWorksite?.distance || 0),
-          latitude,
-          longitude
-        });
-        setStatusMessage(`❌ Out of Range for ${nearestWorksite?.name || 'Office'}. Please submit an exception request.`);
-        setLocationChecking(false);
-        return;
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const { data: todaysExceptions } = await supabase
+          .from('time_exceptions')
+          .select('status')
+          .eq('user_id', session.user.id)
+          .eq('worksite_id', nearestWorksite?.id)
+          .in('status', ['pending', 'approved'])
+          .gte('attempted_at', todayStart.toISOString())
+          .order('attempted_at', { ascending: false })
+          .limit(1);
+        const latest = todaysExceptions && todaysExceptions[0];
+        if (latest && latest.status === 'approved') {
+          viaApprovedException = true;
+        } else {
+          const awaiting = latest && latest.status === 'pending';
+          if (awaiting) setExceptionAwaitingApproval(true);
+          setOutOfRangeData({
+            worksite: nearestWorksite,
+            distance: Math.round(nearestWorksite?.distance || 0),
+            latitude,
+            longitude
+          });
+          setStatusMessage(awaiting
+            ? `Out of Range for ${nearestWorksite?.name || 'Office'}. Your exception request is waiting for manager approval.`
+            : `❌ Out of Range for ${nearestWorksite?.name || 'Office'}. Please submit an exception request.`);
+          setLocationChecking(false);
+          return;
+        }
       }
 
       const { data, error } = await supabase
@@ -387,7 +414,7 @@ export default function App() {
         .insert([{
           user_id: session.user.id,
           clock_in: new Date().toISOString(),
-          ai_anomaly_flag: 'Normal Shift',
+          ai_anomaly_flag: viaApprovedException ? 'Exception Approved' : 'Normal Shift',
           worksite_id: nearestWorksite.id
         }])
         .select()
@@ -398,7 +425,7 @@ export default function App() {
       } else {
         setActiveSession(data);
         setNoWorksites(false);
-        setStatusMessage(`Clocked in at ${nearestWorksite.name}!`);
+        setStatusMessage(viaApprovedException ? `Clocked in at ${nearestWorksite.name} (exception approved).` : `Clocked in at ${nearestWorksite.name}!`);
         fetchTimeData(session.user.id);
       }
     } catch (err) {
@@ -770,22 +797,30 @@ export default function App() {
         {outOfRangeData ? (
           <View style={styles.empExceptionBox}>
             <Text style={styles.empExceptionTitle}>Out of Range</Text>
-            <Text style={styles.empExceptionText}>
-              You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Add a note for your manager:
-            </Text>
-            <TextInput
-              style={styles.empTextArea}
-              placeholder="e.g., Client visit, remote field work..."
-              placeholderTextColor={colors.inputPlaceholder}
-              value={exceptionNote}
-              onChangeText={setExceptionNote}
-              multiline
-              numberOfLines={3}
-            />
-            <TouchableOpacity style={styles.empPrimaryButton} onPress={handleExceptionSubmit} disabled={submittingException}>
-              {submittingException ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.empGhostButton} onPress={() => setOutOfRangeData(null)}>
+            {exceptionAwaitingApproval ? (
+              <Text style={styles.empExceptionText}>
+                Your exception request for {outOfRangeData.worksite.name} is already with your manager. Once it is approved, tap Clock In again — you will not need to file another request.
+              </Text>
+            ) : (
+              <>
+                <Text style={styles.empExceptionText}>
+                  You are {outOfRangeData.distance}m away from {outOfRangeData.worksite.name}. Add a note for your manager:
+                </Text>
+                <TextInput
+                  style={styles.empTextArea}
+                  placeholder="e.g., Client visit, remote field work..."
+                  placeholderTextColor={colors.inputPlaceholder}
+                  value={exceptionNote}
+                  onChangeText={setExceptionNote}
+                  multiline
+                  numberOfLines={3}
+                />
+                <TouchableOpacity style={styles.empPrimaryButton} onPress={handleExceptionSubmit} disabled={submittingException}>
+                  {submittingException ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.empPrimaryButtonText}>Submit Exception Request</Text>}
+                </TouchableOpacity>
+              </>
+            )}
+            <TouchableOpacity style={styles.empGhostButton} onPress={() => { setOutOfRangeData(null); setExceptionAwaitingApproval(false); }}>
               <Text style={styles.empGhostButtonText}>Cancel</Text>
             </TouchableOpacity>
           </View>

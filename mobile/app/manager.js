@@ -191,65 +191,80 @@ export default function ManagerDashboard() {
     // Clock-in, viewing, and exports are never blocked.
     if (billing.state === 'locked') { setSchedMessage('Your trial ended — subscribe to keep posting shifts. Clock-in and reports keep working.'); return; }
     if (schedDates.length === 0) { setSchedMessage('Tap at least one date.'); return; }
-    const dates = [...schedDates].sort();
-    const minD = dates[0];
-    const maxD = dates[dates.length - 1];
-    const rangeStart = new Date(`${minD}T00:00:00`);
-    rangeStart.setDate(rangeStart.getDate() - 1);
-    const rangeEnd = new Date(`${maxD}T00:00:00`);
-    rangeEnd.setDate(rangeEnd.getDate() + 2);
-    const { data: rangeShifts } = await supabase
-      .from('shifts')
-      .select('id, user_id, start_time, end_time, status')
-      .gte('start_time', rangeStart.toISOString())
-      .lt('start_time', rangeEnd.toISOString());
-    const { data: rangeLeaves } = await supabase
-      .from('time_off_requests')
-      .select('user_id, start_date, end_date')
-      .eq('status', 'approved')
-      .lte('start_date', maxD)
-      .gte('end_date', minD);
-    const shifts = rangeShifts || [];
-    const leaves = rangeLeaves || [];
-    const created = [];
-    const skipped = [];
     setCreatingSched(true);
     setSchedMessage('');
-    for (const formDate of dates) {
-      const startD = new Date(`${formDate}T${schedStart}:00`);
-      const endD = new Date(`${formDate}T${schedEnd}:00`);
-      if (schedNextDay) endD.setDate(endD.getDate() + 1);
-      const err = validateShiftInput(startD.toISOString(), endD.toISOString());
-      if (err) { skipped.push(`${formDate} (${err})`); continue; }
-      if (schedEmployee) {
-        const clash = shifts.find((s) =>
-          s.user_id === schedEmployee && s.status === 'assigned' &&
-          shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
-        if (clash) { skipped.push(`${formDate} (overlaps an existing shift)`); continue; }
-        const onLeave = leaves.some((l) => l.user_id === schedEmployee && l.start_date <= formDate && l.end_date >= formDate);
-        if (onLeave) { skipped.push(`${formDate} (approved leave)`); continue; }
+    try {
+      const dates = [...schedDates].sort();
+      const minD = dates[0];
+      const maxD = dates[dates.length - 1];
+      const rangeStart = new Date(`${minD}T00:00:00`);
+      rangeStart.setDate(rangeStart.getDate() - 1);
+      const rangeEnd = new Date(`${maxD}T00:00:00`);
+      rangeEnd.setDate(rangeEnd.getDate() + 2);
+      // A failed range read must stop the batch with a message — never
+      // silently skip the overlap/leave guards by treating it as empty.
+      const { data: rangeShifts, error: rangeShiftsErr } = await supabase
+        .from('shifts')
+        .select('id, user_id, start_time, end_time, status')
+        .gte('start_time', rangeStart.toISOString())
+        .lt('start_time', rangeEnd.toISOString());
+      if (rangeShiftsErr) throw rangeShiftsErr;
+      const { data: rangeLeaves, error: rangeLeavesErr } = await supabase
+        .from('time_off_requests')
+        .select('user_id, start_date, end_date')
+        .eq('status', 'approved')
+        .lte('start_date', maxD)
+        .gte('end_date', minD);
+      if (rangeLeavesErr) throw rangeLeavesErr;
+      const shifts = rangeShifts || [];
+      const leaves = rangeLeaves || [];
+      const created = [];
+      const skipped = [];
+      for (const formDate of dates) {
+        const startD = new Date(`${formDate}T${schedStart}:00`);
+        const endD = new Date(`${formDate}T${schedEnd}:00`);
+        if (schedNextDay) endD.setDate(endD.getDate() + 1);
+        // Guard Invalid Date BEFORE toISOString: it throws, and the
+        // throw used to leave the spinner stuck with no message.
+        if (Number.isNaN(startD.getTime()) || Number.isNaN(endD.getTime())) {
+          skipped.push(`${formDate} (enter a valid start/end time, 24h HH:MM)`);
+          continue;
+        }
+        const err = validateShiftInput(startD.toISOString(), endD.toISOString());
+        if (err) { skipped.push(`${formDate} (${err})`); continue; }
+        if (schedEmployee) {
+          const clash = shifts.find((s) =>
+            s.user_id === schedEmployee && s.status === 'assigned' &&
+            shiftsOverlap(s, { start_time: startD.toISOString(), end_time: endD.toISOString() }));
+          if (clash) { skipped.push(`${formDate} (overlaps an existing shift)`); continue; }
+          const onLeave = leaves.some((l) => l.user_id === schedEmployee && l.start_date <= formDate && l.end_date >= formDate);
+          if (onLeave) { skipped.push(`${formDate} (approved leave)`); continue; }
+        }
+        const { error } = await supabase.from('shifts').insert([{
+          business_id: myBusinessId,
+          user_id: schedEmployee || null,
+          worksite_id: schedWorksite || null,
+          start_time: startD.toISOString(),
+          end_time: endD.toISOString(),
+          status: schedEmployee ? 'assigned' : 'open',
+          notes: schedNotes.trim() || null,
+          created_by: currentUser?.id,
+        }]);
+        if (error) skipped.push(`${formDate} (${error.message})`);
+        else created.push(formDate);
       }
-      const { error } = await supabase.from('shifts').insert([{
-        business_id: myBusinessId,
-        user_id: schedEmployee || null,
-        worksite_id: schedWorksite || null,
-        start_time: startD.toISOString(),
-        end_time: endD.toISOString(),
-        status: schedEmployee ? 'assigned' : 'open',
-        notes: schedNotes.trim() || null,
-        created_by: currentUser?.id,
-      }]);
-      if (error) skipped.push(`${formDate} (${error.message})`);
-      else created.push(formDate);
+      if (created.length > 0) {
+        setSchedMessage((schedEmployee ? 'Shift created for ' : 'Open shift posted for ') + created.join(', ') + (skipped.length > 0 ? `. Skipped: ${skipped.join(', ')}.` : '.'));
+        setShowSchedForm(false);
+        setSchedNotes('');
+      } else {
+        setSchedMessage('Nothing created. Skipped: ' + skipped.join(', ') + '.');
+      }
+    } catch (err) {
+      setSchedMessage('Could not create shift: ' + (err?.message || String(err)));
+    } finally {
+      setCreatingSched(false);
     }
-    if (created.length > 0) {
-      setSchedMessage((schedEmployee ? 'Shift created for ' : 'Open shift posted for ') + created.join(', ') + (skipped.length > 0 ? `. Skipped: ${skipped.join(', ')}.` : '.'));
-      setShowSchedForm(false);
-      setSchedNotes('');
-    } else {
-      setSchedMessage('Nothing created. Skipped: ' + skipped.join(', ') + '.');
-    }
-    setCreatingSched(false);
   };
 
   const handleUpdateException = async (exceptionId, newStatus) => {
