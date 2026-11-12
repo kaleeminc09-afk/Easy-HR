@@ -1,0 +1,32 @@
+[33mcommit 5424aab05ee14aa1742396e56f633d183207725f[m
+Author: kaleeminc09-afk <kaleeminc09@gmail.com>
+Date:   Sat Oct 10 19:38:15 2026 -0400
+
+    Update Supabase keys
+
+[1mdiff --git a/mobile/app/manager.js b/mobile/app/manager.js[m
+[1mindex edbd797..1563820 100644[m
+[1m--- a/mobile/app/manager.js[m
+[1m+++ b/mobile/app/manager.js[m
+[36m@@ -5,7 +5,7 @@[m [mimport { supabase } from '../lib/supabase';[m
+ [m
+ // Added Keys for the Edge Function connection[m
+ const SUPABASE_URL = 'https://ejnkgsddglyabzsivcuu.supabase.co';[m
+[31m-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVqbmtnc2RkZ2x5YWJ6c2l2Y3V1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk5Mjg0MzMsImV4cCI6MjEwNTUwNDQzM30.rfaPQ-qk820zX-bfhmEnqFdpk_4MQJmB-C3ppNJBUtI';[m
+[32m+[m[32mconst SUPABASE_ANON_KEY = 'sb_publishable_RKZg5K10ckrn_icSUUM7KQ_MM71egkI';[m
+ [m
+ export default function ManagerDashboard() {[m
+   const router = useRouter();[m
+[1mdiff --git a/shared/lib/supabase.js b/shared/lib/supabase.js[m
+[1mindex 502b192..d7ee1f5 100644[m
+[1m--- a/shared/lib/supabase.js[m
+[1m+++ b/shared/lib/supabase.js[m
+[36m@@ -1,6 +1,6 @@[m
+ import { createClient } from '@supabase/supabase-js';[m
+ [m
+ const SUPABASE_URL = 'https://ejnkgsddglyabzsivcuu.supabase.co';[m
+[31m-const SUPABASE_KEY = 'sb_publishable_SjRR02ZzLj3Nf1WX15lnGA_HD7mvEJz';[m
+[32m+[m[32mconst SUPABASE_KEY = 'sb_publishable_RKZg5K10ckrn_icSUUM7KQ_MM71egkI';[m
+ [m
+ export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);[m
+\ No newline at end of file[m

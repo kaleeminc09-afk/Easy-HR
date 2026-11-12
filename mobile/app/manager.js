@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
+import { NAV_ICONS } from '../components/NavIcons';
 import { supabase } from '../lib/supabase';
 import { fetchBillingState } from '../lib/billing';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -539,23 +540,36 @@ export default function ManagerDashboard() {
       {menuOpen && (
         <View style={styles.menuPanel}>
           {[
-            ['Team', '/team'],
-            ['Documents', '/documents'],
-            ['Time Off', '/timeoff'],
-            ['Reports', '/reports'],
-            ['Break Policy', '/break-policy'],
-            ['Leave Policy', '/leave-policy'],
-            ['Schedule', '/schedule'],
-            ['QR Codes', '/qrcodes'],
-            ['Profile', '/profile'],
-            ['← Employee Portal', '/'],
-          ].map(([label, href]) => (
-            <TouchableOpacity key={href} style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push(href); }}>
-              <Text style={styles.menuItemText}>{label}</Text>
-            </TouchableOpacity>
+            // Same order as the web toolbar for the items in both.
+            // ← Employee Portal goes home to the clock screen, like
+            // Clock In at the top of the toolbar.
+            ['← Employee Portal', '/', 'clock', null],
+            ['Schedule', '/schedule', 'calendar', null],
+            ['Time Off', '/timeoff', 'calendarX', null],
+            ['Team', '/team', 'people', null],
+            ['Documents', '/documents', 'file', null],
+            ['Reports', '/reports', 'chart', null],
+            ['Profile', '/profile', 'person', null],
+            // Break + Leave Policy sit under a "Policies" label, as in the toolbar.
+            ['Break Policy', '/break-policy', 'shield', 'Policies'],
+            ['Leave Policy', '/leave-policy', 'calendarCheck', null],
+            ['QR Codes', '/qrcodes', 'qr', null],
+          ].map(([label, href, icon, section]) => (
+            <React.Fragment key={href}>
+              {section ? <Text style={styles.menuSectionLabel}>{section}</Text> : null}
+              <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push(href); }}>
+                <View style={styles.menuItemRow}>
+                  {icon ? <View style={styles.menuIconWrap}>{NAV_ICONS[icon](colors.textPrimary)}</View> : null}
+                  <Text style={styles.menuItemText}>{label}</Text>
+                </View>
+              </TouchableOpacity>
+            </React.Fragment>
           ))}
           <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Linking.openURL('mailto:support@northshiftapp.com'); }}>
-            <Text style={styles.menuItemText}>Support</Text>
+            <View style={styles.menuItemRow}>
+              <View style={styles.menuIconWrap}>{NAV_ICONS.help(colors.textPrimary)}</View>
+              <Text style={styles.menuItemText}>Support</Text>
+            </View>
           </TouchableOpacity>
         </View>
       )}
@@ -1005,6 +1019,9 @@ const styles = StyleSheet.create({
   scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxl, maxWidth: 800, width: '100%', alignSelf: 'center' },
   menuPanel: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, gap: 8 },
   menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.sm },
+  menuItemRow: { flexDirection: 'row', alignItems: 'center' },
+  menuIconWrap: { width: 18, height: 18, marginRight: spacing.sm, justifyContent: 'center', alignItems: 'center' },
+  menuSectionLabel: { fontSize: 11, fontFamily: fontFamily.semibold, letterSpacing: 1.2, textTransform: 'uppercase', color: colors.textSecondary, paddingHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.xs },
   menuItemText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 15 },
   emptyCard: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, padding: spacing.xl, borderRadius: radius.md, alignItems: 'center', marginTop: spacing.lg },
   emptyTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.xs },

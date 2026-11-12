@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Animated, { useSharedValue, useAnimatedStyle, withSpring } from 'react-native-reanimated';
 import { Link, useRouter } from 'expo-router';
+import { NAV_ICONS } from '../components/NavIcons';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -725,20 +726,28 @@ export default function App() {
       {menuOpen && (
         <View style={styles.menuPanel}>
           {[
-            ['✦ Assistant', '/EmployeeChatScreen'],
-            ['Team', '/team'],
-            ['Schedule', '/schedule'],
-            ['Time Off', '/timeoff'],
-            ['Documents', '/documents'],
-            ['Manager →', '/manager'],
-            ['Profile', '/profile'],
-          ].map(([label, href]) => (
+            // Same order as the web toolbar for the items in both.
+            ['Schedule', '/schedule', 'calendar'],
+            ['Time Off', '/timeoff', 'calendarX'],
+            ['Team', '/team', 'people'],
+            ['Documents', '/documents', 'file'],
+            // Assistant keeps its existing ✦ mark — no SVG icon on this row.
+            ['✦ Assistant', '/EmployeeChatScreen', null],
+            ['Profile', '/profile', 'person'],
+            ['Manager →', '/manager', 'briefcase'],
+          ].map(([label, href, icon]) => (
             <TouchableOpacity key={href} style={styles.menuItem} onPress={() => { setMenuOpen(false); router.push(href); }}>
-              <Text style={styles.menuItemText}>{label}</Text>
+              <View style={styles.menuItemRow}>
+                {icon ? <View style={styles.menuIconWrap}>{NAV_ICONS[icon](colors.textPrimary)}</View> : null}
+                <Text style={styles.menuItemText}>{label}</Text>
+              </View>
             </TouchableOpacity>
           ))}
           <TouchableOpacity style={styles.menuItem} onPress={() => { setMenuOpen(false); Linking.openURL('mailto:support@northshiftapp.com'); }}>
-            <Text style={styles.menuItemText}>Support</Text>
+            <View style={styles.menuItemRow}>
+              <View style={styles.menuIconWrap}>{NAV_ICONS.help(colors.textPrimary)}</View>
+              <Text style={styles.menuItemText}>Support</Text>
+            </View>
           </TouchableOpacity>
         </View>
       )}
@@ -952,6 +961,8 @@ const styles = StyleSheet.create({
   empHeaderRight: { flexDirection: 'row', gap: 8, alignItems: 'center' },
   menuPanel: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, gap: 8 },
   menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.sm },
+  menuItemRow: { flexDirection: 'row', alignItems: 'center' },
+  menuIconWrap: { width: 18, height: 18, marginRight: spacing.sm, justifyContent: 'center', alignItems: 'center' },
   menuItemText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 15 },
   empAssistantButton: { backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   empAssistantButtonText: { color: colors.accent, fontFamily: fontFamily.semibold, fontSize: 12 },
