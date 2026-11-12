@@ -72,8 +72,16 @@ export default function ScheduleScreen() {
     if (me) { setMyRole(me.role || 'employee'); setBusinessId(me.business_id || null); }
     const { data: ppl } = await supabase.from('profiles').select('id, full_name').order('full_name', { ascending: true });
     if (ppl) setPeople(ppl);
-    const { data: ws } = await supabase.from('worksites').select('id, name').order('name', { ascending: true });
-    if (ws) setWorksites(ws);
+    // Only this business's worksites: the list used to be every
+    // business's sites. No business yet means no sites (never query
+    // with a null id — that would match unclaimed sites).
+    const myBusinessId = me?.business_id || null;
+    if (myBusinessId) {
+      const { data: ws } = await supabase.from('worksites').select('id, name').eq('business_id', myBusinessId).order('name', { ascending: true });
+      if (ws) setWorksites(ws);
+    } else {
+      setWorksites([]);
+    }
     setLoading(false);
   };
 

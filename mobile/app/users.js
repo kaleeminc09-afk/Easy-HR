@@ -59,8 +59,15 @@ export default function UsersScreen() {
     }
     const { data: sub } = await supabase.from('subscriptions').select('employee_limit').eq('owner_id', session.user.id).maybeSingle();
     if (sub) setEmployeeLimit(sub.employee_limit);
-    const { data: wsData } = await supabase.from('worksites').select('id, name').order('name', { ascending: true });
-    if (wsData) setWorksites(wsData);
+    // Only this business's worksites: the list used to be every
+    // business's sites. No business yet means no sites (never query
+    // with a null id — that would match unclaimed sites).
+    if (me.business_id) {
+      const { data: wsData } = await supabase.from('worksites').select('id, name').eq('business_id', me.business_id).order('name', { ascending: true });
+      if (wsData) setWorksites(wsData);
+    } else {
+      setWorksites([]);
+    }
     await loadUsers();
     setLoading(false);
   };

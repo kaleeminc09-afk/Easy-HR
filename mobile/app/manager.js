@@ -126,8 +126,16 @@ export default function ManagerDashboard() {
       }
       const { data: ppl } = await supabase.from('profiles').select('id, full_name').order('full_name', { ascending: true });
       if (ppl) setSchedPeople(ppl);
-      const { data: ws } = await supabase.from('worksites').select('id, name').order('name', { ascending: true });
-      if (ws) setSchedWorksites(ws);
+      // Only this business's worksites for the schedule builder: the
+      // list used to be every business's sites. No business yet means
+      // no sites (never query with a null id — that would match
+      // unclaimed sites).
+      if (profBiz && profBiz.business_id) {
+        const { data: ws } = await supabase.from('worksites').select('id, name').eq('business_id', profBiz.business_id).order('name', { ascending: true });
+        if (ws) setSchedWorksites(ws);
+      } else {
+        setSchedWorksites([]);
+      }
       await fetchAllManagerData();
     } catch (err) {
       console.error('Authorization error:', err);
