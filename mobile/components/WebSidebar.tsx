@@ -20,6 +20,7 @@ const LINKS = [
   { label: 'Time Off', href: '/timeoff', managerOnly: false, adminOnly: false, icon: 'calendarX' },
   { label: 'Team', href: '/team', managerOnly: false, adminOnly: false, icon: 'people' },
   { label: 'Documents', href: '/documents', managerOnly: false, adminOnly: false, icon: 'file' },
+  { label: 'Expenses', href: '/expenses', managerOnly: false, adminOnly: false, icon: 'receipt' },
   { label: 'Reports', href: '/reports', managerOnly: false, adminOnly: false, icon: 'chart' },
   // Assistant keeps its existing ✦ mark — no SVG icon on this row.
   { label: '✦ Assistant', href: '/EmployeeChatScreen', managerOnly: false, adminOnly: false, icon: null },

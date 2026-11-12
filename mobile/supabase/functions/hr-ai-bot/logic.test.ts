@@ -32,6 +32,11 @@ import {
   leaveTypeBalance,
   sanitizeFileName,
   buildStoragePath,
+  buildReceiptPath,
+  CRA_MILEAGE_RATES,
+  MILEAGE_TIER_KM,
+  mileageRateCents,
+  mileageAmountCents,
   zonedTimeToUtc,
   formatFileSize,
   getBillingState,
@@ -826,5 +831,44 @@ describe("getBillingState", () => {
   test("no business date and no subscription is locked, not trialing", () => {
     const s = getBillingState({ businessCreatedAt: null, subscription: null }, NOW);
     expect(s.state).toBe("locked");
+  });
+});
+
+describe("CRA mileage rates", () => {
+  it("2026 province first-tier rate is 73 cents", () => {
+    expect(mileageRateCents(2026, false)).toBe(73);
+    expect(CRA_MILEAGE_RATES[2026].extraCents).toBe(67);
+  });
+  it("2026 territory rate adds 4 cents", () => {
+    expect(mileageRateCents(2026, true)).toBe(77);
+  });
+  it("2025 rates are 72/66 with the same 4-cent territory add-on", () => {
+    expect(mileageRateCents(2025, false)).toBe(72);
+    expect(CRA_MILEAGE_RATES[2025].extraCents).toBe(66);
+    expect(mileageRateCents(2025, true)).toBe(76);
+  });
+  it("an unknown year falls back to the latest table entry", () => {
+    expect(mileageRateCents(2031, false)).toBe(mileageRateCents(2026, false));
+  });
+  it("mileage amount is km x rate, rounded to whole cents", () => {
+    expect(mileageAmountCents(10, 2026, false)).toBe(730);
+    expect(mileageAmountCents(42.5, 2026, false)).toBe(3103);
+    expect(mileageAmountCents(10, 2026, true)).toBe(770);
+  });
+  it("the tier threshold is 5000 km", () => {
+    expect(MILEAGE_TIER_KM).toBe(5000);
+  });
+});
+
+describe("buildReceiptPath", () => {
+  it("builds business/user/ts-name paths", () => {
+    expect(buildReceiptPath("biz-1", "user-2", "receipt.jpg", 1700000000000)).toBe(
+      "biz-1/user-2/1700000000000-receipt.jpg"
+    );
+  });
+  it("sanitizes unsafe file names", () => {
+    expect(buildReceiptPath("biz-1", "user-2", "my receipt (1).JPG", 1)).toBe(
+      "biz-1/user-2/1-my_receipt_1_.JPG"
+    );
   });
 });

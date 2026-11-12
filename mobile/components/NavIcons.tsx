@@ -43,6 +43,13 @@ export const NAV_ICONS: Record<string, (color: string) => React.ReactNode> = {
       <Path d="M16 13H8M16 17H8M10 9H8" />
     </Svg>
   ),
+  // Expenses: receipt with a zigzag tear-off bottom.
+  receipt: (c) => (
+    <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <Path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" />
+      <Path d="M9 7h6M9 11h6M9 15h4" />
+    </Svg>
+  ),
   chart: (c) => (
     <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
       <Path d="M12 20V10M18 20V4M6 20v-4" />

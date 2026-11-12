@@ -877,6 +877,42 @@ export function buildStoragePath(userId: string, fileName: string, timestampMs: 
   return `${userId}/${timestampMs}-${sanitizeFileName(fileName)}`;
 }
 
+/** Object path inside the expense-receipts bucket: <businessId>/<userId>/<ts>-<safe name>.
+ * Segment 1 is the business and segment 2 the user — the bucket policies scope
+ * access off exactly these two segments. */
+export function buildReceiptPath(businessId: string, userId: string, fileName: string, timestampMs: number): string {
+  return `${businessId}/${userId}/${timestampMs}-${sanitizeFileName(fileName)}`;
+}
+
+/** CRA reasonable per-kilometre automobile allowance rates, in cents.
+ * Source: Department of Finance Canada automobile deduction limits announcements;
+ * 2026 rates announced Jan 14, 2026. The 5,000 km tier counts per employee per
+ * calendar year. Add a new entry each January when Finance announces the rates.
+ * Entry amounts use the FIRST-tier rate; the monthly expense report applies the
+ * 5,000 km year-to-date tier split exactly (see the expense module design). */
+export const CRA_MILEAGE_RATES: Record<number, { firstTierCents: number; extraCents: number; territoryExtraCents: number }> = {
+  2025: { firstTierCents: 72, extraCents: 66, territoryExtraCents: 4 },
+  2026: { firstTierCents: 73, extraCents: 67, territoryExtraCents: 4 },
+};
+
+export const MILEAGE_TIER_KM = 5000;
+
+/** Latest year in the CRA table — the fallback for trips in a year with no entry yet. */
+export function latestMileageRateYear(): number {
+  return Math.max(...Object.keys(CRA_MILEAGE_RATES).map(Number));
+}
+
+/** First-tier per-km rate in cents for a trip year (territories add 4 cents). */
+export function mileageRateCents(year: number, territory: boolean): number {
+  const r = CRA_MILEAGE_RATES[year] ?? CRA_MILEAGE_RATES[latestMileageRateYear()];
+  return r.firstTierCents + (territory ? r.territoryExtraCents : 0);
+}
+
+/** Estimated allowance in cents for a trip: km x first-tier rate. */
+export function mileageAmountCents(km: number, year: number, territory: boolean): number {
+  return Math.round(km * mileageRateCents(year, territory));
+}
+
 export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || Number.isNaN(bytes)) return "Unknown size";
   if (bytes < 1024) return `${bytes} B`;

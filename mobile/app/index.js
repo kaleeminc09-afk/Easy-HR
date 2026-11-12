@@ -758,6 +758,7 @@ export default function App() {
             ['Time Off', '/timeoff', 'calendarX'],
             ['Team', '/team', 'people'],
             ['Documents', '/documents', 'file'],
+            ['Expenses', '/expenses', 'receipt'],
             // Assistant keeps its existing ✦ mark — no SVG icon on this row.
             ['✦ Assistant', '/EmployeeChatScreen', null],
             ['Profile', '/profile', 'person'],

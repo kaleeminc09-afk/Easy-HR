@@ -56,6 +56,12 @@
           "cameraPermission": "Allow NorthShift to use your camera to scan the worksite QR code when you clock in or out."
         }
       ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow NorthShift to access your photos so you can attach receipt images to expenses."
+        }
+      ],
       "expo-sharing"
     ],
     "experiments": {

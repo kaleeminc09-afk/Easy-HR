@@ -571,6 +571,7 @@ export default function ManagerDashboard() {
             ['Time Off', '/timeoff', 'calendarX', null],
             ['Team', '/team', 'people', null],
             ['Documents', '/documents', 'file', null],
+            ['Expenses', '/expenses', 'receipt', null],
             ['Reports', '/reports', 'chart', null],
             ['Profile', '/profile', 'person', null],
             // Break + Leave Policy sit under a "Policies" label, as in the toolbar.
