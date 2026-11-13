@@ -8,7 +8,7 @@
 // installed via react-native-qrcode-svg) — no new dependencies.
 // Break Policy + Leave Policy sit under a "Policies" section label.
 import React, { useEffect, useState } from 'react';
-import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import { NAV_ICONS } from './NavIcons';
@@ -60,6 +60,9 @@ export default function WebSidebar() {
   return (
     <View style={styles.sidebar}>
       <Text style={styles.title}>NorthShift</Text>
+      {/* Links scroll when the list is taller than the screen; the title
+          and Sign out stay pinned so both are always reachable. */}
+      <ScrollView style={styles.linksScroll}>
       {LINKS.filter((l) => (!l.managerOnly || (roleLoaded && isManager)) && (!l.adminOnly || (roleLoaded && role === 'admin'))).map((l) => {
         const active = pathname === l.href;
         const iconColor = active ? colors.accent : colors.textPrimary;
@@ -78,7 +81,7 @@ export default function WebSidebar() {
           </React.Fragment>
         );
       })}
-      <View style={styles.spacer} />
+      </ScrollView>
       <TouchableOpacity style={styles.signOut} onPress={() => supabase.auth.signOut()}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
@@ -97,6 +100,9 @@ const styles = StyleSheet.create({
   },
   // Sora is used ONLY for the "NorthShift" company name (theme rule).
   title: { fontFamily: fontFamily.brand, fontSize: 18, color: colors.textPrimary, paddingHorizontal: spacing.sm, marginBottom: spacing.md },
+  // flex: 1 inside the full-height sidebar bounds the scroll area: the
+  // list scrolls, the title above and Sign out below never move.
+  linksScroll: { flex: 1 },
   sectionLabel: { fontSize: 11, fontFamily: fontFamily.semibold, letterSpacing: 1.2, textTransform: 'uppercase', color: colors.textSecondary, paddingHorizontal: spacing.md, marginTop: spacing.sm, marginBottom: spacing.xs },
   link: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, borderRadius: radius.sm, marginBottom: spacing.xs },
   linkActive: { backgroundColor: colors.accentSoft },
@@ -104,7 +110,6 @@ const styles = StyleSheet.create({
   iconWrap: { width: 18, height: 18, marginRight: spacing.sm, justifyContent: 'center', alignItems: 'center' },
   linkText: { fontSize: 15, fontFamily: fontFamily.regular, color: colors.textPrimary },
   linkTextActive: { fontFamily: fontFamily.semibold, color: colors.accent },
-  spacer: { flex: 1 },
   signOut: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, borderRadius: radius.sm },
   signOutText: { fontSize: 15, fontFamily: fontFamily.semibold, color: colors.danger },
 });
