@@ -1144,3 +1144,117 @@ export function getBillingState(
   if (trialEndsAtMs != null && nowMs < trialEndsAtMs) return { state: "trialing", trialEndsAtMs, graceEndsAtMs: null, daysLeft: days(trialEndsAtMs) };
   return { state: "locked", trialEndsAtMs, graceEndsAtMs: null, daysLeft: 0 };
 }
+
+// ---------- Brain knowledge versioning, payroll & cache helpers ----------
+
+/** Bump this when PROVINCE_BREAK_RULES or any law-derived logic in this
+ * file changes. It is part of the Brain's reply-cache key, so a bump
+ * invalidates every cached answer and the next identical question is
+ * answered fresh. */
+export const BRAIN_RULES_VERSION = "2026-11-13";
+
+/** Date the province break rules above were last verified against
+ * official employment-standards sources. The Brain quotes this date
+ * on law questions so nobody mistakes a stored rule for live law. */
+export const BREAK_RULES_VERIFIED_DATE = "November 13, 2026";
+
+/**
+ * Normalizes a chat prompt for exact-repeat cache matching: case and
+ * spacing differences and trailing punctuation are ignored, so
+ * "How long is my break?" and "how long is my break" are the same
+ * question. Anything else — different words, different order — is a
+ * different question and is answered fresh.
+ */
+export function normalizePromptForCache(prompt: string): string {
+  return String(prompt || "").toLowerCase().replace(/\s+/g, " ").trim().replace(/[?.!]+$/, "").trim();
+}
+
+export interface PayrollLogLike {
+  user_id: string;
+  full_name?: string | null;
+  clock_in: string;
+  clock_out?: string | null;
+}
+
+export interface PayrollRow {
+  user_id: string;
+  name: string;
+  hours: number;
+  overtime_hours: number;
+}
+
+/**
+ * Hours and overtime per person across an arbitrary set of logs.
+ * Overtime is weekly (Mon-Sun, same weekStartMs bucketing as
+ * computeWeeklyOvertime): hours past 44 in each week count as
+ * overtime, then weeks are summed. Open shifts count up to nowMs.
+ * Same gross-hours convention as the rest of the app (breaks are
+ * not deducted). Hours only — never pay: NorthShift holds no pay
+ * rates, taxes, or deductions.
+ */
+export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number): PayrollRow[] {
+  const weekMs = new Map<string, { name: string; ms: number }>();
+  for (const log of logs) {
+    const s = new Date(log.clock_in).getTime();
+    if (Number.isNaN(s)) continue;
+    const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
+    if (e <= s) continue;
+    const key = `${log.user_id}|${weekStartMs(s)}`;
+    const cur = weekMs.get(key) || { name: (log.full_name || "").trim() || "Unknown", ms: 0 };
+    cur.ms += e - s;
+    weekMs.set(key, cur);
+  }
+  const totals = new Map<string, { name: string; hours: number; overtime_hours: number }>();
+  for (const [key, w] of weekMs) {
+    const user_id = key.split("|")[0];
+    const hours = w.ms / 3600000;
+    const cur = totals.get(user_id) || { name: w.name, hours: 0, overtime_hours: 0 };
+    cur.hours += hours;
+    cur.overtime_hours += Math.max(0, hours - OT_THRESHOLD_HOURS);
+    totals.set(user_id, cur);
+  }
+  const rows: PayrollRow[] = [];
+  for (const [user_id, t] of totals) {
+    rows.push({ user_id, name: t.name, hours: +t.hours.toFixed(2), overtime_hours: +t.overtime_hours.toFixed(2) });
+  }
+  return rows.sort((a, b) => b.hours - a.hours);
+}
+
+export interface ExpenseCandidateLike {
+  id: string;
+  user_id: string;
+  type: string;
+  expense_date: string;
+  category: string;
+  amount_cents: number;
+  merchant?: string | null;
+}
+
+export type ExpenseCandidateMatch =
+  | { kind: "none" }
+  | { kind: "one"; value: ExpenseCandidateLike }
+  | { kind: "many"; values: ExpenseCandidateLike[] };
+
+/**
+ * Narrows a list of one employee's expenses to the one a chat request
+ * means, using the optional date / category / amount the manager gave.
+ * Returns "many" (with the list) instead of guessing when the filters
+ * still leave more than one — the Brain asks which one.
+ */
+export function resolveExpenseCandidate(
+  candidates: ExpenseCandidateLike[],
+  filters: { date?: string | null; category?: string | null; amountCents?: number | null },
+): ExpenseCandidateMatch {
+  let list = candidates || [];
+  if (filters.date) list = list.filter((c) => c.expense_date === filters.date);
+  if (filters.category) {
+    const want = String(filters.category).trim().toLowerCase();
+    list = list.filter((c) => String(c.category || "").trim().toLowerCase() === want);
+  }
+  if (filters.amountCents != null && Number.isFinite(filters.amountCents)) {
+    list = list.filter((c) => Number(c.amount_cents) === Number(filters.amountCents));
+  }
+  if (list.length === 0) return { kind: "none" };
+  if (list.length === 1) return { kind: "one", value: list[0] };
+  return { kind: "many", values: list };
+}

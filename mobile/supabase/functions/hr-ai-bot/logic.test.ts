@@ -47,6 +47,11 @@ import {
   OT_ALERT_HOURS,
   breakDueInfo,
   isDateOnLeave,
+  BRAIN_RULES_VERSION,
+  BREAK_RULES_VERIFIED_DATE,
+  normalizePromptForCache,
+  payrollPeriodSummary,
+  resolveExpenseCandidate,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -947,5 +952,144 @@ describe("buildExpenseCsv", () => {
   it("formats amounts with two decimals", () => {
     const csv = buildExpenseCsv([row({ amount_cents: 505 })]);
     expect(csv).toContain("5.05");
+  });
+});
+
+describe("brain knowledge versioning", () => {
+  test("rules version and verified date are set", () => {
+    expect(BRAIN_RULES_VERSION).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(BREAK_RULES_VERIFIED_DATE.length).toBeGreaterThan(0);
+  });
+});
+
+describe("normalizePromptForCache", () => {
+  test("ignores case, spacing, and trailing punctuation", () => {
+    expect(normalizePromptForCache("How long is my break?")).toBe("how long is my break");
+    expect(normalizePromptForCache("  how   long is my break  ")).toBe("how long is my break");
+    expect(normalizePromptForCache("How long is my break?!")).toBe("how long is my break");
+  });
+  test("different wording stays different", () => {
+    expect(normalizePromptForCache("how long is my break")).not.toBe(
+      normalizePromptForCache("how long is Ahmed's break"),
+    );
+  });
+  test("empty and blank prompts normalize to empty", () => {
+    expect(normalizePromptForCache("")).toBe("");
+    expect(normalizePromptForCache("   ")).toBe("");
+  });
+});
+
+describe("payrollPeriodSummary", () => {
+  // Monday 2026-11-09 09:00 UTC; a 40h week plus a 10h week.
+  const log = (user_id: string, name: string, start: string, hours: number) => ({
+    user_id,
+    full_name: name,
+    clock_in: start,
+    clock_out: new Date(new Date(start).getTime() + hours * 3600000).toISOString(),
+  });
+  const nowMs = new Date("2026-11-17T12:00:00Z").getTime();
+
+  test("sums hours per person with no overtime under 44h in a week", () => {
+    const rows = payrollPeriodSummary(
+      [log("u1", "Asha", "2026-11-09T09:00:00Z", 40)],
+      nowMs,
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({ user_id: "u1", name: "Asha", hours: 40, overtime_hours: 0 });
+  });
+
+  test("overtime is per week, not per period", () => {
+    // 40h in week 1 + 40h in week 2 = 80h, zero overtime: neither week passes 44.
+    const rows = payrollPeriodSummary(
+      [
+        log("u1", "Asha", "2026-11-09T09:00:00Z", 40),
+        log("u1", "Asha", "2026-11-16T09:00:00Z", 40),
+      ],
+      nowMs,
+    );
+    expect(rows[0].hours).toBe(80);
+    expect(rows[0].overtime_hours).toBe(0);
+  });
+
+  test("hours past 44 in one week count as overtime", () => {
+    const rows = payrollPeriodSummary(
+      [
+        log("u1", "Asha", "2026-11-09T09:00:00Z", 40),
+        log("u1", "Asha", "2026-11-13T09:00:00Z", 10),
+      ],
+      nowMs,
+    );
+    expect(rows[0].hours).toBe(50);
+    expect(rows[0].overtime_hours).toBe(6);
+  });
+
+  test("open shifts count up to now and bad rows are skipped", () => {
+    const rows = payrollPeriodSummary(
+      [
+        { user_id: "u1", full_name: "Asha", clock_in: "2026-11-17T09:00:00Z", clock_out: null },
+        { user_id: "u1", full_name: "Asha", clock_in: "not-a-date", clock_out: null },
+      ],
+      nowMs,
+    );
+    expect(rows[0].hours).toBe(3);
+    expect(rows[0].overtime_hours).toBe(0);
+  });
+
+  test("sorts by hours descending", () => {
+    const rows = payrollPeriodSummary(
+      [
+        log("u1", "Asha", "2026-11-09T09:00:00Z", 10),
+        log("u2", "Ben", "2026-11-09T09:00:00Z", 30),
+      ],
+      nowMs,
+    );
+    expect(rows.map((r) => r.user_id)).toEqual(["u2", "u1"]);
+  });
+});
+
+describe("resolveExpenseCandidate", () => {
+  const cand = (id: string, date: string, category: string, cents: number) => ({
+    id,
+    user_id: "u1",
+    type: "expense",
+    expense_date: date,
+    category,
+    amount_cents: cents,
+    merchant: "Shell",
+  });
+  const list = [
+    cand("a", "2026-11-10", "Fuel", 5000),
+    cand("b", "2026-11-11", "Meals", 2500),
+    cand("c", "2026-11-11", "Fuel", 3000),
+  ];
+
+  test("single candidate resolves without filters", () => {
+    expect(resolveExpenseCandidate([list[0]], {})).toEqual({ kind: "one", value: list[0] });
+  });
+  test("no candidates is none", () => {
+    expect(resolveExpenseCandidate([], {})).toEqual({ kind: "none" });
+  });
+  test("date filter narrows to one", () => {
+    expect(resolveExpenseCandidate(list, { date: "2026-11-10" })).toEqual({ kind: "one", value: list[0] });
+  });
+  test("category filter is case-insensitive", () => {
+    const m = resolveExpenseCandidate(list, { category: "meals" });
+    expect(m).toEqual({ kind: "one", value: list[1] });
+  });
+  test("amount filter narrows to one", () => {
+    const m = resolveExpenseCandidate(list, { amountCents: 3000 });
+    expect(m).toEqual({ kind: "one", value: list[2] });
+  });
+  test("filters that still leave several return many, never a guess", () => {
+    const m = resolveExpenseCandidate(list, { date: "2026-11-11" });
+    expect(m.kind).toBe("many");
+    if (m.kind === "many") expect(m.values).toHaveLength(2);
+  });
+  test("combined filters narrow to one", () => {
+    const m = resolveExpenseCandidate(list, { date: "2026-11-11", category: "Fuel" });
+    expect(m).toEqual({ kind: "one", value: list[2] });
+  });
+  test("non-matching filter is none", () => {
+    expect(resolveExpenseCandidate(list, { date: "2026-11-12" })).toEqual({ kind: "none" });
   });
 });

@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -233,7 +233,101 @@ const managerTools = [
         required: ["employee_name", "decision"],
       },
     },
-  }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_pending_expenses",
+      description: "Lists expenses waiting for manager review: who submitted, date, category, amount, merchant or mileage route. Use for 'pending expenses', 'expenses waiting for review', 'what needs my approval'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_expense_totals",
+      description: "Totals expenses for a period: overall total, totals by category, and totals by status. Use for 'how much did we spend on fuel this month', 'expense totals', 'spending this week'.",
+      parameters: {
+        type: "object",
+        properties: {
+          period: { type: "string", enum: ["this_week", "this_month", "last_month"], description: "Which period to total. Default this_month." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_unpaid_reimbursements",
+      description: "Lists approved expenses that have not been reimbursed yet, with the total owed. Use for 'who has unpaid reimbursements', 'what do we owe the team', 'reimbursements due'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_mileage_summary",
+      description: "Mileage totals for a period: kilometres and amount per employee, plus each employee's year-to-date position against the 5,000 km CRA tier. Use for 'mileage this month', 'who drove the most', 'kilometres claimed'.",
+      parameters: {
+        type: "object",
+        properties: {
+          period: { type: "string", enum: ["this_week", "this_month", "last_month"], description: "Which period to summarise. Default this_month." },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "review_expense",
+      description: "Approves or denies a pending expense. Use for 'approve Ahmed's fuel expense', 'deny Sara's mileage'. Give the date, category, or amount when the employee has more than one pending expense.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "The employee who submitted the expense." },
+          decision: { type: "string", enum: ["approved", "denied"] },
+          date: { type: "string", description: "Optional expense date YYYY-MM-DD to disambiguate." },
+          category: { type: "string", description: "Optional category (Fuel, Meals, Travel, Supplies, Equipment, Parking/Tolls, Lodging, Phone/Internet, Training, Other, Mileage) to disambiguate." },
+          amount_cad: { type: "number", description: "Optional amount in dollars to disambiguate." },
+          note: { type: "string", description: "Optional review note shown to the employee." },
+        },
+        required: ["employee_name", "decision"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "mark_expense_paid",
+      description: "Marks an approved, unpaid expense as reimbursed (paid). Use for 'mark Ahmed's fuel expense paid', 'I reimbursed Sara'. Give the date, category, or amount when the employee has more than one unpaid expense.",
+      parameters: {
+        type: "object",
+        properties: {
+          employee_name: { type: "string", description: "The employee who submitted the expense." },
+          date: { type: "string", description: "Optional expense date YYYY-MM-DD to disambiguate." },
+          category: { type: "string", description: "Optional category to disambiguate." },
+          amount_cad: { type: "number", description: "Optional amount in dollars to disambiguate." },
+        },
+        required: ["employee_name"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_payroll_summary",
+      description: "Hours and overtime per employee for a pay period: total hours and overtime hours (past 44h in a week) for everyone. Use for 'payroll hours this week', 'hours for payroll', 'pay period summary'. Hours only — NorthShift holds no pay rates, so it never computes pay amounts.",
+      parameters: {
+        type: "object",
+        properties: {
+          period: { type: "string", enum: ["this_week", "last_week", "this_month", "last_month"], description: "Which period to summarise. Default this_week." },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 // ---------- Employee tools ----------
@@ -352,7 +446,23 @@ const employeeTools = [
         required: ["type", "start_date", "end_date"],
       },
     },
-  }
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_my_expenses",
+      description: "Shows the employee's own submitted expenses: date, category, amount, approval status, and reimbursement status. Use for 'my expenses', 'did my expense get approved', 'have I been reimbursed'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_my_hours",
+      description: "Shows the employee's own hours: today and this week (Mon-Sun), with overtime hours past 44 this week. Use for 'my hours this week', 'how many hours have I worked', 'am I in overtime'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
 ];
 
 const managerSystemPrompt = `You are the NorthShift AI Manager Assistant.
@@ -399,6 +509,24 @@ OVERTIME & COMPLIANCE:
 - Quote the returned numbers exactly — never estimate hours yourself. Ontario overtime starts past 44 hours in a week (Mon-Sun); the warning level is 40.
 - Break questions ("when is my meal break due", "how long is my break", "when is Asha's meal break due") → get_break_policy. It reports the business policy, the province rule, and the due time from today's clock-in — quote its numbers, never estimate.
 
+EXPENSES:
+- Pending expenses ("what needs my approval") → get_pending_expenses. Spending totals ("how much on fuel this month") → get_expense_totals. Unpaid reimbursements ("what do we owe the team") → get_unpaid_reimbursements. Mileage ("mileage this month") → get_mileage_summary.
+- Approve or deny → review_expense; mark reimbursed → mark_expense_paid. If the tool says there is more than one match, list them and ask which one — never guess.
+- Mileage amounts on approved rows are exact (the 5,000 km yearly tier is applied); pending mileage amounts are estimates until approved. Say so if it matters.
+- If you approve your own expense, the report flags it as self-approved — say that plainly when it happens.
+- The full expense report (breakdown, CSV export, print) lives on the Expenses screen — point there for anything beyond a chat answer.
+
+PAYROLL:
+- Hours and overtime for a pay period → get_payroll_summary. Quote its numbers exactly — never estimate hours yourself.
+- NorthShift tracks hours, not pay. There are no pay rates, taxes, CPP, EI, or deductions in the app, so never compute a paycheque, a tax amount, or a net pay figure. If asked for one, say the hours are here and the pay math lives with their payroll provider.
+- Payroll CSV exports (QuickBooks, ADP, standard) live in the Manager Portal — the Payroll Export card and the Audit Export. Point there when they need the file for payroll.
+
+LAW & RULES — READ THIS BEFORE ANSWERING ANY LAW QUESTION:
+- Your break and employment rules come from a fixed table in the app, verified against official employment-standards sources on ${BREAK_RULES_VERIFIED_DATE}. You do NOT detect law changes on your own. A law that changed after that date is not in your table.
+- When you answer a break, overtime, or employment-standards question, state the rule and add that the rules were verified on ${BREAK_RULES_VERIFIED_DATE}, and that employment law changes — confirm against the official source for the province before acting on it.
+- If someone asks whether a law changed, or about a rule newer than your verified date, say plainly that your rules are as of ${BREAK_RULES_VERIFIED_DATE} and you cannot confirm anything newer — point them at the official provincial employment-standards site. Never invent a law change, a new rate, or a new threshold.
+- The province rules are a compliance aid, never legal advice. Say so when the question has legal consequences.
+
 PROFILES:
 - Job title, department, start date, phone, or emergency contact questions → get_employee_profile.
 - You never receive home addresses or dates of birth — if asked for those, say they are not available in chat.
@@ -407,6 +535,7 @@ WRITE ACTIONS - you can change data, not just read it:
 - Create a shift → create_shift. You need the employee (or an open shift), the date as YYYY-MM-DD, and start/end times in 24-hour HH:MM form.
 - Approve or deny a shift claim → review_shift_claim with the claimant's name.
 - Approve or deny time off → review_time_off with the employee's name.
+- Approve or deny an expense → review_expense with the employee's name; mark an approved expense paid → mark_expense_paid. Same rules: relay the tool's result, ask when it lists more than one match, never invent.
 - If a write tool returns an error or a list to choose from, relay it and ask - never invent a person, worksite, date, or time.
 - After any successful write, say plainly what changed: who, what, and when, using the tool's own result. Then stop — call no further tools.
 - NEVER say a shift was created or a request approved/denied unless the write tool returned success. If it returned success: false, relay the error plainly and do not soften it.
@@ -414,10 +543,11 @@ WRITE ACTIONS - you can change data, not just read it:
 
 APP GUIDE — where things live (web app, right-hand toolbar; phone app, ☰ Menu):
 - Clock In is the home screen. Schedule is the shared week view — everyone sees shifts and claims open ones there.
-- Build Schedule lives in the Manager Portal (the "Build Schedule" section at the top) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
+- Build Schedule lives in the Manager Portal (the Build Schedule card in the tools column) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
 - Break Policy, Leave Policy, QR Codes, and Manager Board are manager-only; Subscription is admin-only.
+- Expenses lives on the Expenses screen: employees submit money expenses and mileage there, managers review and mark reimbursements paid, and the report with CSV export and print is on the same screen.
 - Onboarding: a new owner signs up, creates the business, adds a location, then invites the team by email from Manage Users. An invited employee opens the invite link from their email and sets a password — they never create a business. If someone signed up directly without an invite, point them at the "I was invited" choice on the setup screen.
-- Billing is a stub: every plan starts with a free first month (Starter $25/mo, Growth $49/mo, Business $99/mo); checkout opens at launch and nothing is charged today. NEVER say a payment went through, a card was charged, or a subscription is active — if asked, say billing is not wired up yet and the first month is free.`;
+- Billing: plans are Starter $25/mo (up to 5 staff), Growth $49/mo (up to 15), Business $99/mo (up to 40). A card is taken at signup, the first 30 days are free, and the card is charged on day 31 unless cancelled. Billing questions and plan changes live on the Subscription screen (admin-only). Checkout is running in Stripe test mode, so never say a real payment went through or a real card was charged.`;
 
 function employeeSystemPrompt(location: any): string {
   const locLine = location?.latitude != null
@@ -438,6 +568,11 @@ TONE — TALK LIKE A PERSON:
 - Answer directly, then stop. No filler, no narrating what you're doing.
 - When you file something (exception, blocker), confirm it in one natural sentence.
 
+PERMISSIONS — WHAT YOU MUST NOT DO:
+- You are talking to an employee. Manager-level questions are not yours to answer: approving or denying anything, other people's hours, pay, expenses or personal details, team-wide reports, payroll summaries, billing, and policy changes.
+- When asked one, decline politely in one short sentence and point at the manager: for example, "That's something your manager handles — ask them, or I can log it for them." Never answer it from general knowledge, never guess, and never say it was done.
+- What IS yours: their own shifts, hours, expenses, time off, breaks, schedule, open shifts, and how the app works. Answer those fully.
+
 CAPABILITIES:
 - Shift/hours questions: use get_my_shifts.
 - Team status: if they ask who's online, who's working, or who's on break, use get_team_status and name the people - never answer with counts only.
@@ -450,9 +585,16 @@ CAPABILITIES:
 - Shift results include a ready-made "when" label in local time — use it word-for-word for the date and times instead of converting timestamps yourself. When you list open shifts, introduce them as open shifts the employee can claim (for example: "There is 1 open shift you can claim:") - never show a bare list of times with no explanation.
 - Their own profile ("my job title", "who's my emergency contact", "is my profile complete") → get_my_profile. If it reports missing items, gently suggest completing them in the Profile tab.
 - Break questions ("when is my meal break due", "how long is my break") → get_break_policy. It knows the business policy, the province rule, and today's clock-in time — quote its due time, never estimate.
+- Their own expenses ("my expenses", "did my expense get approved", "have I been reimbursed") → get_my_expenses. Their own hours this week ("my hours this week", "am I in overtime") → get_my_hours. Other people's expenses or hours are manager-level — decline politely (see PERMISSIONS).
+- Where expenses live: the Expenses screen is where they submit a money expense or mileage, with a receipt photo for money expenses.
 - Where things live: on the web app the sections are in the right-hand toolbar; on the phone they are in the ☰ Menu. Schedule is the shared week view — open shifts there are yours to claim.
 - If you were invited, open the invite link from your email to join your manager's business — do not create a business on the setup screen.
-- Billing: the first month is free on every plan and checkout is not wired up yet — never say a payment went through or a card was charged.
+- Billing: the first 30 days are free on every plan (Starter $25, Growth $49, Business $99 per month after that), a card is taken at signup, and billing lives on the Subscription screen for admins. Checkout is running in Stripe test mode — never say a real payment went through or a real card was charged. Billing questions are manager-level: point them at their manager.
+
+LAW & RULES:
+- Your break and employment rules come from a fixed table in the app, verified against official employment-standards sources on ${BREAK_RULES_VERIFIED_DATE}. You do NOT detect law changes on your own.
+- When you answer a break or employment question, state the rule and add that the rules were verified on ${BREAK_RULES_VERIFIED_DATE}, and that employment law changes — confirm against the official source for the province before acting on it.
+- If someone asks whether a law changed, or about a rule newer than your verified date, say plainly that your rules are as of ${BREAK_RULES_VERIFIED_DATE} and you cannot confirm anything newer. Never invent a law change.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -472,6 +614,42 @@ function fmtWhen(startIso: string, endIso: string, tz: string): string {
       : `${dayFmt.format(s)}, ${timeFmt.format(s)} - ${dayFmt.format(e)}, ${timeFmt.format(e)}`;
   } catch {
     return `${startIso} - ${endIso}`;
+  }
+}
+
+// ---------- Reply cache (exact-repeat questions cost no tokens) ----------
+// Only replies produced with ZERO tool calls are ever stored, and the key
+// pins the prompt, the asker, the role, the rule version, the prompt text,
+// and the conversation state — so a cached reply can only replay an answer
+// produced under identical conditions. Live data can never be served stale.
+// Every helper is best-effort: if the cache table is missing (migration not
+// run yet) the Brain works exactly as before, just uncached.
+async function sha256Hex(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+const BRAIN_CACHE_TTL_DAYS = 7;
+
+async function readBrainCache(supabase: any, key: string): Promise<string | null> {
+  try {
+    const cutoff = new Date(Date.now() - BRAIN_CACHE_TTL_DAYS * 24 * 3600 * 1000).toISOString();
+    const { data, error } = await supabase.from("brain_response_cache").select("reply").eq("cache_key", key).gte("created_at", cutoff).maybeSingle();
+    if (error || !data) return null;
+    return typeof data.reply === "string" && data.reply.trim() !== "" ? data.reply : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeBrainCache(supabase: any, key: string, reply: string): Promise<void> {
+  try {
+    const nowIso = new Date().toISOString();
+    await supabase.from("brain_response_cache").upsert({ cache_key: key, reply, created_at: nowIso }, { onConflict: "cache_key" });
+    const cutoff = new Date(Date.now() - BRAIN_CACHE_TTL_DAYS * 24 * 3600 * 1000).toISOString();
+    await supabase.from("brain_response_cache").delete().lt("created_at", cutoff);
+  } catch {
+    // Cache failure must never break chat.
   }
 }
 
@@ -532,6 +710,100 @@ Deno.serve(async (req) => {
       ...cleanHistory,
       { role: "user", content: prompt },
     ];
+
+    // ----- Business scoping -----
+    // The service-role client bypasses RLS, so every team read in the
+    // handlers below is scoped by hand: tables with business_id filter
+    // on it, tables without it (time_logs, time_exceptions, tasks)
+    // filter on the business's user ids. A caller with no business
+    // gets the sentinel id, which matches nobody.
+    const businessScope = callerBusinessId || "00000000-0000-0000-0000-000000000000";
+    let bizUserIds: string[] = [];
+    if (callerBusinessId) {
+      const { data: bizProfs } = await supabase.from("profiles").select("id").eq("business_id", callerBusinessId);
+      bizUserIds = (bizProfs || []).map((p: any) => p.id);
+    }
+    if (bizUserIds.length === 0) bizUserIds = ["00000000-0000-0000-0000-000000000000"];
+    // Worksite reads cover the business's own sites plus unclaimed ones
+    // (the claim flow), never another business's sites.
+    const worksiteFilter = callerBusinessId ? `business_id.eq.${callerBusinessId},business_id.is.null` : "business_id.is.null";
+
+    // ----- Exact-repeat reply cache -----
+    // The key deliberately excludes today's date (knowledge answers do
+    // not depend on it) and the employee's live GPS (it only matters
+    // for exception filing, which uses tools and is never cached).
+    // The canonical prompt (no GPS line) keeps the key stable.
+    const normalizedPrompt = normalizePromptForCache(String(prompt || ""));
+    const cacheable = normalizedPrompt !== "";
+    let cacheKey = "";
+    if (cacheable) {
+      const canonicalPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(null);
+      cacheKey = await sha256Hex([
+        normalizedPrompt,
+        effectiveUserId,
+        effectiveRole,
+        BRAIN_RULES_VERSION,
+        await sha256Hex(canonicalPrompt),
+        await sha256Hex(JSON.stringify(cleanHistory)),
+      ].join("|"));
+      const cachedReply = await readBrainCache(supabase, cacheKey);
+      if (cachedReply) {
+        return new Response(JSON.stringify({ reply: cachedReply }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+      }
+    }
+
+    // Period bounds (YYYY-MM-DD, caller's timezone) for expense and
+    // payroll questions. "This week" is Mon-Sun; months are calendar
+    // months. Weekday math runs on the calendar date itself, so it is
+    // timezone-independent.
+    const periodBounds = (period: string): { start: string; end: string; label: string } => {
+      const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: callerTz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+      const [y, m, d] = todayStr.split("-").map(Number);
+      const atNoon = (yy: number, mm: number, dd: number) => new Date(Date.UTC(yy, mm - 1, dd, 12, 0, 0));
+      const iso = (dt: Date) => dt.toISOString().slice(0, 10);
+      const addDays = (dt: Date, n: number) => new Date(dt.getTime() + n * 86400000);
+      const monthLabel = (dt: Date) => dt.toLocaleDateString("en-US", { timeZone: "UTC", month: "long", year: "numeric" });
+      if (period === "last_month") {
+        const first = atNoon(y, m - 1, 1);
+        return { start: iso(first), end: iso(atNoon(y, m, 1)), label: monthLabel(first) };
+      }
+      if (period === "this_week" || period === "last_week") {
+        const dow = (atNoon(y, m, d).getUTCDay() + 6) % 7;
+        const monday = addDays(atNoon(y, m, d), -dow + (period === "last_week" ? -7 : 0));
+        return { start: iso(monday), end: iso(addDays(monday, 7)), label: period === "last_week" ? `week of ${iso(monday)}` : "this week" };
+      }
+      const first = atNoon(y, m, 1);
+      return { start: iso(first), end: iso(atNoon(y, m + 1, 1)), label: monthLabel(first) };
+    };
+
+    const expenseLabel = (e: any): string => e.type === "mileage"
+      ? `mileage ${e.expense_date}, ${Number(e.mileage_km)} km${e.origin ? ` (${e.origin} to ${e.destination || "?"})` : ""}`
+      : `${e.category} expense ${e.expense_date}, $${(Number(e.amount_cents) / 100).toFixed(2)}${e.merchant ? ` at ${e.merchant}` : ""}`;
+
+    const shapeExpense = (e: any, name: string, amountCents?: number) => ({
+      employee: name,
+      date: e.expense_date,
+      type: e.type,
+      category: e.category,
+      amount_cad: ((amountCents ?? Number(e.amount_cents)) / 100).toFixed(2),
+      merchant: e.merchant || undefined,
+      mileage_km: e.type === "mileage" ? Number(e.mileage_km) : undefined,
+      route: e.type === "mileage" && e.origin ? `${e.origin} to ${e.destination || ""}` : undefined,
+      status: e.status,
+      reimbursement: e.reimbursement_status,
+    });
+
+    // Exact tier-split amounts for one year's approved mileage, keyed by
+    // expense id — the same computation the expense report uses, so the
+    // Brain's numbers match the screen's.
+    const approvedMileageSplits = async (year: number) => {
+      const { data } = await supabase.from("expenses")
+        .select("id, user_id, expense_date, mileage_km, mileage_rate_cents")
+        .eq("business_id", businessScope).eq("type", "mileage").eq("status", "approved")
+        .gte("expense_date", `${year}-01-01`).lt("expense_date", `${year + 1}-01-01`)
+        .order("expense_date", { ascending: true });
+      return mileageSplitByEntry((data || []).map((e: any) => ({ id: e.id, user_id: e.user_id, expense_date: e.expense_date, mileage_km: Number(e.mileage_km), mileage_rate_cents: e.mileage_rate_cents })), year);
+    };
 
     // Provider switch: AI_PROVIDER=together uses Together AI with the
     // TOGETHER_API_KEY secret; anything else keeps Groq. Same model id
@@ -596,6 +868,12 @@ Deno.serve(async (req) => {
       let choice = result.choices[0].message;
 
       if (!choice.tool_calls) {
+        // First response with no tool calls = a pure knowledge answer.
+        // Store it so the exact same question costs no tokens next time.
+        // Replies after tool calls depend on live data and are never cached.
+        if (cacheable && iterations === 1 && typeof choice.content === "string" && choice.content.trim() !== "") {
+          await writeBrainCache(supabase, cacheKey, choice.content);
+        }
         return new Response(JSON.stringify({ reply: choice.content }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
       }
 
@@ -613,7 +891,8 @@ Deno.serve(async (req) => {
           const { data, error } = await supabase
             .from("time_exceptions")
             .select("id, attempted_at, distance_meters, reason_note, profiles!time_exceptions_user_id_fkey(full_name), worksites(name)")
-            .eq("status", "pending");
+            .eq("status", "pending")
+            .in("user_id", bizUserIds);
 
           if (error) {
             output = { error: error.message };
@@ -630,12 +909,13 @@ Deno.serve(async (req) => {
             }));
           }
         } else if (fn === "bulk_update_exceptions") {
-          const { data, error } = await supabase.from("time_exceptions").update({ status: args.status, reviewed_by: effectiveUserId }).in("id", args.exception_ids).select();
+          const { data, error } = await supabase.from("time_exceptions").update({ status: args.status, reviewed_by: effectiveUserId }).in("id", args.exception_ids).in("user_id", bizUserIds).select();
           output = error ? { error: error.message } : { success: true, updated_count: data?.length || 0 };
         } else if (fn === "get_time_logs") {
           const { data, error } = await supabase
             .from("time_logs")
             .select("id, clock_in, clock_out, ai_anomaly_flag, profiles!time_logs_user_id_fkey(full_name), worksites(name)")
+            .in("user_id", bizUserIds)
             .order("clock_in", { ascending: false })
             .limit(10);
 
@@ -657,7 +937,8 @@ Deno.serve(async (req) => {
           const { data: shifts, error: sErr } = await supabase
             .from("time_logs")
             .select("id, user_id, clock_in, profiles!time_logs_user_id_fkey(full_name)")
-            .is("clock_out", null);
+            .is("clock_out", null)
+            .in("user_id", bizUserIds);
           if (sErr) {
             output = { error: sErr.message };
           } else {
@@ -693,7 +974,7 @@ Deno.serve(async (req) => {
           let targetName = callerName;
           let resolveErr: string | null = null;
           if (effectiveRole === "manager" && args.employee_name) {
-            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
             const m = matchByName(emps || [], (p: any) => p.full_name || "", String(args.employee_name).trim());
             if (m.kind !== "one") resolveErr = m.kind === "many" ? `More than one team member matches "${args.employee_name}". Use the full name.` : `No team member matches "${args.employee_name}".`;
             else { targetId = m.value.id; targetName = m.value.full_name; }
@@ -740,6 +1021,7 @@ Deno.serve(async (req) => {
           const { data: profs, error: pErr } = await supabase
             .from("profiles")
             .select("id, full_name")
+            .eq("business_id", businessScope)
             .ilike("full_name", `%${args.employee_name}%`)
             .limit(5);
 
@@ -771,6 +1053,7 @@ Deno.serve(async (req) => {
           const { data: profs, error: pErr } = await supabase
             .from("profiles")
             .select("id, full_name")
+            .eq("business_id", businessScope)
             .ilike("full_name", `%${args.employee_name}%`)
             .limit(5);
 
@@ -800,6 +1083,7 @@ Deno.serve(async (req) => {
           const { data, error } = await supabase
             .from("tasks")
             .select("id, title, status, profiles!tasks_assigned_to_fkey(full_name)")
+            .in("assigned_to", bizUserIds)
             .ilike("title", `%${args.title_contains}%`);
 
           if (error) {
@@ -825,6 +1109,7 @@ Deno.serve(async (req) => {
           let query = supabase
             .from("tasks")
             .select("title, description, status, due_date, profiles!tasks_assigned_to_fkey(full_name)")
+            .in("assigned_to", bizUserIds)
             .order("created_at", { ascending: false })
             .limit(20);
           if (args.status) query = query.eq("status", args.status);
@@ -847,6 +1132,226 @@ Deno.serve(async (req) => {
                   due_date: t.due_date,
                   description: t.description,
                 }));
+          }
+        } else if (fn === "get_pending_expenses") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can review expenses." };
+          } else {
+            const { data, error } = await supabase.from("expenses")
+              .select("id, user_id, type, expense_date, category, amount_cents, merchant, mileage_km, origin, destination, status, reimbursement_status")
+              .eq("business_id", businessScope).eq("status", "pending")
+              .order("expense_date", { ascending: true }).limit(25);
+            const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
+            if (error) {
+              output = { error: error.message };
+            } else if (!data || data.length === 0) {
+              output = { message: "No expenses waiting for review." };
+            } else {
+              output = { pending_count: data.length, expenses: data.map((e: any) => shapeExpense(e, nameMap.get(e.user_id) || "Unknown")) };
+            }
+          }
+        } else if (fn === "get_expense_totals") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can see expense totals." };
+          } else {
+            const bounds = periodBounds(args.period || "this_month");
+            const { data, error } = await supabase.from("expenses")
+              .select("id, user_id, type, expense_date, category, amount_cents, status")
+              .eq("business_id", businessScope)
+              .gte("expense_date", bounds.start).lt("expense_date", bounds.end)
+              .order("expense_date", { ascending: true }).limit(500);
+            if (error) {
+              output = { error: error.message };
+            } else {
+              const rows = data || [];
+              const years = [...new Set([Number(bounds.start.slice(0, 4)), Number(bounds.end.slice(0, 4))])];
+              const splits = new Map<string, { amountCents: number }>();
+              for (const yr of years) {
+                for (const [k, v] of await approvedMileageSplits(yr)) splits.set(k, v);
+              }
+              const exact = (e: any) => e.type === "mileage" && e.status === "approved" ? (splits.get(e.id)?.amountCents ?? Number(e.amount_cents)) : Number(e.amount_cents);
+              const byCategory = new Map<string, number>();
+              const byStatus = new Map<string, number>();
+              let total = 0;
+              for (const e of rows) {
+                const c = exact(e);
+                total += c;
+                byCategory.set(e.category, (byCategory.get(e.category) || 0) + c);
+                byStatus.set(e.status, (byStatus.get(e.status) || 0) + c);
+              }
+              output = rows.length === 0
+                ? { message: `No expenses in ${bounds.label}.` }
+                : {
+                    period: bounds.label,
+                    total_cad: (total / 100).toFixed(2),
+                    expense_count: rows.length,
+                    by_category: [...byCategory.entries()].map(([category, cents]) => ({ category, total_cad: (cents / 100).toFixed(2) })),
+                    by_status: [...byStatus.entries()].map(([status, cents]) => ({ status, total_cad: (cents / 100).toFixed(2) })),
+                  };
+            }
+          }
+        } else if (fn === "get_unpaid_reimbursements") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can see reimbursements." };
+          } else {
+            const { data, error } = await supabase.from("expenses")
+              .select("id, user_id, type, expense_date, category, amount_cents, merchant, mileage_km, origin, destination, status, reimbursement_status")
+              .eq("business_id", businessScope).eq("status", "approved").eq("reimbursement_status", "unpaid")
+              .order("expense_date", { ascending: true }).limit(100);
+            const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
+            if (error) {
+              output = { error: error.message };
+            } else if (!data || data.length === 0) {
+              output = { message: "Nothing owed — every approved expense is marked paid." };
+            } else {
+              const years = [...new Set(data.map((e: any) => Number(e.expense_date.slice(0, 4))))];
+              const splits = new Map<string, { amountCents: number }>();
+              for (const yr of years) {
+                for (const [k, v] of await approvedMileageSplits(yr)) splits.set(k, v);
+              }
+              const exact = (e: any) => e.type === "mileage" ? (splits.get(e.id)?.amountCents ?? Number(e.amount_cents)) : Number(e.amount_cents);
+              const total = data.reduce((a: number, e: any) => a + exact(e), 0);
+              output = {
+                unpaid_count: data.length,
+                total_cad: (total / 100).toFixed(2),
+                reimbursements: data.map((e: any) => shapeExpense(e, nameMap.get(e.user_id) || "Unknown", exact(e))),
+              };
+            }
+          }
+        } else if (fn === "get_mileage_summary") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can see mileage summaries." };
+          } else {
+            const bounds = periodBounds(args.period || "this_month");
+            const { data, error } = await supabase.from("expenses")
+              .select("id, user_id, type, expense_date, category, amount_cents, mileage_km, mileage_rate_cents, origin, destination, status")
+              .eq("business_id", businessScope).eq("type", "mileage")
+              .gte("expense_date", bounds.start).lt("expense_date", bounds.end)
+              .order("expense_date", { ascending: true }).limit(500);
+            const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
+            if (error) {
+              output = { error: error.message };
+            } else if (!data || data.length === 0) {
+              output = { message: `No mileage claimed in ${bounds.label}.` };
+            } else {
+              const year = Number(bounds.start.slice(0, 4));
+              const { data: yearRows } = await supabase.from("expenses")
+                .select("id, user_id, expense_date, mileage_km, mileage_rate_cents")
+                .eq("business_id", businessScope).eq("type", "mileage").eq("status", "approved")
+                .gte("expense_date", `${year}-01-01`).lt("expense_date", `${year + 1}-01-01`)
+                .order("expense_date", { ascending: true });
+              const splits = mileageSplitByEntry((yearRows || []).map((e: any) => ({ id: e.id, user_id: e.user_id, expense_date: e.expense_date, mileage_km: Number(e.mileage_km), mileage_rate_cents: e.mileage_rate_cents })), year);
+              const exact = (e: any) => e.status === "approved" ? (splits.get(e.id)?.amountCents ?? Number(e.amount_cents)) : Number(e.amount_cents);
+              const perEmp = new Map<string, { km: number; cents: number }>();
+              for (const e of data) {
+                const cur = perEmp.get(e.user_id) || { km: 0, cents: 0 };
+                cur.km += Number(e.mileage_km) || 0;
+                cur.cents += exact(e);
+                perEmp.set(e.user_id, cur);
+              }
+              const ytd = mileageTierSplit((yearRows || []).map((e: any) => ({ id: e.id, user_id: e.user_id, expense_date: e.expense_date, mileage_km: Number(e.mileage_km), mileage_rate_cents: e.mileage_rate_cents })), year);
+              output = {
+                period: bounds.label,
+                per_employee: [...perEmp.entries()].map(([uid, t]) => ({ employee: nameMap.get(uid) || "Unknown", km: Math.round(t.km * 100) / 100, amount_cad: (t.cents / 100).toFixed(2) })),
+                year_to_date: ytd.map((r: any) => ({ employee: nameMap.get(r.user_id) || "Unknown", total_km: r.totalKm, km_under_5000: r.kmUnder, km_over_5000: r.kmOver, amount_cad: (r.amountCents / 100).toFixed(2) })),
+              };
+            }
+          }
+        } else if (fn === "review_expense") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can review expenses." };
+          } else {
+            const decision = args.decision === "denied" ? "denied" : "approved";
+            const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
+            if (m.kind !== "one") {
+              output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
+            } else {
+              const target = m.value;
+              const { data: pend } = await supabase.from("expenses")
+                .select("id, user_id, type, expense_date, category, amount_cents, merchant, mileage_km, origin, destination")
+                .eq("business_id", businessScope).eq("user_id", target.id).eq("status", "pending")
+                .order("expense_date", { ascending: true });
+              const match = resolveExpenseCandidate(pend || [], { date: args.date || null, category: args.category || null, amountCents: args.amount_cad != null ? Math.round(Number(args.amount_cad) * 100) : null });
+              if (match.kind === "none") {
+                output = { success: false, error: `${target.full_name} has no pending expense${args.date ? " on that date" : ""}.` };
+              } else if (match.kind === "many") {
+                output = { success: false, needs_choice: true, expenses: match.values.map((e: any) => expenseLabel(e)), error: `${target.full_name} has ${match.values.length} pending expenses. Ask which one, then call again with the date, category, or amount.` };
+              } else {
+                const e: any = match.value;
+                const { data: upd, error: upErr } = await supabase.from("expenses")
+                  .update({ status: decision, reviewed_by: effectiveUserId, review_note: args.note || null })
+                  .eq("id", e.id).eq("status", "pending").select("id");
+                if (upErr || !upd || upd.length === 0) {
+                  output = { success: false, error: upErr ? upErr.message : "That expense was already reviewed." };
+                } else {
+                  output = { success: true, expense: { employee: target.full_name, label: expenseLabel(e), decision }, self_approved: effectiveUserId === e.user_id };
+                }
+              }
+            }
+          }
+        } else if (fn === "mark_expense_paid") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can mark expenses paid." };
+          } else {
+            const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
+            if (m.kind !== "one") {
+              output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
+            } else {
+              const target = m.value;
+              const { data: unpaid } = await supabase.from("expenses")
+                .select("id, user_id, type, expense_date, category, amount_cents, merchant, mileage_km, origin, destination")
+                .eq("business_id", businessScope).eq("user_id", target.id).eq("status", "approved").eq("reimbursement_status", "unpaid")
+                .order("expense_date", { ascending: true });
+              const match = resolveExpenseCandidate(unpaid || [], { date: args.date || null, category: args.category || null, amountCents: args.amount_cad != null ? Math.round(Number(args.amount_cad) * 100) : null });
+              if (match.kind === "none") {
+                output = { success: false, error: `${target.full_name} has no unpaid approved expense${args.date ? " on that date" : ""}.` };
+              } else if (match.kind === "many") {
+                output = { success: false, needs_choice: true, expenses: match.values.map((e: any) => expenseLabel(e)), error: `${target.full_name} has ${match.values.length} unpaid expenses. Ask which one, then call again with the date, category, or amount.` };
+              } else {
+                const e: any = match.value;
+                const { data: upd, error: upErr } = await supabase.from("expenses")
+                  .update({ reimbursement_status: "paid" })
+                  .eq("id", e.id).eq("status", "approved").eq("reimbursement_status", "unpaid").select("id");
+                if (upErr || !upd || upd.length === 0) {
+                  output = { success: false, error: upErr ? upErr.message : "That expense was already marked paid." };
+                } else {
+                  output = { success: true, expense: { employee: target.full_name, label: expenseLabel(e) } };
+                }
+              }
+            }
+          }
+        } else if (fn === "get_payroll_summary") {
+          if (effectiveRole !== "manager") {
+            output = { success: false, error: "Only managers can see payroll summaries." };
+          } else {
+            const bounds = periodBounds(args.period || "this_week");
+            const startIso = new Date(zonedTimeToUtc(bounds.start, "00:00", callerTz)).toISOString();
+            const endIso = new Date(zonedTimeToUtc(bounds.end, "00:00", callerTz)).toISOString();
+            const { data, error } = await supabase.from("time_logs")
+              .select("user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+              .in("user_id", bizUserIds).gte("clock_in", startIso).lt("clock_in", endIso);
+            if (error) {
+              output = { error: error.message };
+            } else {
+              const rows = payrollPeriodSummary((data || []).map((l: any) => ({ user_id: l.user_id, full_name: l.profiles?.full_name, clock_in: l.clock_in, clock_out: l.clock_out })), Date.now());
+              const totalHours = +rows.reduce((a, r) => a + r.hours, 0).toFixed(2);
+              const totalOt = +rows.reduce((a, r) => a + r.overtime_hours, 0).toFixed(2);
+              output = rows.length === 0
+                ? { message: `No hours logged in ${bounds.label}.` }
+                : {
+                    period: bounds.label,
+                    overtime_threshold_hours: 44,
+                    team: rows.map((r) => ({ employee: r.name, hours: r.hours, overtime_hours: r.overtime_hours })),
+                    total_hours: totalHours,
+                    total_overtime_hours: totalOt,
+                    note: "Hours only — NorthShift holds no pay rates, so it never computes pay, tax, CPP, or EI. Export a payroll CSV from the Manager Portal for your payroll provider.",
+                  };
+            }
           }
         }
 
@@ -876,7 +1381,7 @@ Deno.serve(async (req) => {
           if (location?.latitude == null || location?.longitude == null) {
             output = { error: "No GPS location was attached to this chat. Ask the employee to enable location services and try again." };
           } else {
-            const { data: worksites, error: wsError } = await supabase.from("worksites").select("id, name, latitude, longitude, radius_meters");
+            const { data: worksites, error: wsError } = await supabase.from("worksites").select("id, name, latitude, longitude, radius_meters").or(worksiteFilter);
             if (wsError || !worksites || worksites.length === 0) {
               output = { error: "No worksites are configured yet." };
             } else {
@@ -917,6 +1422,7 @@ Deno.serve(async (req) => {
           const { data: rows, error } = await supabase
             .from("shifts")
             .select("id, user_id, worksite_id, start_time, end_time, status, claimed_by, notes")
+            .eq("business_id", businessScope)
             .gte("start_time", new Date(fromMs).toISOString())
             .lt("start_time", new Date(toMs).toISOString())
             .order("start_time", { ascending: true })
@@ -924,8 +1430,8 @@ Deno.serve(async (req) => {
           if (error) {
             output = { error: error.message };
           } else {
-            const { data: profs } = await supabase.from("profiles").select("id, full_name");
-            const { data: sites } = await supabase.from("worksites").select("id, name");
+            const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const { data: sites } = await supabase.from("worksites").select("id, name").or(worksiteFilter);
             const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
             const siteMap = new Map((sites || []).map((w: any) => [w.id, w.name]));
             let list = rows || [];
@@ -955,6 +1461,7 @@ Deno.serve(async (req) => {
           const { data: rows, error } = await supabase
             .from("shifts")
             .select("id, worksite_id, start_time, end_time, status, claimed_by, notes")
+            .eq("business_id", businessScope)
             .in("status", ["open", "claim_pending"])
             .gte("start_time", dayStart.toISOString())
             .order("start_time", { ascending: true })
@@ -962,8 +1469,8 @@ Deno.serve(async (req) => {
           if (error) {
             output = { error: error.message };
           } else {
-            const { data: profs } = await supabase.from("profiles").select("id, full_name");
-            const { data: sites } = await supabase.from("worksites").select("id, name");
+            const { data: profs } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
+            const { data: sites } = await supabase.from("worksites").select("id, name").or(worksiteFilter);
             const nameMap = new Map((profs || []).map((p: any) => [p.id, p.full_name || "Unknown"]));
             const siteMap = new Map((sites || []).map((w: any) => [w.id, w.name]));
             const shape = (s: any) => ({
@@ -989,6 +1496,7 @@ Deno.serve(async (req) => {
           const { data, error } = await supabase
             .from("time_logs")
             .select("user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .in("user_id", bizUserIds)
             .gte("clock_in", startIso);
           if (error) {
             output = { error: error.message };
@@ -1012,6 +1520,7 @@ Deno.serve(async (req) => {
           const { data: logs, error } = await supabase
             .from("time_logs")
             .select("id, user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .in("user_id", bizUserIds)
             .gte("clock_in", sinceIso);
           if (error) {
             output = { error: error.message };
@@ -1038,6 +1547,7 @@ Deno.serve(async (req) => {
           const { data: profs, error: pErr } = await supabase
             .from("profiles")
             .select("id, full_name, role, phone, job_title, department, start_date, employment_type, employee_number, primary_worksite_id")
+            .eq("business_id", businessScope)
             .ilike("full_name", `%${args.employee_name}%`)
             .limit(5);
           if (pErr) {
@@ -1081,7 +1591,7 @@ Deno.serve(async (req) => {
             let targetName = "Open shift";
             let failure: string | null = null;
             if (!isOpen) {
-              const { data: emps } = await supabase.from("profiles").select("id, full_name");
+              const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
               const m = matchByName(emps || [], (p: any) => p.full_name || "", empName);
               if (m.kind === "none") failure = `No team member matches "${empName}".`;
               else if (m.kind === "many") failure = `More than one team member matches "${empName}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.`;
@@ -1094,7 +1604,7 @@ Deno.serve(async (req) => {
             let worksiteId: string | null = null;
             let worksiteName = "No worksite";
             if (!failure && args.worksite_name) {
-              const { data: sites } = await supabase.from("worksites").select("id, name");
+              const { data: sites } = await supabase.from("worksites").select("id, name").or(worksiteFilter);
               const sm = (sites || []).find((s: any) => (s.name || "").toLowerCase().includes(String(args.worksite_name).toLowerCase()));
               if (!sm) failure = `No worksite matches "${args.worksite_name}". Sites on file: ${(sites || []).map((s: any) => s.name).join(", ") || "none"}.`;
               else { worksiteId = sm.id; worksiteName = sm.name; }
@@ -1152,7 +1662,7 @@ Deno.serve(async (req) => {
             output = { success: false, error: "Only managers can review claims." };
           } else {
             const decision = args.decision === "denied" ? "denied" : "approved";
-            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
             const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
             if (m.kind !== "one") {
               output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
@@ -1161,7 +1671,8 @@ Deno.serve(async (req) => {
               const { data: claims } = await supabase.from("shifts")
                 .select("id, claimed_by, start_time, end_time")
                 .eq("status", "claim_pending")
-                .eq("claimed_by", target.id);
+                .eq("claimed_by", target.id)
+                .eq("business_id", businessScope);
               let matches = claims || [];
               if (args.date) {
                 const dayInTz = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: callerTz, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
@@ -1188,7 +1699,7 @@ Deno.serve(async (req) => {
             output = { success: false, error: "Only managers can review time off." };
           } else {
             const decision = args.decision === "denied" ? "denied" : "approved";
-            const { data: emps } = await supabase.from("profiles").select("id, full_name");
+            const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
             const m = matchByName(emps || [], (p: any) => p.full_name || "", (args.employee_name || "").trim());
             if (m.kind !== "one") {
               output = { success: false, error: m.kind === "many" ? `More than one team member matches "${args.employee_name}": ${m.values.map((p: any) => p.full_name).join(", ")}. Use the full name.` : `No team member matches "${args.employee_name}".` };
@@ -1198,6 +1709,7 @@ Deno.serve(async (req) => {
                 .select("id, type, start_date, end_date, half_day")
                 .eq("status", "pending")
                 .eq("user_id", target.id)
+                .eq("business_id", businessScope)
                 .order("start_date", { ascending: true });
               let matches = reqs || [];
               if (args.date) matches = matches.filter((r: any) => r.start_date === args.date);
@@ -1224,6 +1736,7 @@ Deno.serve(async (req) => {
             const { data: opens } = await supabase.from("shifts")
               .select("id, start_time, end_time, worksite_id")
               .eq("status", "open")
+              .eq("business_id", businessScope)
               .gte("start_time", new Date(dayStart).toISOString())
               .lt("start_time", new Date(dayStart + 24 * 3600 * 1000).toISOString())
               .order("start_time", { ascending: true });
@@ -1340,6 +1853,43 @@ Deno.serve(async (req) => {
               missing_from_profile: missing,
             };
           }
+        } else if (fn === "get_my_expenses") {
+          const { data, error } = await supabase.from("expenses")
+            .select("type, expense_date, category, amount_cents, merchant, mileage_km, origin, destination, status, reimbursement_status")
+            .eq("user_id", effectiveUserId)
+            .order("expense_date", { ascending: false }).limit(10);
+          const { data: unpaid } = await supabase.from("expenses")
+            .select("amount_cents")
+            .eq("user_id", effectiveUserId).eq("status", "approved").eq("reimbursement_status", "unpaid");
+          if (error) {
+            output = { error: error.message };
+          } else if (!data || data.length === 0) {
+            output = { message: "You have not submitted any expenses yet. The Expenses screen is where you submit them." };
+          } else {
+            const owedCents = (unpaid || []).reduce((a: number, e: any) => a + Number(e.amount_cents), 0);
+            output = {
+              expenses: data.map((e: any) => shapeExpense(e, callerName)),
+              reimbursement_owed_cad: (owedCents / 100).toFixed(2),
+            };
+          }
+        } else if (fn === "get_my_hours") {
+          const startIso = new Date(weekStartMs(Date.now())).toISOString();
+          const { data, error } = await supabase.from("time_logs")
+            .select("clock_in, clock_out")
+            .eq("user_id", effectiveUserId).gte("clock_in", startIso);
+          if (error) {
+            output = { error: error.message };
+          } else {
+            const logs = (data || []).map((l: any) => ({ user_id: effectiveUserId, clock_in: l.clock_in, clock_out: l.clock_out }));
+            const rows = payrollPeriodSummary(logs, Date.now());
+            const week = rows[0] || { hours: 0, overtime_hours: 0 };
+            output = {
+              hours_today: computeTodayHours(logs, Date.now()),
+              hours_this_week: week.hours,
+              overtime_hours_this_week: week.overtime_hours,
+              overtime_threshold_hours: 44,
+            };
+          }
         }
 
 
@@ -1362,6 +1912,8 @@ Deno.serve(async (req) => {
           else if (fn === "review_shift_claim" && output.claim) writeReplies.push(`${output.claim.decision === "denied" ? "Denied" : "Approved"} the shift claim for ${output.claim.employee}, ${output.claim.when}.`);
           else if (fn === "request_time_off" && output.requested) writeReplies.push(`Your ${output.requested.type} request for ${output.requested.dates} is pending manager approval.`);
           else if (fn === "review_time_off" && output.time_off) writeReplies.push(`${output.time_off.decision === "denied" ? "Denied" : "Approved"} ${output.time_off.employee}'s ${output.time_off.type} request for ${output.time_off.dates}.`);
+          else if (fn === "review_expense" && output.expense) writeReplies.push(`${output.expense.decision === "denied" ? "Denied" : "Approved"} ${output.expense.employee}'s ${output.expense.label}.${output.self_approved ? " Note: you approved your own expense — it is flagged as self-approved in the report." : ""}`);
+          else if (fn === "mark_expense_paid" && output.expense) writeReplies.push(`Marked ${output.expense.employee}'s ${output.expense.label} as paid.`);
         }
       }
       if (writeReplies.length > 0) {
