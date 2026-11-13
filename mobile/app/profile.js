@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -255,20 +255,22 @@ export default function ProfileScreen() {
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{(displayName || email || '?').charAt(0).toUpperCase()}</Text>
           </View>
-          <Text style={styles.email}>{email}</Text>
-          <View style={styles.roleBadge}>
-            <Text style={styles.roleBadgeText}>{role.toUpperCase()}</Text>
-          </View>
-          {businessName ? (
-            <View style={styles.bizBox}>
-              <Text style={styles.bizName}>{businessName}</Text>
-              {accountNumber ? <Text style={styles.bizAcct}>Acct #{accountNumber}</Text> : null}
+          <View style={styles.identityText}>
+            <Text style={styles.identityName}>{displayName || email}</Text>
+            {displayName ? <Text style={styles.email}>{email}</Text> : null}
+            <View style={styles.identityMeta}>
+              <View style={styles.roleBadge}>
+                <Text style={styles.roleBadgeText}>{role.toUpperCase()}</Text>
+              </View>
+              {businessName ? <Text style={styles.bizName}>{businessName}{accountNumber ? ` · Acct #${accountNumber}` : ''}</Text> : null}
             </View>
-          ) : null}
+          </View>
         </View>
 
+        <View style={styles.columnsWrap}>
+          <View style={styles.column}>
         {setupMissing ? (
-          <View style={styles.card}>
+          <View style={styles.sectionCard}>
             <Text style={styles.sectionTitle}>Profile fields not set up yet</Text>
             <Text style={styles.sectionNote}>The latest database update has not been applied to this workspace yet. Your manager can run it from the NorthShift setup files.</Text>
           </View>
@@ -276,36 +278,35 @@ export default function ProfileScreen() {
           <>
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Personal</Text>
-              <Field label="First name" value={firstName} onChangeText={setFirstName} placeholder="First name" autoCapitalize="words" />
-              <Field label="Last name" value={lastName} onChangeText={setLastName} placeholder="Last name" autoCapitalize="words" />
-              <Field label="Phone" value={phone} onChangeText={setPhone} placeholder="(416) 555-0100" keyboardType="phone-pad" />
-              <Field label="Date of birth" value={dob} onChangeText={setDob} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" />
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldCell}><Field label="First name" value={firstName} onChangeText={setFirstName} placeholder="First name" autoCapitalize="words" /></View>
+                <View style={styles.fieldCell}><Field label="Last name" value={lastName} onChangeText={setLastName} placeholder="Last name" autoCapitalize="words" /></View>
+              </View>
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldCell}><Field label="Phone" value={phone} onChangeText={setPhone} placeholder="(416) 555-0100" keyboardType="phone-pad" /></View>
+                <View style={styles.fieldCell}><Field label="Date of birth" value={dob} onChangeText={setDob} placeholder="YYYY-MM-DD" keyboardType="numbers-and-punctuation" /></View>
+              </View>
               <Field label="Street address" value={addressLine} onChangeText={setAddressLine} placeholder="123 Main St, Unit 4" autoCapitalize="words" />
-              <Field label="City" value={city} onChangeText={setCity} placeholder="Toronto" autoCapitalize="words" />
-              <Field label="Province" value={province} onChangeText={setProvince} placeholder="Ontario" autoCapitalize="words" />
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldCell}><Field label="City" value={city} onChangeText={setCity} placeholder="Toronto" autoCapitalize="words" /></View>
+                <View style={styles.fieldCell}><Field label="Province" value={province} onChangeText={setProvince} placeholder="Ontario" autoCapitalize="words" /></View>
+              </View>
               <Field label="Postal code" value={postalCode} onChangeText={setPostalCode} placeholder="M1B 2K3" autoCapitalize="characters" />
             </View>
 
             <View style={styles.sectionCard}>
               <Text style={styles.sectionTitle}>Emergency Contacts</Text>
               <Text style={styles.sectionNote}>Who your manager should call in an emergency. Contact 1 is the primary contact.</Text>
-              <Field label="Contact 1 — name" value={ec1Name} onChangeText={setEc1Name} placeholder="Full name" autoCapitalize="words" />
-              <Field label="Contact 1 — relationship" value={ec1Relationship} onChangeText={setEc1Relationship} placeholder="Spouse, parent, sibling..." autoCapitalize="words" />
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldCell}><Field label="Contact 1 — name" value={ec1Name} onChangeText={setEc1Name} placeholder="Full name" autoCapitalize="words" /></View>
+                <View style={styles.fieldCell}><Field label="Contact 1 — relationship" value={ec1Relationship} onChangeText={setEc1Relationship} placeholder="Spouse, parent, sibling..." autoCapitalize="words" /></View>
+              </View>
               <Field label="Contact 1 — phone" value={ec1Phone} onChangeText={setEc1Phone} placeholder="(416) 555-0100" keyboardType="phone-pad" />
-              <Field label="Contact 2 — name (optional)" value={ec2Name} onChangeText={setEc2Name} placeholder="Full name" autoCapitalize="words" />
-              <Field label="Contact 2 — relationship" value={ec2Relationship} onChangeText={setEc2Relationship} placeholder="Spouse, parent, sibling..." autoCapitalize="words" />
+              <View style={styles.fieldRow}>
+                <View style={styles.fieldCell}><Field label="Contact 2 — name (optional)" value={ec2Name} onChangeText={setEc2Name} placeholder="Full name" autoCapitalize="words" /></View>
+                <View style={styles.fieldCell}><Field label="Contact 2 — relationship" value={ec2Relationship} onChangeText={setEc2Relationship} placeholder="Spouse, parent, sibling..." autoCapitalize="words" /></View>
+              </View>
               <Field label="Contact 2 — phone" value={ec2Phone} onChangeText={setEc2Phone} placeholder="(416) 555-0100" keyboardType="phone-pad" />
-            </View>
-
-            <View style={styles.sectionCard}>
-              <Text style={styles.sectionTitle}>Employment</Text>
-              <Text style={styles.sectionNote}>Set by your manager — contact them if anything here looks wrong.</Text>
-              <InfoRow label="Job title" value={jobTitle} />
-              <InfoRow label="Department" value={department} />
-              <InfoRow label="Start date" value={startDate ? new Date(startDate + 'T12:00:00').toLocaleDateString() : ''} />
-              <InfoRow label="Employment type" value={employmentType} />
-              <InfoRow label="Primary worksite" value={worksiteName} />
-              <InfoRow label="Employee #" value={employeeNumber} />
             </View>
 
             <View style={styles.sectionCard}>
@@ -319,6 +320,20 @@ export default function ProfileScreen() {
             </View>
           </>
         )}
+          </View>
+          <View style={styles.column}>
+            {!setupMissing && (
+            <View style={styles.sectionCard}>
+              <Text style={styles.sectionTitle}>Employment</Text>
+              <Text style={styles.sectionNote}>Set by your manager — contact them if anything here looks wrong.</Text>
+              <InfoRow label="Job title" value={jobTitle} />
+              <InfoRow label="Department" value={department} />
+              <InfoRow label="Start date" value={startDate ? new Date(startDate + 'T12:00:00').toLocaleDateString() : ''} />
+              <InfoRow label="Employment type" value={employmentType} />
+              <InfoRow label="Primary worksite" value={worksiteName} />
+              <InfoRow label="Employee #" value={employeeNumber} />
+            </View>
+            )}
 
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Change password</Text>
@@ -358,6 +373,8 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </View>
         </View>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -370,19 +387,24 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
   navButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.sm },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
-  content: { padding: spacing.lg, paddingBottom: spacing.xxl, alignItems: 'center', gap: spacing.lg },
-  card: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, alignItems: 'center', ...elevation.card },
-  sectionCard: { width: '100%', maxWidth: 400, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
+  content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.lg, width: '100%', maxWidth: 840, alignSelf: 'center' },
+  card: { width: '100%', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, flexDirection: 'row', alignItems: 'center', gap: spacing.md, ...elevation.card },
+  sectionCard: { width: '100%', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.xl, ...elevation.card },
+  columnsWrap: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: spacing.lg, alignItems: 'flex-start' },
+  column: { flex: 1, width: '100%', gap: spacing.lg },
+  fieldRow: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: spacing.md },
+  fieldCell: { flex: 1 },
+  identityText: { flex: 1 },
+  identityName: { fontSize: 17, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  identityMeta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' },
   sectionTitle: { fontSize: 16, fontFamily: fontFamily.bold, color: colors.textPrimary, marginBottom: spacing.md },
   sectionNote: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, marginBottom: spacing.md, marginTop: -spacing.sm },
-  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center', marginBottom: spacing.md },
+  avatar: { width: 72, height: 72, borderRadius: 36, backgroundColor: colors.accentSoft, borderWidth: 1, borderColor: colors.accentBorder, justifyContent: 'center', alignItems: 'center' },
   avatarText: { fontSize: 28, fontFamily: fontFamily.bold, color: colors.accent },
   email: { fontSize: 15, color: colors.textPrimary, fontFamily: fontFamily.semibold },
-  roleBadge: { marginTop: spacing.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
+  roleBadge: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 4, paddingHorizontal: 12 },
   roleBadgeText: { ...type.label, color: colors.accent },
-  bizBox: { alignItems: 'center', marginTop: spacing.lg },
-  bizName: { fontSize: 15, fontFamily: fontFamily.semibold, color: colors.textPrimary },
-  bizAcct: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, marginTop: 2 },
+  bizName: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary },
   label: { ...type.label, color: colors.textSecondary, marginBottom: spacing.xs },
   input: { fontFamily: fontFamily.regular, width: '100%', backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textPrimary, marginBottom: spacing.md },
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },

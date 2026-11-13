@@ -48,6 +48,21 @@ function todayStr() {
   const p2 = (n) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
 }
+// ISO date arithmetic on the YYYY-MM-DD strings the report stores.
+// Noon anchor avoids DST edge cases; string comparison stays valid.
+function addDaysIso(iso, n) {
+  const d = new Date(iso + 'T12:00:00');
+  d.setDate(d.getDate() + n);
+  const p2 = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
+function mondayOf(iso) {
+  const d = new Date(iso + 'T12:00:00');
+  const dow = (d.getDay() + 6) % 7; // Monday = 0
+  d.setDate(d.getDate() - dow);
+  const p2 = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p2(d.getMonth() + 1)}-${p2(d.getDate())}`;
+}
 // Strict YYYY-MM-DD check: format AND a real calendar date. Never build a Date
 // from unchecked text and call toISOString on it — an Invalid Date throws.
 function parseDateStrict(s) {
@@ -105,12 +120,16 @@ export default function ExpensesScreen() {
   const [exportMsg, setExportMsg] = useState('');
   const [reportYear, setReportYear] = useState(new Date().getFullYear());
   const [reportMonth, setReportMonth] = useState(new Date().getMonth() + 1);
+  const [reportPeriod, setReportPeriod] = useState('month'); // 'day' | 'week' | 'month'
+  const [reportDay, setReportDay] = useState(todayStr());
+  const [reportWeekStart, setReportWeekStart] = useState(mondayOf(todayStr()));
+  const [collapsedReport, setCollapsedReport] = useState({ breakdown: true, tier: true, filters: true });
   const [reportEmployee, setReportEmployee] = useState('all');
   const [reportCategory, setReportCategory] = useState('all');
   const [reportStatus, setReportStatus] = useState('all');
   const [reportType, setReportType] = useState('all');
   const [reportReimb, setReportReimb] = useState('all');
-  const yearLoadedRef = useRef(null);
+  const yearsLoadedRef = useRef(null); // comma-joined sorted years in yearExpenses
 
   const isManager = myRole === 'manager' || myRole === 'admin';
 
@@ -136,7 +155,7 @@ export default function ExpensesScreen() {
   };
 
   useEffect(() => { init(); }, []);
-  useEffect(() => { if (isManager && businessId && yearLoadedRef.current !== reportYear) loadYearExpenses(businessId, reportYear); }, [reportYear]);
+  useEffect(() => { if (isManager && businessId) { const years = periodYears(); if (yearsLoadedRef.current !== [...years].sort().join(',')) loadReportYears(businessId, years); } }, [reportPeriod, reportDay, reportWeekStart, reportYear]);
 
   const init = async () => {
     const { data: { session } } = await supabase.auth.getSession();
@@ -151,7 +170,7 @@ export default function ExpensesScreen() {
     if ((role === 'manager' || role === 'admin') && bizId) {
       await loadPeople();
       await loadTeamExpenses(bizId);
-      await loadYearExpenses(bizId, new Date().getFullYear());
+      await loadReportYears(bizId, [new Date().getFullYear()]);
     }
     setLoading(false);
   };
@@ -183,7 +202,7 @@ export default function ExpensesScreen() {
     setPendingQueue(data || []);
   };
 
-  const loadYearExpenses = async (bizId, year) => {
+  const fetchYearExpenses = async (bizId, year) => {
     const { data } = await supabase
       .from('expenses')
       .select(EXPENSE_COLUMNS)
@@ -191,14 +210,32 @@ export default function ExpensesScreen() {
       .gte('expense_date', `${year}-01-01`)
       .lte('expense_date', `${year}-12-31`)
       .order('expense_date', { ascending: false });
-    setYearExpenses(data || []);
-    yearLoadedRef.current = year;
+    return data || [];
+  };
+
+  // Years the selected report period touches: one, except a week
+  // spanning New Year, which needs both years loaded.
+  const periodYears = () => {
+    if (reportPeriod === 'day') return [Number(reportDay.slice(0, 4))];
+    if (reportPeriod === 'week') {
+      const y1 = Number(reportWeekStart.slice(0, 4));
+      const y2 = Number(addDaysIso(reportWeekStart, 6).slice(0, 4));
+      return y1 === y2 ? [y1] : [y1, y2];
+    }
+    return [reportYear];
+  };
+
+  const loadReportYears = async (bizId, years) => {
+    const parts = [];
+    for (const y of years) parts.push(...(await fetchYearExpenses(bizId, y)));
+    setYearExpenses(parts);
+    yearsLoadedRef.current = [...years].sort().join(',');
   };
 
   const reloadManagerData = async () => {
     if (!isManager || !businessId) return;
     await loadTeamExpenses(businessId);
-    await loadYearExpenses(businessId, reportYear);
+    await loadReportYears(businessId, periodYears());
   };
 
   const nameOf = (id) => {
@@ -415,13 +452,25 @@ export default function ExpensesScreen() {
     setBusyId(null);
   };
 
-  const prevMonth = () => {
-    if (reportMonth === 1) { setReportMonth(12); setReportYear(reportYear - 1); }
+  const prevPeriod = () => {
+    if (reportPeriod === 'day') setReportDay((d) => addDaysIso(d, -1));
+    else if (reportPeriod === 'week') setReportWeekStart((w) => addDaysIso(w, -7));
+    else if (reportMonth === 1) { setReportMonth(12); setReportYear(reportYear - 1); }
     else setReportMonth(reportMonth - 1);
   };
-  const nextMonth = () => {
-    if (reportMonth === 12) { setReportMonth(1); setReportYear(reportYear + 1); }
+  const nextPeriod = () => {
+    if (reportPeriod === 'day') setReportDay((d) => addDaysIso(d, 1));
+    else if (reportPeriod === 'week') setReportWeekStart((w) => addDaysIso(w, 7));
+    else if (reportMonth === 12) { setReportMonth(1); setReportYear(reportYear + 1); }
     else setReportMonth(reportMonth + 1);
+  };
+  // Switching period jumps to the current day / week / month — the
+  // predictable anchor for generating a fresh report.
+  const setPeriod = (p) => {
+    setReportPeriod(p);
+    if (p === 'day') setReportDay(todayStr());
+    else if (p === 'week') setReportWeekStart(mondayOf(todayStr()));
+    else { setReportYear(new Date().getFullYear()); setReportMonth(new Date().getMonth() + 1); }
   };
 
   const exportReportCsv = async () => {
@@ -441,7 +490,7 @@ export default function ExpensesScreen() {
       }));
       if (rows.length === 0) { setExportMsg('Nothing to export for these filters.'); return; }
       const csv = buildExpenseCsv(rows);
-      const filename = `northshift-expenses-${reportKey}.csv`;
+      const filename = `northshift-expenses-${periodKey}.csv`;
       if (Platform.OS === 'web') {
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -477,7 +526,7 @@ export default function ExpensesScreen() {
       '<tr><td>' + escHtml(e.expense_date) + '</td><td>' + escHtml(nameOf(e.user_id)) + '</td><td>' + escHtml(e.type) + '</td><td>' + escHtml(e.category) + '</td><td>' + escHtml(e.merchant || '') + '</td><td>' + (splitAmount(e) / 100).toFixed(2) + '</td><td>' + escHtml(e.status) + '</td><td>' + escHtml(e.reimbursement_status) + '</td><td>' + (e.status === 'approved' && e.reviewed_by === e.user_id ? 'self-approved' : '') + '</td></tr>'
     )).join('');
     win.document.write(
-      '<!doctype html><html><head><title>NorthShift Expense Report &mdash; ' + escHtml(monthName(reportMonth)) + ' ' + reportYear + '</title>' +
+      '<!doctype html><html><head><title>NorthShift Expense Report &mdash; ' + escHtml(periodLabel) + '</title>' +
       '<style>body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#1c1917}' +
       '.sheet{max-width:900px;margin:32px auto;padding:24px}' +
       '.brand{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#0F766E;font-weight:700}' +
@@ -485,8 +534,8 @@ export default function ExpensesScreen() {
       'table{width:100%;border-collapse:collapse;font-size:13px}' +
       'th,td{border:1px solid #d6d3d1;padding:6px 8px;text-align:left}th{background:#f5f5f4}</style></head><body>' +
       '<div class="sheet"><div class="brand">NorthShift</div>' +
-      '<h1>Expense Report &mdash; ' + escHtml(monthName(reportMonth)) + ' ' + reportYear + '</h1>' +
-      '<p class="totals">Approved ' + escHtml(fmtCents(totalApproved)) + ' &middot; Pending ' + escHtml(fmtCents(totalPending)) + ' &middot; Reimbursement due ' + escHtml(fmtCents(reimbDue)) + ' &middot; Mileage ' + monthMileageKm.toFixed(1) + ' km ' + escHtml(fmtCents(monthMileageAmt)) + ' &middot; Denied ' + escHtml(fmtCents(totalDenied)) + '</p>' +
+      '<h1>Expense Report &mdash; ' + escHtml(periodLabel) + '</h1>' +
+      '<p class="totals">Approved ' + escHtml(fmtCents(totalApproved)) + ' &middot; Pending ' + escHtml(fmtCents(totalPending)) + ' &middot; Reimbursement due ' + escHtml(fmtCents(reimbDue)) + ' &middot; Mileage ' + periodMileageKm.toFixed(1) + ' km ' + escHtml(fmtCents(periodMileageAmt)) + ' &middot; Denied ' + escHtml(fmtCents(totalDenied)) + '</p>' +
       '<table><tr><th>Date</th><th>Employee</th><th>Type</th><th>Category</th><th>Merchant</th><th>Amount (CAD)</th><th>Status</th><th>Reimbursement</th><th>Flags</th></tr>' + rowsHtml + '</table>' +
       '<p class="totals">Mileage amounts use the year-to-date 5,000 km tier split.</p></div>' +
       '<script>window.onload = function () { window.focus(); window.print(); };' +
@@ -512,23 +561,35 @@ export default function ExpensesScreen() {
   const showEstimate = kind === 'mileage' && Number.isFinite(kmPreview) && kmPreview > 0 && datePreview;
 
   // ---- Manager report derivations (computed from loaded rows, no extra queries) ----
-  const reportKey = `${reportYear}-${String(reportMonth).padStart(2, '0')}`;
-  const monthRows = yearExpenses.filter((e) => e.expense_date.slice(0, 7) === reportKey);
+  const periodLabel = reportPeriod === 'day' ? fmtDate(reportDay) : reportPeriod === 'week' ? `${fmtDate(reportWeekStart)} – ${fmtDate(addDaysIso(reportWeekStart, 6))}` : `${monthName(reportMonth)} ${reportYear}`;
+  const periodKey = reportPeriod === 'day' ? reportDay : reportPeriod === 'week' ? `${reportWeekStart}_week` : `${reportYear}-${String(reportMonth).padStart(2, '0')}`;
+  const periodYear = reportPeriod === 'month' ? reportYear : Number((reportPeriod === 'day' ? reportDay : reportWeekStart).slice(0, 4));
+  const periodRows = yearExpenses.filter((e) => {
+    if (reportPeriod === 'day') return e.expense_date === reportDay;
+    if (reportPeriod === 'week') return e.expense_date >= reportWeekStart && e.expense_date <= addDaysIso(reportWeekStart, 6);
+    return e.expense_date.slice(0, 7) === `${reportYear}-${String(reportMonth).padStart(2, '0')}`;
+  });
   const approvedMileageYear = yearExpenses.filter((e) => e.type === 'mileage' && e.status === 'approved');
-  const splitByEntry = mileageSplitByEntry(approvedMileageYear, reportYear);
+  // Tier splits are per calendar year: compute one map per loaded year
+  // and merge, so a New-Year-spanning week splits each entry in its
+  // own year. mileageSplitByEntry filters by year internally.
+  const splitByEntry = new Map();
+  for (const y of [...new Set(yearExpenses.map((e) => Number(e.expense_date.slice(0, 4))))]) {
+    for (const [k, v] of mileageSplitByEntry(approvedMileageYear, y)) splitByEntry.set(k, v);
+  }
   // Report mileage amounts are tier-split exact; pending mileage falls back to
   // the stored estimate (it has no split until approved).
   const splitAmount = (e) => (e.type === 'mileage' ? (splitByEntry.get(e.id)?.amountCents ?? e.amount_cents) : e.amount_cents);
   const sumRows = (rows, fn) => rows.reduce((t, e) => t + fn(e), 0);
-  const totalApproved = sumRows(monthRows.filter((e) => e.status === 'approved'), splitAmount);
-  const totalPending = sumRows(monthRows.filter((e) => e.status === 'pending'), splitAmount);
-  const totalDenied = sumRows(monthRows.filter((e) => e.status === 'denied'), splitAmount);
-  const reimbDue = sumRows(monthRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid'), splitAmount);
-  const monthMileageRows = monthRows.filter((e) => e.type === 'mileage' && e.status === 'approved');
-  const monthMileageKm = sumRows(monthMileageRows, (e) => Number(e.mileage_km) || 0);
-  const monthMileageAmt = sumRows(monthMileageRows, splitAmount);
-  const tierRows = mileageTierSplit(approvedMileageYear, reportYear);
-  const filteredRows = monthRows.filter((e) =>
+  const totalApproved = sumRows(periodRows.filter((e) => e.status === 'approved'), splitAmount);
+  const totalPending = sumRows(periodRows.filter((e) => e.status === 'pending'), splitAmount);
+  const totalDenied = sumRows(periodRows.filter((e) => e.status === 'denied'), splitAmount);
+  const reimbDue = sumRows(periodRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid'), splitAmount);
+  const periodMileageRows = periodRows.filter((e) => e.type === 'mileage' && e.status === 'approved');
+  const periodMileageKm = sumRows(periodMileageRows, (e) => Number(e.mileage_km) || 0);
+  const periodMileageAmt = sumRows(periodMileageRows, splitAmount);
+  const tierRows = mileageTierSplit(approvedMileageYear, periodYear);
+  const filteredRows = periodRows.filter((e) =>
     (reportEmployee === 'all' || e.user_id === reportEmployee) &&
     (reportCategory === 'all' || e.category === reportCategory) &&
     (reportStatus === 'all' || e.status === reportStatus) &&
@@ -536,10 +597,18 @@ export default function ExpensesScreen() {
     (reportReimb === 'all' || e.reimbursement_status === reportReimb)
   );
   const dueShown = filteredRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid');
+  const activeFilters = [];
+  if (reportEmployee !== 'all') activeFilters.push(nameOf(reportEmployee));
+  if (reportCategory !== 'all') activeFilters.push(reportCategory);
+  if (reportStatus !== 'all') activeFilters.push(reportStatus);
+  if (reportType !== 'all') activeFilters.push(reportType);
+  if (reportReimb !== 'all') activeFilters.push(reportReimb);
+  const filterSummary = activeFilters.length === 0 ? 'All expenses' : activeFilters.join(' · ');
+  const toggleReport = (key) => setCollapsedReport((prev) => ({ ...prev, [key]: !prev[key] }));
   const byCategory = {};
-  for (const e of monthRows) { const c = byCategory[e.category] || { count: 0, total: 0 }; c.count += 1; c.total += splitAmount(e); byCategory[e.category] = c; }
+  for (const e of periodRows) { const c = byCategory[e.category] || { count: 0, total: 0 }; c.count += 1; c.total += splitAmount(e); byCategory[e.category] = c; }
   const byEmployee = {};
-  for (const e of monthRows) {
+  for (const e of periodRows) {
     const b = byEmployee[e.user_id] || { money: 0, mileageKm: 0, mileageAmt: 0 };
     if (e.type === 'mileage') { b.mileageKm += Number(e.mileage_km) || 0; b.mileageAmt += splitAmount(e); }
     else { b.money += e.amount_cents; }
@@ -674,7 +743,7 @@ export default function ExpensesScreen() {
                       <Text style={[styles.chipText, territory && styles.chipTextActive]}>Driving in Yukon / NWT / Nunavut (+4¢/km)</Text>
                     </TouchableOpacity>
                     {showEstimate && (
-                      <Text style={styles.cardText}>Estimated {fmtCents(mileageAmountCents(kmPreview, datePreview.year, territory))} at {mileageRateCents(datePreview.year, territory)}¢/km. The monthly report applies the 5,000 km yearly tier exactly.</Text>
+                      <Text style={styles.cardText}>Estimated {fmtCents(mileageAmountCents(kmPreview, datePreview.year, territory))} at {mileageRateCents(datePreview.year, territory)}¢/km. The expense report applies the 5,000 km yearly tier exactly.</Text>
                     )}
                   </>
                 )}
@@ -730,12 +799,19 @@ export default function ExpensesScreen() {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Expense Report</Text>
                 <View style={styles.card}>
+                  <View style={styles.chipRow}>
+                    {[['day', 'Day'], ['week', 'Week'], ['month', 'Month']].map(([v, l]) => (
+                      <TouchableOpacity key={v} style={[styles.chip, reportPeriod === v && styles.chipActive]} onPress={() => setPeriod(v)}>
+                        <Text style={[styles.chipText, reportPeriod === v && styles.chipTextActive]}>{l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                   <View style={styles.monthRow}>
-                    <TouchableOpacity style={styles.smallOutline} onPress={prevMonth}>
+                    <TouchableOpacity style={styles.smallOutline} onPress={prevPeriod}>
                       <Text style={styles.smallOutlineText}>← Prev</Text>
                     </TouchableOpacity>
-                    <Text style={styles.monthLabel}>{monthName(reportMonth)} {reportYear}</Text>
-                    <TouchableOpacity style={styles.smallOutline} onPress={nextMonth}>
+                    <Text style={styles.monthLabel}>{periodLabel}</Text>
+                    <TouchableOpacity style={styles.smallOutline} onPress={nextPeriod}>
                       <Text style={styles.smallOutlineText}>Next →</Text>
                     </TouchableOpacity>
                   </View>
@@ -743,97 +819,63 @@ export default function ExpensesScreen() {
                     <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalApproved)}</Text><Text style={styles.totalLabel}>Approved</Text></View>
                     <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalPending)}</Text><Text style={styles.totalLabel}>Pending</Text></View>
                     <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(reimbDue)}</Text><Text style={styles.totalLabel}>Reimbursement due</Text></View>
-                    <View style={styles.totalBox}><Text style={styles.totalValue}>{monthMileageKm.toFixed(1)} km</Text><Text style={styles.totalLabel}>Mileage · {fmtCents(monthMileageAmt)}</Text></View>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{periodMileageKm.toFixed(1)} km</Text><Text style={styles.totalLabel}>Mileage · {fmtCents(periodMileageAmt)}</Text></View>
                     <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalDenied)}</Text><Text style={styles.totalLabel}>Denied</Text></View>
                   </View>
                   <Text style={styles.cardText}>Mileage amounts use the year-to-date 5,000 km tier split — the payroll-exact number.</Text>
                 </View>
 
                 <View style={styles.card}>
-                  <Text style={styles.cardTitle}>By category</Text>
-                  {Object.keys(byCategory).length === 0 ? (
-                    <Text style={styles.emptyText}>Nothing this month.</Text>
-                  ) : Object.entries(byCategory).sort((a, b) => b[1].total - a[1].total).map(([cat, v]) => (
-                    <View key={cat} style={styles.reportRow}>
-                      <Text style={styles.reportRowLabel}>{cat} · {v.count}</Text>
-                      <Text style={styles.reportRowValue}>{fmtCents(v.total)}</Text>
-                    </View>
-                  ))}
+                  <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleReport('breakdown')}>
+                    <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Breakdown</Text>
+                    <Text style={styles.chevron}>{collapsedReport.breakdown ? '▸' : '▾'}</Text>
+                  </TouchableOpacity>
+                  {!collapsedReport.breakdown && (
+                    <>
+                      <Text style={styles.subhead}>By category</Text>
+                      {Object.keys(byCategory).length === 0 ? (
+                        <Text style={styles.emptyText}>Nothing in this period.</Text>
+                      ) : Object.entries(byCategory).sort((a, b) => b[1].total - a[1].total).map(([cat, v]) => (
+                        <View key={cat} style={styles.reportRow}>
+                          <Text style={styles.reportRowLabel}>{cat} · {v.count}</Text>
+                          <Text style={styles.reportRowValue}>{fmtCents(v.total)}</Text>
+                        </View>
+                      ))}
+                      <Text style={styles.subhead}>By employee</Text>
+                      {Object.keys(byEmployee).length === 0 ? (
+                        <Text style={styles.emptyText}>Nothing in this period.</Text>
+                      ) : Object.entries(byEmployee).map(([uid, b]) => (
+                        <View key={uid} style={styles.reportRow}>
+                          <Text style={styles.reportRowLabel}>{nameOf(uid)}</Text>
+                          <Text style={styles.reportRowValue}>{fmtCents(b.money)} money{b.mileageKm > 0 ? ` · ${b.mileageKm.toFixed(1)} km ${fmtCents(b.mileageAmt)}` : ''}</Text>
+                        </View>
+                      ))}
+                    </>
+                  )}
                 </View>
 
                 <View style={styles.card}>
-                  <Text style={styles.cardTitle}>By employee</Text>
-                  {Object.keys(byEmployee).length === 0 ? (
-                    <Text style={styles.emptyText}>Nothing this month.</Text>
-                  ) : Object.entries(byEmployee).map(([uid, b]) => (
-                    <View key={uid} style={styles.reportRow}>
-                      <Text style={styles.reportRowLabel}>{nameOf(uid)}</Text>
-                      <Text style={styles.reportRowValue}>{fmtCents(b.money)} money{b.mileageKm > 0 ? ` · ${b.mileageKm.toFixed(1)} km ${fmtCents(b.mileageAmt)}` : ''}</Text>
-                    </View>
-                  ))}
+                  <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleReport('tier')}>
+                    <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Mileage tier split · {periodYear}</Text>
+                    <Text style={styles.chevron}>{collapsedReport.tier ? '▸' : '▾'}</Text>
+                  </TouchableOpacity>
+                  {!collapsedReport.tier && (
+                    <>
+                      {tierRows.length === 0 ? (
+                        <Text style={styles.emptyText}>No approved mileage this year.</Text>
+                      ) : tierRows.map((t) => (
+                        <View key={t.user_id} style={styles.reportRow}>
+                          <Text style={styles.reportRowLabel}>{nameOf(t.user_id)}</Text>
+                          <Text style={styles.reportRowValue}>{t.kmUnder.toFixed(1)} km @ tier 1 = {fmtCents(t.tier1Cents)}{t.kmOver > 0 ? ` · ${t.kmOver.toFixed(1)} km @ tier 2 = ${fmtCents(t.tier2Cents)}` : ''}</Text>
+                        </View>
+                      ))}
+                    </>
+                  )}
                 </View>
 
                 <View style={styles.card}>
-                  <Text style={styles.cardTitle}>Mileage tier split · {reportYear} year to date</Text>
-                  {tierRows.length === 0 ? (
-                    <Text style={styles.emptyText}>No approved mileage this year.</Text>
-                  ) : tierRows.map((t) => (
-                    <View key={t.user_id} style={styles.reportRow}>
-                      <Text style={styles.reportRowLabel}>{nameOf(t.user_id)}</Text>
-                      <Text style={styles.reportRowValue}>{t.kmUnder.toFixed(1)} km @ tier 1 = {fmtCents(t.tier1Cents)}{t.kmOver > 0 ? ` · ${t.kmOver.toFixed(1)} km @ tier 2 = ${fmtCents(t.tier2Cents)}` : ''}</Text>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={styles.card}>
-                  <Text style={styles.cardTitle}>All expenses · {monthName(reportMonth)} {reportYear}</Text>
-                  <Text style={styles.label}>Employee</Text>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowH}>
-                    <TouchableOpacity style={[styles.chip, reportEmployee === 'all' && styles.chipActive]} onPress={() => setReportEmployee('all')}>
-                      <Text style={[styles.chipText, reportEmployee === 'all' && styles.chipTextActive]}>Everyone</Text>
-                    </TouchableOpacity>
-                    {people.map((p) => (
-                      <TouchableOpacity key={p.id} style={[styles.chip, reportEmployee === p.id && styles.chipActive]} onPress={() => setReportEmployee(p.id)}>
-                        <Text style={[styles.chipText, reportEmployee === p.id && styles.chipTextActive]}>{p.id === myId ? 'Me' : (p.full_name || 'Unknown')}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                  <Text style={styles.label}>Category</Text>
-                  <View style={styles.chipRow}>
-                    <TouchableOpacity style={[styles.chip, reportCategory === 'all' && styles.chipActive]} onPress={() => setReportCategory('all')}>
-                      <Text style={[styles.chipText, reportCategory === 'all' && styles.chipTextActive]}>All</Text>
-                    </TouchableOpacity>
-                    {[...CATEGORIES, MILEAGE_CATEGORY].map((c) => (
-                      <TouchableOpacity key={c} style={[styles.chip, reportCategory === c && styles.chipActive]} onPress={() => setReportCategory(c)}>
-                        <Text style={[styles.chipText, reportCategory === c && styles.chipTextActive]}>{c}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={styles.label}>Status</Text>
-                  <View style={styles.chipRow}>
-                    {[['all', 'All'], ['pending', 'Pending'], ['approved', 'Approved'], ['denied', 'Denied']].map(([v, l]) => (
-                      <TouchableOpacity key={v} style={[styles.chip, reportStatus === v && styles.chipActive]} onPress={() => setReportStatus(v)}>
-                        <Text style={[styles.chipText, reportStatus === v && styles.chipTextActive]}>{l}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={styles.label}>Type</Text>
-                  <View style={styles.chipRow}>
-                    {[['all', 'All'], ['expense', 'Expense'], ['mileage', 'Mileage']].map(([v, l]) => (
-                      <TouchableOpacity key={v} style={[styles.chip, reportType === v && styles.chipActive]} onPress={() => setReportType(v)}>
-                        <Text style={[styles.chipText, reportType === v && styles.chipTextActive]}>{l}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={styles.label}>Reimbursement</Text>
-                  <View style={styles.chipRow}>
-                    {[['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid']].map(([v, l]) => (
-                      <TouchableOpacity key={v} style={[styles.chip, reportReimb === v && styles.chipActive]} onPress={() => setReportReimb(v)}>
-                        <Text style={[styles.chipText, reportReimb === v && styles.chipTextActive]}>{l}</Text>
-                      </TouchableOpacity>
-                    ))}
-                  </View>
-                  <Text style={styles.cardText}>Showing {filteredRows.length} of {monthRows.length} expenses.</Text>
+                  <Text style={styles.cardTitle}>Expenses · {periodLabel}</Text>
+                  <Text style={styles.cardText}>Showing {filteredRows.length} of {periodRows.length} expenses.</Text>
                   <View style={styles.docActions}>
                     <TouchableOpacity style={styles.smallPrimary} onPress={exportReportCsv}>
                       <Text style={styles.smallPrimaryText}>Export CSV</Text>
@@ -850,6 +892,63 @@ export default function ExpensesScreen() {
                     )}
                   </View>
                   {exportMsg ? <Text style={styles.cardText}>{exportMsg}</Text> : null}
+                </View>
+
+                <View style={styles.card}>
+                  <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleReport('filters')}>
+                    <Text style={[styles.cardTitle, { marginBottom: 0 }]}>Filters · {filterSummary}</Text>
+                    <Text style={styles.chevron}>{collapsedReport.filters ? '▸' : '▾'}</Text>
+                  </TouchableOpacity>
+                  {!collapsedReport.filters && (
+                    <>
+                      <Text style={styles.label}>Employee</Text>
+                      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowH}>
+                        <TouchableOpacity style={[styles.chip, reportEmployee === 'all' && styles.chipActive]} onPress={() => setReportEmployee('all')}>
+                          <Text style={[styles.chipText, reportEmployee === 'all' && styles.chipTextActive]}>Everyone</Text>
+                        </TouchableOpacity>
+                        {people.map((p) => (
+                          <TouchableOpacity key={p.id} style={[styles.chip, reportEmployee === p.id && styles.chipActive]} onPress={() => setReportEmployee(p.id)}>
+                            <Text style={[styles.chipText, reportEmployee === p.id && styles.chipTextActive]}>{p.id === myId ? 'Me' : (p.full_name || 'Unknown')}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <Text style={styles.label}>Category</Text>
+                      <View style={styles.chipRow}>
+                        <TouchableOpacity style={[styles.chip, reportCategory === 'all' && styles.chipActive]} onPress={() => setReportCategory('all')}>
+                          <Text style={[styles.chipText, reportCategory === 'all' && styles.chipTextActive]}>All</Text>
+                        </TouchableOpacity>
+                        {[...CATEGORIES, MILEAGE_CATEGORY].map((c) => (
+                          <TouchableOpacity key={c} style={[styles.chip, reportCategory === c && styles.chipActive]} onPress={() => setReportCategory(c)}>
+                            <Text style={[styles.chipText, reportCategory === c && styles.chipTextActive]}>{c}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={styles.label}>Status</Text>
+                      <View style={styles.chipRow}>
+                        {[['all', 'All'], ['pending', 'Pending'], ['approved', 'Approved'], ['denied', 'Denied']].map(([v, l]) => (
+                          <TouchableOpacity key={v} style={[styles.chip, reportStatus === v && styles.chipActive]} onPress={() => setReportStatus(v)}>
+                            <Text style={[styles.chipText, reportStatus === v && styles.chipTextActive]}>{l}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={styles.label}>Type</Text>
+                      <View style={styles.chipRow}>
+                        {[['all', 'All'], ['expense', 'Expense'], ['mileage', 'Mileage']].map(([v, l]) => (
+                          <TouchableOpacity key={v} style={[styles.chip, reportType === v && styles.chipActive]} onPress={() => setReportType(v)}>
+                            <Text style={[styles.chipText, reportType === v && styles.chipTextActive]}>{l}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                      <Text style={styles.label}>Reimbursement</Text>
+                      <View style={styles.chipRow}>
+                        {[['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid']].map(([v, l]) => (
+                          <TouchableOpacity key={v} style={[styles.chip, reportReimb === v && styles.chipActive]} onPress={() => setReportReimb(v)}>
+                            <Text style={[styles.chipText, reportReimb === v && styles.chipTextActive]}>{l}</Text>
+                          </TouchableOpacity>
+                        ))}
+                      </View>
+                    </>
+                  )}
                 </View>
 
                 {filteredRows.length === 0 ? (
@@ -948,6 +1047,9 @@ const styles = StyleSheet.create({
   totalValue: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
   totalLabel: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
   reportRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, paddingVertical: spacing.xs },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 44 },
+  chevron: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  subhead: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary, marginTop: spacing.md, marginBottom: spacing.xs },
   reportRowLabel: { flex: 1, fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary },
   reportRowValue: { fontFamily: fontFamily.semibold, fontSize: 13, color: colors.textPrimary, textAlign: 'right' },
 });
