@@ -627,27 +627,6 @@ export default function ManagerDashboard() {
         </View>
       )}
 
-      {userRole === 'admin' && (
-        <View style={styles.adminCard}>
-          <View>
-            <Text style={styles.adminCardTitle}>Administration</Text>
-            <Text style={styles.adminCardText}>Add managers, manage roles and access.</Text>
-          </View>
-          <View style={{ gap: 8 }}>
-            <Link href="/users" asChild>
-              <TouchableOpacity style={styles.adminCardButton}>
-                    <Text style={styles.adminCardButtonText}>Manage Users →</Text>
-              </TouchableOpacity>
-            </Link>
-            <Link href="/subscription" asChild>
-              <TouchableOpacity style={styles.adminCardButton}>
-                <Text style={styles.adminCardButtonText}>Subscription →</Text>
-              </TouchableOpacity>
-            </Link>
-          </View>
-        </View>
-      )}
-
       {/* Pinned filter bar: always visible above the content, so the AI
           tab can never hide the only way back to the lists. */}
       <View style={styles.filterBar}>
@@ -803,6 +782,24 @@ export default function ManagerDashboard() {
           </View>
         </View>
         <View style={styles.column}>
+          {userRole === 'admin' && (
+            <View style={styles.otCard}>
+              <Text style={styles.otTitle}>Administration</Text>
+              <Text style={styles.otClear}>Add managers, manage roles and access.</Text>
+              <View style={styles.adminBtnRow}>
+                <Link href="/users" asChild>
+                  <TouchableOpacity style={styles.adminCardButton}>
+                    <Text style={styles.adminCardButtonText}>Manage Users →</Text>
+                  </TouchableOpacity>
+                </Link>
+                <Link href="/subscription" asChild>
+                  <TouchableOpacity style={styles.adminCardButton}>
+                    <Text style={styles.adminCardButtonText}>Subscription →</Text>
+                  </TouchableOpacity>
+                </Link>
+              </View>
+            </View>
+          )}
       <View style={styles.otCard}>
         <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleTool('schedule')}>
           <Text style={[styles.otTitle, { marginBottom: 0 }]}>Build Schedule</Text>
@@ -1169,9 +1166,7 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   navButton: { ...buttons.glass },
   navButtonText: { color: colors.textPrimary, fontFamily: fontFamily.semibold, fontSize: 13 },
-  adminCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.lg, padding: spacing.lg, marginHorizontal: spacing.lg, marginTop: spacing.md, ...elevation.card },
-  adminCardTitle: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
-  adminCardText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
+  adminBtnRow: { flexDirection: 'row', gap: 8, marginTop: spacing.md, flexWrap: 'wrap' },
   adminCardButton: { ...buttons.compact },
   adminCardButtonText: { ...buttons.compactText },
   filterBar: { flexDirection: 'row', paddingVertical: spacing.md, paddingHorizontal: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center', backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
