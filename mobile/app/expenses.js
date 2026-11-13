@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -7,7 +7,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File } from 'expo-file-system';
 import { supabase } from '../lib/supabase';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
-import { buildReceiptPath, formatFileSize, mileageRateCents, mileageAmountCents } from '../supabase/functions/hr-ai-bot/logic';
+import { buildReceiptPath, formatFileSize, mileageRateCents, mileageAmountCents, mileageTierSplit, mileageSplitByEntry, buildExpenseCsv } from '../supabase/functions/hr-ai-bot/logic';
 
 const BUCKET = 'expense-receipts';
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -67,6 +67,17 @@ function parseMoneyCents(s) {
 function fmtCents(c) {
   return '$' + (c / 100).toFixed(2);
 }
+function fmtDate(iso) {
+  return new Date(iso + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function monthName(m) {
+  return MONTH_NAMES[m - 1] || '';
+}
+function escHtml(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+const EXPENSE_COLUMNS = 'id, user_id, type, expense_date, category, amount_cents, merchant, note, receipt_path, mileage_km, mileage_rate_cents, origin, destination, status, reviewed_by, review_note, reimbursement_status, created_at';
 function statusBadge(status) {
   if (status === 'approved') return { label: 'APPROVED', bg: colors.successSoft || colors.accentSoft, fg: colors.success };
   if (status === 'denied') return { label: 'DENIED', bg: colors.surface, fg: colors.danger };
@@ -85,6 +96,23 @@ export default function ExpensesScreen() {
   const [picking, setPicking] = useState(false);
   const [busyId, setBusyId] = useState(null);
   const [confirmingDeleteId, setConfirmingDeleteId] = useState(null);
+  const [myRole, setMyRole] = useState('employee');
+  const [people, setPeople] = useState([]);
+  const [pendingQueue, setPendingQueue] = useState([]);
+  const [yearExpenses, setYearExpenses] = useState([]);
+  const [reviewNotes, setReviewNotes] = useState({});
+  const [confirmMarkAllPaid, setConfirmMarkAllPaid] = useState(false);
+  const [exportMsg, setExportMsg] = useState('');
+  const [reportYear, setReportYear] = useState(new Date().getFullYear());
+  const [reportMonth, setReportMonth] = useState(new Date().getMonth() + 1);
+  const [reportEmployee, setReportEmployee] = useState('all');
+  const [reportCategory, setReportCategory] = useState('all');
+  const [reportStatus, setReportStatus] = useState('all');
+  const [reportType, setReportType] = useState('all');
+  const [reportReimb, setReportReimb] = useState('all');
+  const yearLoadedRef = useRef(null);
+
+  const isManager = myRole === 'manager' || myRole === 'admin';
 
   // Form state.
   const [kind, setKind] = useState('expense'); // 'expense' | 'mileage'
@@ -108,14 +136,23 @@ export default function ExpensesScreen() {
   };
 
   useEffect(() => { init(); }, []);
+  useEffect(() => { if (isManager && businessId && yearLoadedRef.current !== reportYear) loadYearExpenses(businessId, reportYear); }, [reportYear]);
 
   const init = async () => {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
     setMyId(session.user.id);
-    const { data: me } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
-    if (me) setBusinessId(me.business_id || null);
+    const { data: me } = await supabase.from('profiles').select('role, business_id').eq('id', session.user.id).single();
+    const role = me?.role || 'employee';
+    const bizId = me?.business_id || null;
+    setMyRole(role);
+    setBusinessId(bizId);
     await loadExpenses(session.user.id);
+    if ((role === 'manager' || role === 'admin') && bizId) {
+      await loadPeople();
+      await loadTeamExpenses(bizId);
+      await loadYearExpenses(bizId, new Date().getFullYear());
+    }
     setLoading(false);
   };
 
@@ -129,6 +166,45 @@ export default function ExpensesScreen() {
     if (error) { setSetupMissing(true); setExpenses([]); return; }
     setSetupMissing(false);
     setExpenses(data || []);
+  };
+
+  const loadPeople = async () => {
+    const { data } = await supabase.from('profiles').select('id, full_name').order('full_name', { ascending: true });
+    if (data) setPeople(data);
+  };
+
+  const loadTeamExpenses = async (bizId) => {
+    const { data } = await supabase
+      .from('expenses')
+      .select(EXPENSE_COLUMNS)
+      .eq('business_id', bizId)
+      .eq('status', 'pending')
+      .order('created_at', { ascending: true });
+    setPendingQueue(data || []);
+  };
+
+  const loadYearExpenses = async (bizId, year) => {
+    const { data } = await supabase
+      .from('expenses')
+      .select(EXPENSE_COLUMNS)
+      .eq('business_id', bizId)
+      .gte('expense_date', `${year}-01-01`)
+      .lte('expense_date', `${year}-12-31`)
+      .order('expense_date', { ascending: false });
+    setYearExpenses(data || []);
+    yearLoadedRef.current = year;
+  };
+
+  const reloadManagerData = async () => {
+    if (!isManager || !businessId) return;
+    await loadTeamExpenses(businessId);
+    await loadYearExpenses(businessId, reportYear);
+  };
+
+  const nameOf = (id) => {
+    if (id === myId) return 'you';
+    const p = people.find((x) => x.id === id);
+    return (p && p.full_name) || 'Team member';
   };
 
   // Normalize a picked asset (ImagePicker on phone, DocumentPicker on web)
@@ -295,6 +371,132 @@ export default function ExpensesScreen() {
     setBusyId(null);
   };
 
+  const reviewExpense = async (exp, status) => {
+    setBusyId(exp.id);
+    setMessage('');
+    const { error } = await supabase.from('expenses')
+      .update({ status, reviewed_by: myId, review_note: (reviewNotes[exp.id] || '').trim() || null })
+      .eq('id', exp.id);
+    setMessage(error ? 'Could not update: ' + error.message : `Expense ${status}.`);
+    if (!error) setReviewNotes((prev) => { const n = { ...prev }; delete n[exp.id]; return n; });
+    await loadExpenses(myId);
+    await reloadManagerData();
+    setBusyId(null);
+  };
+
+  const markPaid = async (exp) => {
+    setBusyId(exp.id);
+    setMessage('');
+    const { error } = await supabase.from('expenses')
+      .update({ reimbursement_status: 'paid' })
+      .eq('id', exp.id)
+      .eq('status', 'approved')
+      .eq('reimbursement_status', 'unpaid');
+    setMessage(error ? 'Could not update: ' + error.message : 'Marked as paid.');
+    await loadExpenses(myId);
+    await reloadManagerData();
+    setBusyId(null);
+  };
+
+  const markAllShownPaid = async () => {
+    if (!confirmMarkAllPaid) { setConfirmMarkAllPaid(true); return; }
+    setConfirmMarkAllPaid(false);
+    setBusyId('batch');
+    setMessage('');
+    const ids = dueShown.map((e) => e.id);
+    const { error } = await supabase.from('expenses')
+      .update({ reimbursement_status: 'paid' })
+      .in('id', ids)
+      .eq('status', 'approved')
+      .eq('reimbursement_status', 'unpaid');
+    setMessage(error ? 'Could not update: ' + error.message : `${ids.length} marked as paid.`);
+    await loadExpenses(myId);
+    await reloadManagerData();
+    setBusyId(null);
+  };
+
+  const prevMonth = () => {
+    if (reportMonth === 1) { setReportMonth(12); setReportYear(reportYear - 1); }
+    else setReportMonth(reportMonth - 1);
+  };
+  const nextMonth = () => {
+    if (reportMonth === 12) { setReportMonth(1); setReportYear(reportYear + 1); }
+    else setReportMonth(reportMonth + 1);
+  };
+
+  const exportReportCsv = async () => {
+    try {
+      const rows = filteredRows.map((e) => ({
+        expense_date: e.expense_date,
+        employee_name: nameOf(e.user_id),
+        type: e.type,
+        category: e.category,
+        merchant: e.merchant,
+        amount_cents: splitAmount(e),
+        status: e.status,
+        reimbursement_status: e.reimbursement_status,
+        receipt_path: e.receipt_path,
+        user_id: e.user_id,
+        reviewed_by: e.reviewed_by,
+      }));
+      if (rows.length === 0) { setExportMsg('Nothing to export for these filters.'); return; }
+      const csv = buildExpenseCsv(rows);
+      const filename = `northshift-expenses-${reportKey}.csv`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+        setExportMsg(`Exported ${rows.length} expenses.`);
+      } else {
+        const { File, Paths } = require('expo-file-system');
+        const Sharing = require('expo-sharing');
+        const file = new File(Paths.cache, filename);
+        file.write(csv);
+        if (await Sharing.isAvailableAsync()) {
+          await Sharing.shareAsync(file.uri, { mimeType: 'text/csv', dialogTitle: 'NorthShift expense report' });
+          setExportMsg(`Exported ${rows.length} expenses.`);
+        } else {
+          setExportMsg('Sharing is not available on this device.');
+        }
+      }
+    } catch (e) {
+      setExportMsg('Export failed: ' + (e.message || 'unknown error'));
+    }
+  };
+
+  const printReport = () => {
+    if (typeof window === 'undefined') return;
+    setExportMsg('');
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) { setExportMsg('Pop-up blocked — allow pop-ups for this site, then try Print again.'); return; }
+    const rowsHtml = filteredRows.map((e) => (
+      '<tr><td>' + escHtml(e.expense_date) + '</td><td>' + escHtml(nameOf(e.user_id)) + '</td><td>' + escHtml(e.type) + '</td><td>' + escHtml(e.category) + '</td><td>' + escHtml(e.merchant || '') + '</td><td>' + (splitAmount(e) / 100).toFixed(2) + '</td><td>' + escHtml(e.status) + '</td><td>' + escHtml(e.reimbursement_status) + '</td><td>' + (e.status === 'approved' && e.reviewed_by === e.user_id ? 'self-approved' : '') + '</td></tr>'
+    )).join('');
+    win.document.write(
+      '<!doctype html><html><head><title>NorthShift Expense Report &mdash; ' + escHtml(monthName(reportMonth)) + ' ' + reportYear + '</title>' +
+      '<style>body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#1c1917}' +
+      '.sheet{max-width:900px;margin:32px auto;padding:24px}' +
+      '.brand{font-size:13px;letter-spacing:.18em;text-transform:uppercase;color:#0F766E;font-weight:700}' +
+      'h1{font-size:24px;margin:8px 0 4px}.totals{font-size:14px;color:#57534e;margin:0 0 20px}' +
+      'table{width:100%;border-collapse:collapse;font-size:13px}' +
+      'th,td{border:1px solid #d6d3d1;padding:6px 8px;text-align:left}th{background:#f5f5f4}</style></head><body>' +
+      '<div class="sheet"><div class="brand">NorthShift</div>' +
+      '<h1>Expense Report &mdash; ' + escHtml(monthName(reportMonth)) + ' ' + reportYear + '</h1>' +
+      '<p class="totals">Approved ' + escHtml(fmtCents(totalApproved)) + ' &middot; Pending ' + escHtml(fmtCents(totalPending)) + ' &middot; Reimbursement due ' + escHtml(fmtCents(reimbDue)) + ' &middot; Mileage ' + monthMileageKm.toFixed(1) + ' km ' + escHtml(fmtCents(monthMileageAmt)) + ' &middot; Denied ' + escHtml(fmtCents(totalDenied)) + '</p>' +
+      '<table><tr><th>Date</th><th>Employee</th><th>Type</th><th>Category</th><th>Merchant</th><th>Amount (CAD)</th><th>Status</th><th>Reimbursement</th><th>Flags</th></tr>' + rowsHtml + '</table>' +
+      '<p class="totals">Mileage amounts use the year-to-date 5,000 km tier split.</p></div>' +
+      '<script>window.onload = function () { window.focus(); window.print(); };' +
+      'window.onafterprint = function () { window.close(); };</script>' +
+      '</body></html>'
+    );
+    win.document.close();
+    setExportMsg('Print view opened — use your browser\'s print dialog.');
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -308,6 +510,41 @@ export default function ExpensesScreen() {
   const kmPreview = Number((kmStr || '').replace(/,/g, ''));
   const datePreview = parseDateStrict(dateStr);
   const showEstimate = kind === 'mileage' && Number.isFinite(kmPreview) && kmPreview > 0 && datePreview;
+
+  // ---- Manager report derivations (computed from loaded rows, no extra queries) ----
+  const reportKey = `${reportYear}-${String(reportMonth).padStart(2, '0')}`;
+  const monthRows = yearExpenses.filter((e) => e.expense_date.slice(0, 7) === reportKey);
+  const approvedMileageYear = yearExpenses.filter((e) => e.type === 'mileage' && e.status === 'approved');
+  const splitByEntry = mileageSplitByEntry(approvedMileageYear, reportYear);
+  // Report mileage amounts are tier-split exact; pending mileage falls back to
+  // the stored estimate (it has no split until approved).
+  const splitAmount = (e) => (e.type === 'mileage' ? (splitByEntry.get(e.id)?.amountCents ?? e.amount_cents) : e.amount_cents);
+  const sumRows = (rows, fn) => rows.reduce((t, e) => t + fn(e), 0);
+  const totalApproved = sumRows(monthRows.filter((e) => e.status === 'approved'), splitAmount);
+  const totalPending = sumRows(monthRows.filter((e) => e.status === 'pending'), splitAmount);
+  const totalDenied = sumRows(monthRows.filter((e) => e.status === 'denied'), splitAmount);
+  const reimbDue = sumRows(monthRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid'), splitAmount);
+  const monthMileageRows = monthRows.filter((e) => e.type === 'mileage' && e.status === 'approved');
+  const monthMileageKm = sumRows(monthMileageRows, (e) => Number(e.mileage_km) || 0);
+  const monthMileageAmt = sumRows(monthMileageRows, splitAmount);
+  const tierRows = mileageTierSplit(approvedMileageYear, reportYear);
+  const filteredRows = monthRows.filter((e) =>
+    (reportEmployee === 'all' || e.user_id === reportEmployee) &&
+    (reportCategory === 'all' || e.category === reportCategory) &&
+    (reportStatus === 'all' || e.status === reportStatus) &&
+    (reportType === 'all' || e.type === reportType) &&
+    (reportReimb === 'all' || e.reimbursement_status === reportReimb)
+  );
+  const dueShown = filteredRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid');
+  const byCategory = {};
+  for (const e of monthRows) { const c = byCategory[e.category] || { count: 0, total: 0 }; c.count += 1; c.total += splitAmount(e); byCategory[e.category] = c; }
+  const byEmployee = {};
+  for (const e of monthRows) {
+    const b = byEmployee[e.user_id] || { money: 0, mileageKm: 0, mileageAmt: 0 };
+    if (e.type === 'mileage') { b.mileageKm += Number(e.mileage_km) || 0; b.mileageAmt += splitAmount(e); }
+    else { b.money += e.amount_cents; }
+    byEmployee[e.user_id] = b;
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -329,6 +566,46 @@ export default function ExpensesScreen() {
           </View>
         ) : (
           <>
+            {isManager && pendingQueue.length > 0 && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Waiting for your review ({pendingQueue.length})</Text>
+                {pendingQueue.map((exp) => {
+                  const badge = statusBadge(exp.status);
+                  return (
+                    <View key={exp.id} style={styles.docCard}>
+                      <View style={styles.docTop}>
+                        <Text style={styles.docName} numberOfLines={1}>
+                          {nameOf(exp.user_id)} · {exp.type === 'mileage' ? `${exp.origin || ''} → ${exp.destination || ''}` : (exp.merchant || exp.category)}
+                        </Text>
+                        <View style={[styles.badge, { backgroundColor: badge.bg, borderColor: badge.fg }]}>
+                          <Text style={[styles.badgeText, { color: badge.fg }]}>{badge.label}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.docMeta}>
+                        {fmtDate(exp.expense_date)} · {exp.type === 'mileage' ? `${exp.mileage_km} km × ${exp.mileage_rate_cents}¢` : exp.category} · {fmtCents(exp.amount_cents)}
+                      </Text>
+                      {exp.note ? <Text style={styles.docMeta}>{exp.note}</Text> : null}
+                      {exp.receipt_path ? (
+                        <View style={styles.docActions}>
+                          <TouchableOpacity style={styles.smallPrimary} onPress={() => viewReceipt(exp)} disabled={busyId === exp.id}>
+                            <Text style={styles.smallPrimaryText}>View Receipt</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                      <TextInput style={[styles.input, { marginTop: spacing.sm, marginBottom: spacing.sm }]} value={reviewNotes[exp.id] || ''} onChangeText={(v) => setReviewNotes((prev) => ({ ...prev, [exp.id]: v }))} placeholder="Review note (optional)" placeholderTextColor={colors.inputPlaceholder} />
+                      <View style={styles.reviewRow}>
+                        <TouchableOpacity style={styles.smallPrimary} onPress={() => reviewExpense(exp, 'approved')} disabled={busyId === exp.id}>
+                          <Text style={styles.smallPrimaryText}>Approve</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.smallOutline} onPress={() => reviewExpense(exp, 'denied')} disabled={busyId === exp.id}>
+                          <Text style={styles.smallOutlineText}>Deny</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
             {!businessId ? (
               <View style={styles.card}>
                 <Text style={styles.cardTitle}>No business yet</Text>
@@ -449,6 +726,171 @@ export default function ExpensesScreen() {
                 );
               })}
             </View>
+            {isManager && (
+              <View style={styles.section}>
+                <Text style={styles.sectionTitle}>Expense Report</Text>
+                <View style={styles.card}>
+                  <View style={styles.monthRow}>
+                    <TouchableOpacity style={styles.smallOutline} onPress={prevMonth}>
+                      <Text style={styles.smallOutlineText}>← Prev</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.monthLabel}>{monthName(reportMonth)} {reportYear}</Text>
+                    <TouchableOpacity style={styles.smallOutline} onPress={nextMonth}>
+                      <Text style={styles.smallOutlineText}>Next →</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.totalsStrip}>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalApproved)}</Text><Text style={styles.totalLabel}>Approved</Text></View>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalPending)}</Text><Text style={styles.totalLabel}>Pending</Text></View>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(reimbDue)}</Text><Text style={styles.totalLabel}>Reimbursement due</Text></View>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{monthMileageKm.toFixed(1)} km</Text><Text style={styles.totalLabel}>Mileage · {fmtCents(monthMileageAmt)}</Text></View>
+                    <View style={styles.totalBox}><Text style={styles.totalValue}>{fmtCents(totalDenied)}</Text><Text style={styles.totalLabel}>Denied</Text></View>
+                  </View>
+                  <Text style={styles.cardText}>Mileage amounts use the year-to-date 5,000 km tier split — the payroll-exact number.</Text>
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>By category</Text>
+                  {Object.keys(byCategory).length === 0 ? (
+                    <Text style={styles.emptyText}>Nothing this month.</Text>
+                  ) : Object.entries(byCategory).sort((a, b) => b[1].total - a[1].total).map(([cat, v]) => (
+                    <View key={cat} style={styles.reportRow}>
+                      <Text style={styles.reportRowLabel}>{cat} · {v.count}</Text>
+                      <Text style={styles.reportRowValue}>{fmtCents(v.total)}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>By employee</Text>
+                  {Object.keys(byEmployee).length === 0 ? (
+                    <Text style={styles.emptyText}>Nothing this month.</Text>
+                  ) : Object.entries(byEmployee).map(([uid, b]) => (
+                    <View key={uid} style={styles.reportRow}>
+                      <Text style={styles.reportRowLabel}>{nameOf(uid)}</Text>
+                      <Text style={styles.reportRowValue}>{fmtCents(b.money)} money{b.mileageKm > 0 ? ` · ${b.mileageKm.toFixed(1)} km ${fmtCents(b.mileageAmt)}` : ''}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>Mileage tier split · {reportYear} year to date</Text>
+                  {tierRows.length === 0 ? (
+                    <Text style={styles.emptyText}>No approved mileage this year.</Text>
+                  ) : tierRows.map((t) => (
+                    <View key={t.user_id} style={styles.reportRow}>
+                      <Text style={styles.reportRowLabel}>{nameOf(t.user_id)}</Text>
+                      <Text style={styles.reportRowValue}>{t.kmUnder.toFixed(1)} km @ tier 1 = {fmtCents(t.tier1Cents)}{t.kmOver > 0 ? ` · ${t.kmOver.toFixed(1)} km @ tier 2 = ${fmtCents(t.tier2Cents)}` : ''}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={styles.card}>
+                  <Text style={styles.cardTitle}>All expenses · {monthName(reportMonth)} {reportYear}</Text>
+                  <Text style={styles.label}>Employee</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRowH}>
+                    <TouchableOpacity style={[styles.chip, reportEmployee === 'all' && styles.chipActive]} onPress={() => setReportEmployee('all')}>
+                      <Text style={[styles.chipText, reportEmployee === 'all' && styles.chipTextActive]}>Everyone</Text>
+                    </TouchableOpacity>
+                    {people.map((p) => (
+                      <TouchableOpacity key={p.id} style={[styles.chip, reportEmployee === p.id && styles.chipActive]} onPress={() => setReportEmployee(p.id)}>
+                        <Text style={[styles.chipText, reportEmployee === p.id && styles.chipTextActive]}>{p.id === myId ? 'Me' : (p.full_name || 'Unknown')}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                  <Text style={styles.label}>Category</Text>
+                  <View style={styles.chipRow}>
+                    <TouchableOpacity style={[styles.chip, reportCategory === 'all' && styles.chipActive]} onPress={() => setReportCategory('all')}>
+                      <Text style={[styles.chipText, reportCategory === 'all' && styles.chipTextActive]}>All</Text>
+                    </TouchableOpacity>
+                    {[...CATEGORIES, MILEAGE_CATEGORY].map((c) => (
+                      <TouchableOpacity key={c} style={[styles.chip, reportCategory === c && styles.chipActive]} onPress={() => setReportCategory(c)}>
+                        <Text style={[styles.chipText, reportCategory === c && styles.chipTextActive]}>{c}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.label}>Status</Text>
+                  <View style={styles.chipRow}>
+                    {[['all', 'All'], ['pending', 'Pending'], ['approved', 'Approved'], ['denied', 'Denied']].map(([v, l]) => (
+                      <TouchableOpacity key={v} style={[styles.chip, reportStatus === v && styles.chipActive]} onPress={() => setReportStatus(v)}>
+                        <Text style={[styles.chipText, reportStatus === v && styles.chipTextActive]}>{l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.label}>Type</Text>
+                  <View style={styles.chipRow}>
+                    {[['all', 'All'], ['expense', 'Expense'], ['mileage', 'Mileage']].map(([v, l]) => (
+                      <TouchableOpacity key={v} style={[styles.chip, reportType === v && styles.chipActive]} onPress={() => setReportType(v)}>
+                        <Text style={[styles.chipText, reportType === v && styles.chipTextActive]}>{l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.label}>Reimbursement</Text>
+                  <View style={styles.chipRow}>
+                    {[['all', 'All'], ['unpaid', 'Unpaid'], ['paid', 'Paid']].map(([v, l]) => (
+                      <TouchableOpacity key={v} style={[styles.chip, reportReimb === v && styles.chipActive]} onPress={() => setReportReimb(v)}>
+                        <Text style={[styles.chipText, reportReimb === v && styles.chipTextActive]}>{l}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                  <Text style={styles.cardText}>Showing {filteredRows.length} of {monthRows.length} expenses.</Text>
+                  <View style={styles.docActions}>
+                    <TouchableOpacity style={styles.smallPrimary} onPress={exportReportCsv}>
+                      <Text style={styles.smallPrimaryText}>Export CSV</Text>
+                    </TouchableOpacity>
+                    {Platform.OS === 'web' && (
+                      <TouchableOpacity style={styles.smallOutline} onPress={printReport}>
+                        <Text style={styles.smallOutlineText}>Print</Text>
+                      </TouchableOpacity>
+                    )}
+                    {dueShown.length > 0 && (
+                      <TouchableOpacity style={styles.smallOutline} onPress={markAllShownPaid} disabled={busyId === 'batch'}>
+                        <Text style={styles.smallOutlineText}>{confirmMarkAllPaid ? `Tap again to mark ${dueShown.length} paid` : `Mark all shown paid (${dueShown.length})`}</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                  {exportMsg ? <Text style={styles.cardText}>{exportMsg}</Text> : null}
+                </View>
+
+                {filteredRows.length === 0 ? (
+                  <Text style={styles.emptyText}>No expenses match these filters.</Text>
+                ) : filteredRows.map((exp) => {
+                  const badge = statusBadge(exp.status);
+                  const selfApproved = exp.status === 'approved' && exp.reviewed_by === exp.user_id;
+                  return (
+                    <View key={exp.id} style={styles.docCard}>
+                      <View style={styles.docTop}>
+                        <Text style={styles.docName} numberOfLines={1}>
+                          {nameOf(exp.user_id)} · {exp.type === 'mileage' ? `${exp.origin || ''} → ${exp.destination || ''}` : (exp.merchant || exp.category)}
+                        </Text>
+                        <View style={[styles.badge, { backgroundColor: badge.bg, borderColor: badge.fg }]}>
+                          <Text style={[styles.badgeText, { color: badge.fg }]}>{badge.label}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.docMeta}>
+                        {fmtDate(exp.expense_date)} · {exp.type === 'mileage' ? `${exp.mileage_km} km × ${exp.mileage_rate_cents}¢` : exp.category} · {fmtCents(splitAmount(exp))}
+                        {exp.status === 'approved' ? (exp.reimbursement_status === 'paid' ? ' · Reimbursed' : ' · Awaiting reimbursement') : ''}
+                        {selfApproved ? ' · Self-approved' : ''}
+                      </Text>
+                      {exp.note ? <Text style={styles.docMeta}>{exp.note}</Text> : null}
+                      {exp.review_note ? <Text style={styles.docMeta}>Manager note: {exp.review_note}</Text> : null}
+                      <View style={styles.docActions}>
+                        {exp.receipt_path ? (
+                          <TouchableOpacity style={styles.smallPrimary} onPress={() => viewReceipt(exp)} disabled={busyId === exp.id}>
+                            <Text style={styles.smallPrimaryText}>View Receipt</Text>
+                          </TouchableOpacity>
+                        ) : null}
+                        {exp.status === 'approved' && exp.reimbursement_status === 'unpaid' && (
+                          <TouchableOpacity style={styles.smallOutline} onPress={() => markPaid(exp)} disabled={busyId === exp.id}>
+                            <Text style={styles.smallOutlineText}>Mark paid</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
@@ -497,4 +939,15 @@ const styles = StyleSheet.create({
   smallOutline: { ...buttons.compactOutline },
   smallOutlineText: { ...buttons.compactOutlineText },
   emptyText: { fontFamily: fontFamily.regular, color: colors.textSecondary, fontSize: 13 },
+  reviewRow: { flexDirection: 'row', gap: spacing.sm },
+  chipRowH: { flexDirection: 'row', gap: spacing.sm, paddingVertical: spacing.xs, marginBottom: spacing.md },
+  monthRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: spacing.md },
+  monthLabel: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  totalsStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
+  totalBox: { flexGrow: 1, flexBasis: 100, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.sm, alignItems: 'center' },
+  totalValue: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  totalLabel: { fontFamily: fontFamily.regular, fontSize: 12, color: colors.textSecondary, textAlign: 'center' },
+  reportRow: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.sm, paddingVertical: spacing.xs },
+  reportRowLabel: { flex: 1, fontFamily: fontFamily.regular, fontSize: 13, color: colors.textPrimary },
+  reportRowValue: { fontFamily: fontFamily.semibold, fontSize: 13, color: colors.textPrimary, textAlign: 'right' },
 });

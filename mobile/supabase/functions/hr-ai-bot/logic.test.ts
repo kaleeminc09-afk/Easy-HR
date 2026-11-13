@@ -37,6 +37,9 @@ import {
   MILEAGE_TIER_KM,
   mileageRateCents,
   mileageAmountCents,
+  mileageSplitByEntry,
+  mileageTierSplit,
+  buildExpenseCsv,
   zonedTimeToUtc,
   formatFileSize,
   getBillingState,
@@ -870,5 +873,79 @@ describe("buildReceiptPath", () => {
     expect(buildReceiptPath("biz-1", "user-2", "my receipt (1).JPG", 1)).toBe(
       "biz-1/user-2/1-my_receipt_1_.JPG"
     );
+  });
+});
+
+describe("mileage tier split (5,000 km per employee per year)", () => {
+  const entry = (id: string, user: string, date: string, km: number, rate: number | null) => ({
+    id, user_id: user, expense_date: date, mileage_km: km, mileage_rate_cents: rate,
+  });
+  it("prices everything at tier 1 under 5,000 km", () => {
+    const splits = mileageSplitByEntry([entry("a", "u1", "2026-03-01", 4000, 73)], 2026);
+    expect(splits.get("a")).toEqual({ kmUnder: 4000, kmOver: 0, amountCents: 292000 });
+  });
+  it("splits a trip straddling the tier, oldest first", () => {
+    const splits = mileageSplitByEntry([
+      entry("a", "u1", "2026-03-01", 4000, 73),
+      entry("b", "u1", "2026-04-01", 2000, 73),
+    ], 2026);
+    expect(splits.get("a")).toEqual({ kmUnder: 4000, kmOver: 0, amountCents: 292000 });
+    expect(splits.get("b")).toEqual({ kmUnder: 1000, kmOver: 1000, amountCents: 73000 + 67000 });
+  });
+  it("keeps the territory +4 on both tiers", () => {
+    const splits = mileageSplitByEntry([entry("a", "u1", "2026-03-01", 6000, 77)], 2026);
+    expect(splits.get("a")).toEqual({ kmUnder: 5000, kmOver: 1000, amountCents: 385000 + 71000 });
+  });
+  it("tracks each employee separately", () => {
+    const splits = mileageSplitByEntry([
+      entry("a", "u1", "2026-03-01", 6000, 73),
+      entry("b", "u2", "2026-03-01", 6000, 73),
+    ], 2026);
+    expect(splits.get("a")!.kmOver).toBe(1000);
+    expect(splits.get("b")!.kmOver).toBe(1000);
+  });
+  it("ignores entries from other years", () => {
+    const splits = mileageSplitByEntry([entry("a", "u1", "2025-12-20", 6000, 72)], 2026);
+    expect(splits.size).toBe(0);
+  });
+  it("aggregates per-employee tier rows", () => {
+    const rows = mileageTierSplit([
+      entry("a", "u1", "2026-03-01", 4000, 73),
+      entry("b", "u1", "2026-04-01", 2000, 73),
+      entry("c", "u2", "2026-03-01", 100, 73),
+    ], 2026);
+    expect(rows).toEqual([
+      { user_id: "u1", totalKm: 6000, kmUnder: 5000, kmOver: 1000, tier1Cents: 365000, tier2Cents: 67000, amountCents: 432000 },
+      { user_id: "u2", totalKm: 100, kmUnder: 100, kmOver: 0, tier1Cents: 7300, tier2Cents: 0, amountCents: 7300 },
+    ]);
+  });
+});
+
+describe("buildExpenseCsv", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    expense_date: "2026-11-10", employee_name: "Asha", type: "expense", category: "Fuel",
+    merchant: "Shell", amount_cents: 5000, status: "approved", reimbursement_status: "unpaid",
+    receipt_path: "biz/u1/1-shell.jpg", user_id: "u1", reviewed_by: "u2", ...over,
+  });
+  it("writes the standard header and rows in date order", () => {
+    const csv = buildExpenseCsv([row({ expense_date: "2026-11-12" }), row({ expense_date: "2026-11-10" })]);
+    const lines = csv.split("\n");
+    expect(lines[0]).toBe("Date,Employee,Type,Category,Merchant,Amount (CAD),Status,Reimbursement,Receipt,Flags");
+    expect(lines[1]).toContain("2026-11-10");
+    expect(lines[2]).toContain("2026-11-12");
+  });
+  it("quotes fields containing commas", () => {
+    const csv = buildExpenseCsv([row({ merchant: "Shell, Main St" })]);
+    expect(csv).toContain('"Shell, Main St"');
+  });
+  it("flags self-approved rows", () => {
+    const csv = buildExpenseCsv([row({ reviewed_by: "u1" })]);
+    expect(csv).toContain("self-approved");
+    const csv2 = buildExpenseCsv([row({ reviewed_by: "u2" })]);
+    expect(csv2).not.toContain("self-approved");
+  });
+  it("formats amounts with two decimals", () => {
+    const csv = buildExpenseCsv([row({ amount_cents: 505 })]);
+    expect(csv).toContain("5.05");
   });
 });

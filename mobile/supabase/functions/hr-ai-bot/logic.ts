@@ -913,6 +913,140 @@ export function mileageAmountCents(km: number, year: number, territory: boolean)
   return Math.round(km * mileageRateCents(year, territory));
 }
 
+export interface MileageEntryLike {
+  id: string;
+  user_id: string;
+  expense_date: string; // YYYY-MM-DD
+  mileage_km: number;
+  mileage_rate_cents: number | null;
+}
+
+export interface MileageSplit {
+  kmUnder: number; // km priced at the first-tier rate
+  kmOver: number; // km priced at the extra rate
+  amountCents: number;
+}
+
+/** Split each approved mileage entry at the 5,000 km per-employee per-year tier,
+ * consuming entries oldest-first so trips straddling the tier split exactly.
+ * Territory trips (stored rate = first-tier + 4) keep their +4 on both tiers.
+ * Entries outside the year, or with no positive distance, are ignored. The
+ * stored rate is authoritative for tier 1 (the rate at submit time). */
+export function mileageSplitByEntry(entries: MileageEntryLike[], year: number): Map<string, MileageSplit> {
+  const rates = CRA_MILEAGE_RATES[year] ?? CRA_MILEAGE_RATES[latestMileageRateYear()];
+  const byUser = new Map<string, MileageEntryLike[]>();
+  for (const e of entries) {
+    if (!e.expense_date || Number(e.expense_date.slice(0, 4)) !== year) continue;
+    const km = Number(e.mileage_km);
+    if (!Number.isFinite(km) || km <= 0) continue;
+    const list = byUser.get(e.user_id) || [];
+    list.push(e);
+    byUser.set(e.user_id, list);
+  }
+  const out = new Map<string, MileageSplit>();
+  for (const list of byUser.values()) {
+    const sorted = [...list].sort((a, b) => a.expense_date.localeCompare(b.expense_date));
+    let used = 0;
+    for (const e of sorted) {
+      const km = Number(e.mileage_km);
+      const stored = Number(e.mileage_rate_cents);
+      const territory = Number.isFinite(stored) && stored === rates.firstTierCents + rates.territoryExtraCents;
+      const tier1Rate = Number.isFinite(stored) && stored > 0 ? stored : rates.firstTierCents;
+      const tier2Rate = rates.extraCents + (territory ? rates.territoryExtraCents : 0);
+      const under = Math.max(0, Math.min(km, MILEAGE_TIER_KM - used));
+      const over = km - under;
+      out.set(e.id, {
+        kmUnder: Math.round(under * 100) / 100,
+        kmOver: Math.round(over * 100) / 100,
+        amountCents: Math.round(under * tier1Rate) + Math.round(over * tier2Rate),
+      });
+      used += km;
+    }
+  }
+  return out;
+}
+
+export interface MileageTierRow {
+  user_id: string;
+  totalKm: number;
+  kmUnder: number;
+  kmOver: number;
+  tier1Cents: number;
+  tier2Cents: number;
+  amountCents: number;
+}
+
+/** Per-employee year-to-date tier totals, aggregated from mileageSplitByEntry. */
+export function mileageTierSplit(entries: MileageEntryLike[], year: number): MileageTierRow[] {
+  const rates = CRA_MILEAGE_RATES[year] ?? CRA_MILEAGE_RATES[latestMileageRateYear()];
+  const splits = mileageSplitByEntry(entries, year);
+  const byUser = new Map<string, MileageTierRow>();
+  for (const e of entries) {
+    const split = splits.get(e.id);
+    if (!split) continue;
+    const stored = Number(e.mileage_rate_cents);
+    const territory = Number.isFinite(stored) && stored === rates.firstTierCents + rates.territoryExtraCents;
+    const tier1Rate = Number.isFinite(stored) && stored > 0 ? stored : rates.firstTierCents;
+    const tier2Rate = rates.extraCents + (territory ? rates.territoryExtraCents : 0);
+    const row = byUser.get(e.user_id) || { user_id: e.user_id, totalKm: 0, kmUnder: 0, kmOver: 0, tier1Cents: 0, tier2Cents: 0, amountCents: 0 };
+    row.kmUnder += split.kmUnder;
+    row.kmOver += split.kmOver;
+    row.tier1Cents += Math.round(split.kmUnder * tier1Rate);
+    row.tier2Cents += Math.round(split.kmOver * tier2Rate);
+    byUser.set(e.user_id, row);
+  }
+  const rows = [...byUser.values()].map((r) => ({
+    ...r,
+    totalKm: Math.round((r.kmUnder + r.kmOver) * 100) / 100,
+    kmUnder: Math.round(r.kmUnder * 100) / 100,
+    kmOver: Math.round(r.kmOver * 100) / 100,
+    amountCents: r.tier1Cents + r.tier2Cents,
+  }));
+  rows.sort((a, b) => a.user_id.localeCompare(b.user_id));
+  return rows;
+}
+
+export interface ExpenseCsvRow {
+  expense_date: string;
+  employee_name: string;
+  type: string;
+  category: string;
+  merchant: string | null;
+  amount_cents: number;
+  status: string;
+  reimbursement_status: string;
+  receipt_path: string | null;
+  user_id: string;
+  reviewed_by: string | null;
+}
+
+/** Expense report CSV (standard layout): date, employee, type, category,
+ * merchant, amount, status, reimbursement, receipt reference, flags.
+ * Self-approved rows (reviewer is the submitter) are flagged, matching the
+ * on-screen report. Amounts arrive pre-computed (mileage already tier-split). */
+export function buildExpenseCsv(rows: ExpenseCsvRow[]): string {
+  const header = ["Date", "Employee", "Type", "Category", "Merchant", "Amount (CAD)", "Status", "Reimbursement", "Receipt", "Flags"];
+  const lines: string[] = [header.join(",")];
+  const sorted = [...rows].sort((a, b) => a.expense_date.localeCompare(b.expense_date) || a.employee_name.localeCompare(b.employee_name));
+  for (const r of sorted) {
+    const flags = r.status === "approved" && r.reviewed_by && r.reviewed_by === r.user_id ? "self-approved" : "";
+    const row = [
+      r.expense_date,
+      r.employee_name,
+      r.type,
+      r.category,
+      r.merchant || "",
+      (r.amount_cents / 100).toFixed(2),
+      r.status,
+      r.reimbursement_status,
+      r.receipt_path || "",
+      flags,
+    ];
+    lines.push(row.map(csvCell).join(","));
+  }
+  return lines.join("\n");
+}
+
 export function formatFileSize(bytes: number | null | undefined): string {
   if (bytes == null || Number.isNaN(bytes)) return "Unknown size";
   if (bytes < 1024) return `${bytes} B`;
