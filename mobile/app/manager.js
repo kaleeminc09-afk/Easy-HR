@@ -6,7 +6,7 @@ import { NAV_ICONS } from '../components/NavIcons';
 import { supabase } from '../lib/supabase';
 import { fetchBillingState } from '../lib/billing';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, computeTodayHours, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput } from '../supabase/functions/hr-ai-bot/logic';
 import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
@@ -57,6 +57,11 @@ export default function ManagerDashboard() {
   const [exportDays, setExportDays] = useState(14);
   const [exportMsg, setExportMsg] = useState('');
   const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
+  const [expandedLogId, setExpandedLogId] = useState(null);
+  // Tool cards start collapsed except Build Schedule (the daily action);
+  // headers carry the key number so the state is visible without opening.
+  const [collapsedTools, setCollapsedTools] = useState({ schedule: false, overtime: true, break: true, audit: true });
+  const [pendingTimeOffCount, setPendingTimeOffCount] = useState(null);
   const [payrollFormat, setPayrollFormat] = useState('STANDARD'); 
 
   // --- NEW AI CHAT STATE ---
@@ -179,6 +184,16 @@ export default function ManagerDashboard() {
       setExcErrorMsg('');
       setExceptions(excData);
     }
+
+    // Pending time-off count for the summary strip. No business filter:
+    // RLS scopes a manager's read to their own business, same as the
+    // logs and exceptions queries above. On error the count stays
+    // null and the strip shows a dash instead of a wrong zero.
+    const { count: timeOffPending, error: timeOffError } = await supabase
+      .from('time_off_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'pending');
+    if (!timeOffError) setPendingTimeOffCount(timeOffPending || 0);
   };
 
   // Create shifts, one per picked date. Same guards as the old
@@ -313,6 +328,11 @@ export default function ManagerDashboard() {
     return date.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   };
 
+  const fmtTime = (isoString) => {
+    if (!isoString) return 'Active';
+    return new Date(isoString).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
   const calculateDuration = (inTime, outTime) => {
     if (!outTime) {
       const diffMs = new Date().getTime() - new Date(inTime).getTime();
@@ -437,6 +457,14 @@ export default function ManagerDashboard() {
 
   const pendingExceptionsCount = exceptions.filter(e => e.status === 'pending').length;
 
+  // Summary strip + queue derivations (computed from loaded rows only).
+  const onShiftNow = logs.filter(l => l.clock_in && !l.clock_out).length;
+  const anomalyCount = logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')).length;
+  const hoursToday = computeTodayHours(logs.filter(l => l.user_id), Date.now());
+  const pendingExcList = exceptions.filter(e => e.status === 'pending');
+  const anomalyList = logs.filter(l => l.ai_anomaly_flag?.includes('⚠️'));
+  const toggleTool = (key) => setCollapsedTools((prev) => ({ ...prev, [key]: !prev[key] }));
+
   const overtimeRows = computeWeeklyOvertime(
     logs.filter(l => l.user_id).map(l => ({
       user_id: l.user_id,
@@ -447,6 +475,7 @@ export default function ManagerDashboard() {
     Date.now()
   );
   const otWatch = overtimeRows.filter(r => r.status !== 'ok');
+  const otOverCount = otWatch.filter(r => r.status === 'overtime').length;
 
   const handleExport = async () => {
     try {
@@ -619,6 +648,28 @@ export default function ManagerDashboard() {
         </View>
       )}
 
+      {/* Pinned filter bar: always visible above the content, so the AI
+          tab can never hide the only way back to the lists. */}
+      <View style={styles.filterBar}>
+        <TouchableOpacity style={[styles.filterTab, filter === 'ALL' && styles.activeFilterTab]} onPress={() => setFilter('ALL')}>
+          <Text style={[styles.filterText, filter === 'ALL' && styles.activeFilterText]}>All Logs ({logs.length})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTab, filter === 'ANOMALIES' && styles.activeFilterTab]} onPress={() => setFilter('ANOMALIES')}>
+          <Text style={[styles.filterText, filter === 'ANOMALIES' && styles.activeFilterText]}>AI Anomalies ({anomalyCount})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTab, filter === 'EXCEPTIONS' && styles.activeFilterTab]} onPress={() => setFilter('EXCEPTIONS')}>
+          <Text style={[styles.filterText, filter === 'EXCEPTIONS' && styles.activeFilterText]}>Geo Exceptions ({pendingExceptionsCount} pending)</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.aiTabActive]} onPress={() => setFilter('AI')}>
+          <Text style={[styles.filterText, filter === 'AI' ? styles.aiTabTextActive : styles.aiTabText]}>✦ AI Assistant</Text>
+        </TouchableOpacity>
+        <View style={styles.exportSection}>
+          <TouchableOpacity style={styles.refreshButton} onPress={fetchAllManagerData}>
+            <Text style={styles.refreshButtonText}>↻</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {filter === 'AI' ? (
         <KeyboardAvoidingView style={styles.chatWrapper} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <FlatList
@@ -648,7 +699,7 @@ export default function ManagerDashboard() {
           </View>
         </KeyboardAvoidingView>
       ) : (
-        <ScrollView contentContainerStyle={styles.scrollContent} stickyHeaderIndices={[4]}>
+        <ScrollView contentContainerStyle={styles.scrollContent}>
       {billing.state === 'grace' && (
         <View style={styles.billingBannerWarn}>
           <Text style={styles.billingBannerText}>Payment failed — setup locks in {billing.daysLeft} day{billing.daysLeft === 1 ? '' : 's'}. </Text>
@@ -665,8 +716,100 @@ export default function ManagerDashboard() {
           </Link>
         </View>
       )}
+      <View style={styles.summaryStrip}>
+        <TouchableOpacity style={styles.summaryBox} onPress={() => setFilter('ALL')}>
+          <Text style={styles.summaryValue}>{onShiftNow}</Text>
+          <Text style={styles.summaryLabel}>On shift now</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.summaryBox} onPress={() => setFilter('EXCEPTIONS')}>
+          <Text style={styles.summaryValue}>{pendingExceptionsCount}</Text>
+          <Text style={styles.summaryLabel}>Pending exceptions</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.summaryBox} onPress={() => setFilter('ANOMALIES')}>
+          <Text style={styles.summaryValue}>{anomalyCount}</Text>
+          <Text style={styles.summaryLabel}>Anomalies</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.summaryBox} onPress={() => router.push('/timeoff')}>
+          <Text style={styles.summaryValue}>{pendingTimeOffCount ?? '–'}</Text>
+          <Text style={styles.summaryLabel}>Pending time-off</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.summaryBox} onPress={() => setFilter('ALL')}>
+          <Text style={styles.summaryValue}>{hoursToday.toFixed(1)}h</Text>
+          <Text style={styles.summaryLabel}>Hours today</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.columnsWrap}>
+        <View style={styles.column}>
+          <View style={styles.otCard}>
+            <Text style={styles.otTitle}>Geo Exceptions · {pendingExceptionsCount} pending</Text>
+            {pendingExcList.length === 0 ? (
+              <Text style={styles.otClear}>No exception requests waiting.</Text>
+            ) : (
+              <>
+                {pendingExcList.slice(0, 5).map((exc) => {
+                  const employeeName = exc.profiles?.full_name || `${exc.profiles?.first_name || ''} ${exc.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
+                  const worksiteName = exc.worksites?.name || 'Selected Office';
+                  return (
+                    <View key={exc.id} style={styles.queueRow}>
+                      <View style={styles.queueText}>
+                        <Text style={styles.queueName}>{employeeName}</Text>
+                        <Text style={styles.queueSub}>{worksiteName} · {exc.distance_meters} m away</Text>
+                      </View>
+                      <TouchableOpacity style={styles.queueApprove} onPress={() => handleUpdateException(exc.id, 'approved')}>
+                        <Text style={styles.approveButtonText}>Approve</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={styles.queueReject} onPress={() => handleUpdateException(exc.id, 'rejected')}>
+                        <Text style={styles.rejectButtonText}>Reject</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+                {pendingExcList.length > 5 && (
+                  <TouchableOpacity onPress={() => setFilter('EXCEPTIONS')}>
+                    <Text style={styles.queueMore}>Show all {pendingExcList.length} exceptions →</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+
+          <View style={styles.otCard}>
+            <Text style={styles.otTitle}>AI Anomalies · {anomalyCount}</Text>
+            {anomalyList.length === 0 ? (
+              <Text style={styles.otClear}>Nothing flagged by the AI.</Text>
+            ) : (
+              <>
+                {anomalyList.slice(0, 5).map((log) => {
+                  const employeeName = log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
+                  return (
+                    <TouchableOpacity key={log.id} style={styles.queueRow} onPress={() => { setFilter('ANOMALIES'); setExpandedLogId(log.id); }}>
+                      <View style={[styles.statusDot, { backgroundColor: colors.danger }]} />
+                      <View style={styles.queueText}>
+                        <Text style={styles.queueName}>{employeeName}</Text>
+                        <Text style={styles.queueSub} numberOfLines={1}>{(log.ai_anomaly_flag || '').replace(/⚠️\s*/g, '').trim()}</Text>
+                      </View>
+                      <Text style={styles.chevron}>▸</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                {anomalyList.length > 5 && (
+                  <TouchableOpacity onPress={() => setFilter('ANOMALIES')}>
+                    <Text style={styles.queueMore}>Show all {anomalyCount} anomalies →</Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )}
+          </View>
+        </View>
+        <View style={styles.column}>
       <View style={styles.otCard}>
-        <Text style={styles.otTitle}>Build Schedule</Text>
+        <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleTool('schedule')}>
+          <Text style={[styles.otTitle, { marginBottom: 0 }]}>Build Schedule</Text>
+          <Text style={styles.chevron}>{collapsedTools.schedule ? '▸' : '▾'}</Text>
+        </TouchableOpacity>
+        {!collapsedTools.schedule && (
+          <>
         <Text style={styles.otClear}>Post shifts for your team. They appear on the shared Schedule week view, where employees can claim open ones.</Text>
         <TouchableOpacity style={[styles.primaryButton, { marginTop: spacing.md }]} onPress={() => setShowSchedForm(!showSchedForm)}>
           <Text style={styles.primaryButtonText}>{showSchedForm ? 'Close' : '+ Build Shifts'}</Text>
@@ -732,10 +875,17 @@ export default function ManagerDashboard() {
           </View>
         )}
         {schedMessage ? <Text style={styles.schedMessage}>{schedMessage}</Text> : null}
+          </>
+        )}
       </View>
 
       <View style={styles.otCard}>
-        <Text style={styles.otTitle}>Overtime Watch · This Week</Text>
+        <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleTool('overtime')}>
+          <Text style={[styles.otTitle, { marginBottom: 0 }]}>{otOverCount > 0 ? `Overtime Watch · ${otOverCount} over 44h` : 'Overtime Watch · All clear'}</Text>
+          <Text style={styles.chevron}>{collapsedTools.overtime ? '▸' : '▾'}</Text>
+        </TouchableOpacity>
+        {!collapsedTools.overtime && (
+          <>
         {otWatch.length === 0 ? (
           <Text style={styles.otClear}>All clear — nobody is close to the {OT_THRESHOLD_HOURS}h overtime line this week.</Text>
         ) : otWatch.map(r => (
@@ -754,10 +904,17 @@ export default function ManagerDashboard() {
             </Text>
           </View>
         ))}
+          </>
+        )}
       </View>
 
       <View style={styles.otCard}>
-        <Text style={styles.otTitle}>Break Compliance · Last 14 Days</Text>
+        <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleTool('break')}>
+          <Text style={[styles.otTitle, { marginBottom: 0 }]}>{complianceFlags.length > 0 ? `Break Compliance · ${complianceFlags.length} flagged` : 'Break Compliance · All clear'}</Text>
+          <Text style={styles.chevron}>{collapsedTools.break ? '▸' : '▾'}</Text>
+        </TouchableOpacity>
+        {!collapsedTools.break && (
+          <>
         {complianceFlags.length === 0 ? (
           <Text style={styles.otClear}>All clear — every recent shift had its 30-minute meal break.</Text>
         ) : (
@@ -776,10 +933,17 @@ export default function ManagerDashboard() {
             )}
           </>
         )}
+          </>
+        )}
       </View>
 
       <View style={styles.otCard}>
-        <Text style={styles.otTitle}>Audit Export</Text>
+        <TouchableOpacity style={styles.cardHeaderRow} onPress={() => toggleTool('audit')}>
+          <Text style={[styles.otTitle, { marginBottom: 0 }]}>Audit Export</Text>
+          <Text style={styles.chevron}>{collapsedTools.audit ? '▸' : '▾'}</Text>
+        </TouchableOpacity>
+        {!collapsedTools.audit && (
+          <>
         <Text style={styles.otClear}>One CSV with every completed shift, break, overtime total and compliance flag — ready for payroll or an ESA audit.</Text>
         <View style={styles.exportChips}>
           {[7, 14, 30].map(d => (
@@ -792,57 +956,32 @@ export default function ManagerDashboard() {
           <Text style={styles.exportBtnText}>Export Last {exportDays} Days</Text>
         </TouchableOpacity>
         {exportMsg ? <Text style={styles.exportMsg}>{exportMsg}</Text> : null}
+          </>
+        )}
       </View>
-
-      <View style={styles.filterBar}>
-        <TouchableOpacity style={[styles.filterTab, filter === 'ALL' && styles.activeFilterTab]} onPress={() => setFilter('ALL')}>
-          <Text style={[styles.filterText, filter === 'ALL' && styles.activeFilterText]}>All Logs ({logs.length})</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.filterTab, filter === 'ANOMALIES' && styles.activeFilterTab]} onPress={() => setFilter('ANOMALIES')}>
-          <Text style={[styles.filterText, filter === 'ANOMALIES' && styles.activeFilterText]}>
-            AI Anomalies ({logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')).length})
-          </Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity style={[styles.filterTab, filter === 'EXCEPTIONS' && styles.activeFilterTab]} onPress={() => setFilter('EXCEPTIONS')}>
-          <Text style={[styles.filterText, filter === 'EXCEPTIONS' && styles.activeFilterText]}>
-            Geo Exceptions ({pendingExceptionsCount} pending)
-          </Text>
-        </TouchableOpacity>
-
-        {/* NEW AI TAB */}
-        <TouchableOpacity style={[styles.filterTab, filter === 'AI' && styles.aiTabActive]} onPress={() => setFilter('AI')}>
-          <Text style={[styles.filterText, filter === 'AI' ? styles.aiTabTextActive : styles.aiTabText]}>
-            ✦ AI Assistant
-          </Text>
-        </TouchableOpacity>
-
-        <View style={styles.exportSection}>
-          {filter !== 'EXCEPTIONS' && filter !== 'AI' && (
-            <>
-              <Text style={styles.label}>Payroll export — all logs in this list (separate from the Audit Export above)</Text>
-              <View style={styles.formatSelector}>
-                <TouchableOpacity style={[styles.formatTab, payrollFormat === 'STANDARD' && styles.activeFormatTab]} onPress={() => setPayrollFormat('STANDARD')}>
-                  <Text style={[styles.formatText, payrollFormat === 'STANDARD' && styles.activeFormatText]}>Standard</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.formatTab, payrollFormat === 'QUICKBOOKS' && styles.activeFormatTab]} onPress={() => setPayrollFormat('QUICKBOOKS')}>
-                  <Text style={[styles.formatText, payrollFormat === 'QUICKBOOKS' && styles.activeFormatText]}>QuickBooks</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.formatTab, payrollFormat === 'ADP' && styles.activeFormatTab]} onPress={() => setPayrollFormat('ADP')}>
-                  <Text style={[styles.formatText, payrollFormat === 'ADP' && styles.activeFormatText]}>ADP</Text>
-                </TouchableOpacity>
-              </View>
-              <TouchableOpacity style={styles.exportButton} onPress={handlePayrollExport}>
-                <Text style={styles.exportButtonText}>Export {payrollFormat}</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          <TouchableOpacity style={styles.refreshButton} onPress={fetchAllManagerData}>
-            <Text style={styles.refreshButtonText}>↻</Text>
-          </TouchableOpacity>
         </View>
       </View>
+
+      {filter !== 'EXCEPTIONS' && filter !== 'AI' && (
+        <View style={styles.otCard}>
+          <Text style={styles.otTitle}>Payroll Export</Text>
+          <Text style={styles.otClear}>All logs in this list, in your payroll format. Separate from the Audit Export above.</Text>
+          <View style={[styles.formatSelector, { marginTop: spacing.md, alignSelf: 'flex-start' }]}>
+            <TouchableOpacity style={[styles.formatTab, payrollFormat === 'STANDARD' && styles.activeFormatTab]} onPress={() => setPayrollFormat('STANDARD')}>
+              <Text style={[styles.formatText, payrollFormat === 'STANDARD' && styles.activeFormatText]}>Standard</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.formatTab, payrollFormat === 'QUICKBOOKS' && styles.activeFormatTab]} onPress={() => setPayrollFormat('QUICKBOOKS')}>
+              <Text style={[styles.formatText, payrollFormat === 'QUICKBOOKS' && styles.activeFormatText]}>QuickBooks</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.formatTab, payrollFormat === 'ADP' && styles.activeFormatTab]} onPress={() => setPayrollFormat('ADP')}>
+              <Text style={[styles.formatText, payrollFormat === 'ADP' && styles.activeFormatText]}>ADP</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity style={[styles.exportButton, { marginTop: spacing.md }]} onPress={handlePayrollExport}>
+            <Text style={styles.exportButtonText}>Export {payrollFormat}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
 
 
           {filter === 'EXCEPTIONS' ? (
@@ -903,16 +1042,28 @@ export default function ManagerDashboard() {
             ) : (
               (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).map((log) => {
                 const isAnomaly = log.ai_anomaly_flag?.includes('⚠️');
+                const expanded = expandedLogId === log.id;
                 const employeeName = log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
                 const worksiteName = log.worksites?.name || 'Unassigned / Remote';
                 
                 return (
                   <View key={log.id} style={[styles.logCard, isAnomaly && styles.anomalyCard]}>
-                    <View style={styles.cardHeader}>
-                      <Text style={styles.employeeName}>{employeeName}</Text>
-                      <Text style={[styles.statusBadge, isAnomaly ? styles.badgeDanger : styles.badgeNormal]}>{log.ai_anomaly_flag || 'Normal Shift'}</Text>
-                    </View>
+                    <TouchableOpacity style={styles.compactRow} onPress={() => setExpandedLogId(expanded ? null : log.id)}>
+                      <View style={[styles.statusDot, { backgroundColor: isAnomaly ? colors.danger : !log.clock_out ? colors.accent : colors.success }]} />
+                      <View style={styles.compactMain}>
+                        <Text style={styles.employeeName} numberOfLines={1}>{employeeName}</Text>
+                        <Text style={styles.compactSub} numberOfLines={1}>{worksiteName} · {fmtTime(log.clock_in)} – {log.clock_out ? fmtTime(log.clock_out) : 'Active'}</Text>
+                      </View>
+                      <Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text>
+                      <Text style={styles.chevron}>{expanded ? '▾' : '▸'}</Text>
+                    </TouchableOpacity>
+                    {expanded && (
                     <View style={styles.cardBody}>
+                      {isAnomaly ? (
+                        <View style={{ alignSelf: 'flex-start' }}>
+                          <Text style={[styles.statusBadge, styles.badgeDanger]}>{log.ai_anomaly_flag}</Text>
+                        </View>
+                      ) : null}
                       <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
@@ -963,6 +1114,7 @@ export default function ManagerDashboard() {
                         )
                       )}
                     </View>
+                    )}
                   </View>
                 );
               })
@@ -1022,7 +1174,7 @@ const styles = StyleSheet.create({
   adminCardText: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary, marginTop: 2 },
   adminCardButton: { ...buttons.compact },
   adminCardButtonText: { ...buttons.compactText },
-  filterBar: { flexDirection: 'row', paddingVertical: spacing.md, backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
+  filterBar: { flexDirection: 'row', paddingVertical: spacing.md, paddingHorizontal: spacing.lg, maxWidth: 800, width: '100%', alignSelf: 'center', backgroundColor: colors.background, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder, alignItems: 'center', flexWrap: 'wrap', gap: 8 },
   filterTab: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: radius.pill, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder },
   activeFilterTab: { backgroundColor: colors.accentSoft, borderColor: colors.accentBorder },
   aiTabActive: { backgroundColor: colors.accent, borderColor: colors.accent },
@@ -1041,6 +1193,26 @@ const styles = StyleSheet.create({
   refreshButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, paddingVertical: 8, paddingHorizontal: 12, borderRadius: radius.sm },
   refreshButtonText: { fontSize: 13, color: colors.textSecondary },
   scrollContent: { padding: spacing.lg, paddingBottom: spacing.xxl, maxWidth: 800, width: '100%', alignSelf: 'center' },
+  // --- Portal redesign: summary strip, columns, queues, compact rows ---
+  summaryStrip: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.md },
+  summaryBox: { flexGrow: 1, flexBasis: 100, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, padding: spacing.md, alignItems: 'center', justifyContent: 'center', minHeight: 64 },
+  summaryValue: { fontSize: 20, fontFamily: fontFamily.bold, color: colors.textPrimary },
+  summaryLabel: { fontSize: 12, fontFamily: fontFamily.semibold, color: colors.textSecondary, textAlign: 'center', marginTop: 2 },
+  columnsWrap: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: spacing.md, alignItems: 'flex-start' },
+  column: { flex: 1, width: '100%' },
+  cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', minHeight: 44 },
+  chevron: { fontSize: 15, fontFamily: fontFamily.bold, color: colors.textSecondary },
+  queueRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.sm, borderTopWidth: 1, borderTopColor: colors.surfaceBorder, minHeight: 44 },
+  queueText: { flex: 1 },
+  queueName: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.textPrimary },
+  queueSub: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  queueApprove: { ...buttons.compact },
+  queueReject: { ...buttons.compact, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger },
+  queueMore: { fontSize: 13, fontFamily: fontFamily.semibold, color: colors.accent, marginTop: spacing.sm },
+  compactRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, minHeight: 56, paddingVertical: spacing.sm },
+  compactMain: { flex: 1 },
+  compactSub: { fontSize: 13, fontFamily: fontFamily.regular, color: colors.textSecondary },
+  statusDot: { width: 10, height: 10, borderRadius: 5 },
   menuPanel: { backgroundColor: colors.backgroundSecondary, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.md, marginHorizontal: spacing.lg, marginTop: spacing.sm, padding: spacing.sm, gap: 8 },
   menuItem: { minHeight: 44, justifyContent: 'center', paddingHorizontal: spacing.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.sm },
   menuItemRow: { flexDirection: 'row', alignItems: 'center' },
