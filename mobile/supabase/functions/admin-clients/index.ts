@@ -24,6 +24,10 @@ const json = (body: unknown, status = 200) =>
 // CRM tables and the activity log keep zero app-role policies.
 // Write actions (notes, outreach, subscription activation) arrive in
 // Phase 3; this function answers list + detail only.
+//
+// Speed: every independent fetch runs in parallel (Promise.all). The
+// first version ran them one after another and the list took far too
+// long to load; sequential fetches are the thing not to reintroduce.
 
 type Profile = {
   id: string;
@@ -39,6 +43,20 @@ type Profile = {
 function displayName(p: Profile): string {
   const joined = [p.first_name, p.last_name].filter(Boolean).join(" ");
   return p.full_name || joined || p.email || "Unknown";
+}
+
+// Last sign-in per user, from the Auth admin API (paginated, capped
+// at 1,000 users — far above current scale; revisit if it binds).
+async function loadLastSeen(db: ReturnType<typeof createClient>): Promise<Map<string, string | null>> {
+  const lastSeen = new Map<string, string | null>();
+  for (let page = 1; page <= 10; page++) {
+    const { data, error } = await db.auth.admin.listUsers({ page, perPage: 100 });
+    const users = (data as { users?: Array<{ id: string; last_sign_in_at?: string | null }> } | null)?.users || [];
+    if (error || users.length === 0) break;
+    for (const u of users) lastSeen.set(u.id, u.last_sign_in_at ?? null);
+    if (users.length < 100) break;
+  }
+  return lastSeen;
 }
 
 serve(async (req) => {
@@ -67,16 +85,16 @@ serve(async (req) => {
     const action = String(body.action || "");
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
-    const { data: businesses } = await db
-      .from("businesses")
-      .select("id, account_number, business_name, owner_id, created_at")
-      .order("created_at", { ascending: true });
-    const { data: profiles } = await db
-      .from("profiles")
-      .select("id, first_name, last_name, full_name, email, phone, role, business_id");
-    const { data: subs } = await db
-      .from("subscriptions")
-      .select("business_id, plan, status, employee_limit, trial_end, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end");
+    // All independent reads in parallel — never sequential.
+    const [bizRes, profRes, subRes, lastSeen] = await Promise.all([
+      db.from("businesses").select("id, account_number, business_name, owner_id, created_at").order("created_at", { ascending: true }),
+      db.from("profiles").select("id, first_name, last_name, full_name, email, phone, role, business_id"),
+      db.from("subscriptions").select("business_id, plan, status, employee_limit, trial_end, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end"),
+      loadLastSeen(db),
+    ]);
+    const businesses = bizRes.data;
+    const profiles = profRes.data;
+    const subs = subRes.data;
 
     const bizList = businesses || [];
     const profList = (profiles || []) as Profile[];
@@ -88,17 +106,6 @@ serve(async (req) => {
       const arr = profsByBiz.get(p.business_id) || [];
       arr.push(p);
       profsByBiz.set(p.business_id, arr);
-    }
-
-    // Last sign-in per user, from the Auth admin API (paginated, capped
-    // at 1,000 users — far above current scale; revisit if it binds).
-    const lastSeen = new Map<string, string | null>();
-    for (let page = 1; page <= 10; page++) {
-      const { data, error } = await db.auth.admin.listUsers({ page, perPage: 100 });
-      const users = (data as { users?: Array<{ id: string; last_sign_in_at?: string | null }> } | null)?.users || [];
-      if (error || users.length === 0) break;
-      for (const u of users) lastSeen.set(u.id, u.last_sign_in_at ?? null);
-      if (users.length < 100) break;
     }
 
     if (action === "list") {
@@ -170,29 +177,40 @@ serve(async (req) => {
       const sub = subByBiz.get(businessId) || null;
 
       // Footprint from tables that already exist (no new logging needed).
+      // All counts in parallel, including the member-scoped time_logs.
       const countEq = async (table: string, col: string, val: string) => {
         const { count } = await db.from(table).select("*", { count: "exact", head: true }).eq(col, val);
         return count ?? 0;
       };
-      const [shifts, expenses, documents, timeOff] = await Promise.all([
+      const countIn = async (table: string, col: string, vals: string[]) => {
+        if (vals.length === 0) return 0;
+        const { count } = await db.from(table).select("*", { count: "exact", head: true }).in(col, vals);
+        return count ?? 0;
+      };
+      const [shifts, expenses, documents, timeOff, timeLogs] = await Promise.all([
         countEq("shifts", "business_id", businessId),
         countEq("expenses", "business_id", businessId),
         countEq("documents", "business_id", businessId),
         countEq("time_off_requests", "business_id", businessId),
+        countIn("time_logs", "user_id", memberIds),
       ]);
-      let timeLogs = 0;
-      if (memberIds.length > 0) {
-        const { count } = await db.from("time_logs").select("*", { count: "exact", head: true }).in("user_id", memberIds);
-        timeLogs = count ?? 0;
-      }
 
       // Activity log: recent events + counts (bounded fetch, small scale).
-      const { data: events } = await db
-        .from("activity_events")
-        .select("id, user_id, event, meta, created_at")
-        .or(`business_id.eq.${businessId},user_id.in.(${memberIds.join(",") || "00000000-0000-0000-0000-000000000000"})`)
-        .order("created_at", { ascending: false })
-        .limit(2000);
+      // Runs in parallel with the interactions read.
+      const [eventsRes, interactionsRes] = await Promise.all([
+        db.from("activity_events")
+          .select("id, user_id, event, meta, created_at")
+          .or(`business_id.eq.${businessId},user_id.in.(${memberIds.join(",") || "00000000-0000-0000-0000-000000000000"})`)
+          .order("created_at", { ascending: false })
+          .limit(2000),
+        db.from("crm_interactions")
+          .select("id, author_id, kind, body, created_at")
+          .eq("business_id", businessId)
+          .order("created_at", { ascending: false })
+          .limit(50),
+      ]);
+      const events = eventsRes.data;
+      const interactions = interactionsRes.data;
       const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
       const counts: Record<string, number> = {};
       const counts30d: Record<string, number> = {};
@@ -209,13 +227,6 @@ serve(async (req) => {
         created_at: e.created_at,
         user: profById.get(e.user_id as string) ? displayName(profById.get(e.user_id as string)!) : null,
       }));
-
-      const { data: interactions } = await db
-        .from("crm_interactions")
-        .select("id, author_id, kind, body, created_at")
-        .eq("business_id", businessId)
-        .order("created_at", { ascending: false })
-        .limit(50);
 
       return json({
         business: {
