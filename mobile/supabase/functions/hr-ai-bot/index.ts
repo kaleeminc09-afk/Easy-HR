@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -522,9 +522,9 @@ PAYROLL:
 - Payroll CSV exports (QuickBooks, ADP, standard) live in the Manager Portal — the Payroll Export card and the Audit Export. Point there when they need the file for payroll.
 
 LAW & RULES — READ THIS BEFORE ANSWERING ANY LAW QUESTION:
-- Your break and employment rules come from a fixed table in the app, verified against official employment-standards sources on ${BREAK_RULES_VERIFIED_DATE}. You do NOT detect law changes on your own. A law that changed after that date is not in your table.
-- When you answer a break, overtime, or employment-standards question, state the rule and add that the rules were verified on ${BREAK_RULES_VERIFIED_DATE}, and that employment law changes — confirm against the official source for the province before acting on it.
-- If someone asks whether a law changed, or about a rule newer than your verified date, say plainly that your rules are as of ${BREAK_RULES_VERIFIED_DATE} and you cannot confirm anything newer — point them at the official provincial employment-standards site. Never invent a law change, a new rate, or a new threshold.
+- Your break rules and minimum-wage figures come from the LEGAL RULES block in your context, which is read live from the database on every question — quote it exactly, never from memory. Each fact carries its own verified date: state it when you answer, and add that employment law changes, so confirm against the official source for the province before acting on it.
+- You do NOT detect law changes on your own. A law that changed after the verified date in the block is not in your rules.
+- If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer — point them at the official provincial employment-standards site. Never invent a law change, a new rate, or a new threshold.
 - The province rules are a compliance aid, never legal advice. Say so when the question has legal consequences.
 
 PROFILES:
@@ -592,9 +592,9 @@ CAPABILITIES:
 - Billing: the first 30 days are free on every plan (Starter $25, Growth $49, Business $99 per month after that), a card is taken at signup, and billing lives on the Subscription screen for admins. Checkout is running in Stripe test mode — never say a real payment went through or a real card was charged. Billing questions are manager-level: point them at their manager.
 
 LAW & RULES:
-- Your break and employment rules come from a fixed table in the app, verified against official employment-standards sources on ${BREAK_RULES_VERIFIED_DATE}. You do NOT detect law changes on your own.
-- When you answer a break or employment question, state the rule and add that the rules were verified on ${BREAK_RULES_VERIFIED_DATE}, and that employment law changes — confirm against the official source for the province before acting on it.
-- If someone asks whether a law changed, or about a rule newer than your verified date, say plainly that your rules are as of ${BREAK_RULES_VERIFIED_DATE} and you cannot confirm anything newer. Never invent a law change.
+- Your break rules and minimum-wage figures come from the LEGAL RULES block in your context, which is read live from the database on every question — quote it exactly, never from memory. Each fact carries its own verified date: state it when you answer, and add that employment law changes, so confirm against the official source for the province before acting on it.
+- You do NOT detect law changes on your own. A law that changed after the verified date in the block is not in your rules.
+- If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer. Never invent a law change.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -702,11 +702,39 @@ Deno.serve(async (req) => {
     const todayInTz = new Intl.DateTimeFormat("en-US", { timeZone: callerTz, weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(new Date());
     const contextNote = `\n\nCONTEXT: Today is ${todayInTz} in the team's timezone (${callerTz}). You are talking to ${callerName} (${effectiveRole}). Convert relative dates like "Friday" or "next Monday" into YYYY-MM-DD dates using today as the anchor. Times the user gives are local wall-clock times in ${callerTz}; pass them to tools as HH:MM in 24-hour form.`;
 
+    // ----- Live legal rules -----
+    // Break rules and wage figures live in the legal_rules table and
+    // are read on every request, so a law update (one UPDATE statement)
+    // reaches the Brain immediately — no code change, no redeploy.
+    // Any failure falls back to the code table, so chat never breaks.
+    let legalRows: any[] = [];
+    let legalFromDb = false;
+    try {
+      const { data: lr, error: lrErr } = await supabase.from("legal_rules").select("rule_key, province, rule_type, payload, verified_date, source_url, updated_at");
+      if (!lrErr && lr) { legalRows = lr; legalFromDb = true; }
+    } catch { /* fall back to the code table */ }
+    const parsedLegal = parseLegalRules(legalRows, PROVINCE_BREAK_RULES, BREAK_RULES_VERIFIED_DATE);
+    const breakRules = parsedLegal.breaks;
+    const rulesFingerprint = legalFromDb ? legalRulesFingerprint(legalRows) : `fallback-${BRAIN_RULES_VERSION}`;
+    let businessProvince = "ON";
+    try {
+      if (callerBusinessId) {
+        const { data: pol } = await supabase.from("break_policies").select("province").eq("business_id", callerBusinessId).maybeSingle();
+        if (pol?.province && breakRules[pol.province]) businessProvince = pol.province;
+      }
+    } catch { /* keep the default */ }
+    const provRule = breakRules[businessProvince] || breakRules.ON;
+    const provWages = parsedLegal.wages.filter((w: any) => w.province === businessProvince);
+    const fmtLegalDate = (iso: string) => {
+      try { return new Date(iso + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }); } catch { return iso; }
+    };
+    const legalBlock = `\n\nLEGAL RULES (read live from the database on this request — quote exactly, never from memory):\n- ${provRule.name} meal break: ${provRule.meal_threshold_minutes == null ? "no express statutory meal break — employer policy governs" : `${provRule.meal_minutes} minutes after no more than ${Math.round(provRule.meal_threshold_minutes / 60)} consecutive hours`}${provRule.split_allowed ? "; may be split into two periods by agreement" : ""}. ${provRule.note} Verified ${fmtLegalDate(provRule.verified_date)}.${provWages.length ? "\n" + provWages.map((w: any) => `- ${provRule.name} minimum wage (${w.label}): $${(w.amount_cents / 100).toFixed(2)}/hr, effective ${fmtLegalDate(w.effective_from)}. Verified ${fmtLegalDate(w.verified_date)}.`).join("\n") : ""}`;
+
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
 
     let messages = [
-      { role: "system", content: systemPrompt + contextNote },
+      { role: "system", content: systemPrompt + contextNote + legalBlock },
       ...cleanHistory,
       { role: "user", content: prompt },
     ];
@@ -743,6 +771,7 @@ Deno.serve(async (req) => {
         effectiveUserId,
         effectiveRole,
         BRAIN_RULES_VERSION,
+        rulesFingerprint,
         await sha256Hex(canonicalPrompt),
         await sha256Hex(JSON.stringify(cleanHistory)),
       ].join("|"));
@@ -990,7 +1019,7 @@ Deno.serve(async (req) => {
               rest_max_per_shift: pol?.rest_max_per_shift,
               meal_paid_if_available: pol?.meal_paid_if_available,
             };
-            const rule = PROVINCE_BREAK_RULES[policy.province] || PROVINCE_BREAK_RULES.ON;
+            const rule = breakRules[policy.province] || breakRules.ON;
             const { data: active } = await supabase.from("time_logs").select("id, clock_in").eq("user_id", targetId).is("clock_out", null).maybeSingle();
             let taken: any[] = [];
             if (active) {
@@ -1001,6 +1030,7 @@ Deno.serve(async (req) => {
             output = {
               employee: targetName,
               province: rule.name,
+              rule_verified_date: rule.verified_date,
               meal_minutes: due.meal_minutes,
               meal_paid_if_available: policy.meal_paid_if_available ?? true,
               rest_minutes: due.rest_minutes,

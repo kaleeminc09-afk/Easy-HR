@@ -203,6 +203,9 @@ export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): Ov
 // employment-standards summaries. CONFIRM against the official
 // employment-standards source for the province before payroll use.
 // This table is a compliance aid, never legal advice.
+// FALLBACK ONLY: the live rules live in the legal_rules table and are
+// read per request; this copy is used only when that read fails, so a
+// law update never needs a code change or a redeploy.
 // "Paid if available" = the meal break is paid when the employee must
 // remain available to the employer / at the workstation during it.
 // "Split" = the meal may be taken as two shorter periods totalling the
@@ -1257,4 +1260,101 @@ export function resolveExpenseCandidate(
   if (list.length === 0) return { kind: "none" };
   if (list.length === 1) return { kind: "one", value: list[0] };
   return { kind: "many", values: list };
+}
+
+// ---------- Live legal rules (database-backed) ----------
+
+export interface LegalRuleRow {
+  rule_key: string;
+  province: string;
+  rule_type: string;
+  payload: any;
+  verified_date: string; // YYYY-MM-DD
+  source_url?: string | null;
+  updated_at?: string | null;
+}
+
+export type EffectiveBreakRule = ProvinceBreakRule & { verified_date: string };
+
+export interface LegalWage {
+  province: string;
+  category: string; // general | student | homeworker
+  label: string;
+  amount_cents: number;
+  effective_from: string; // YYYY-MM-DD
+  verified_date: string;
+}
+
+export interface ParsedLegalRules {
+  breaks: Record<string, EffectiveBreakRule>;
+  wages: LegalWage[];
+}
+
+function isBreakPayload(p: any): p is ProvinceBreakRule {
+  return !!p && typeof p === "object"
+    && typeof p.code === "string"
+    && typeof p.name === "string"
+    && (p.meal_threshold_minutes === null || Number.isFinite(p.meal_threshold_minutes))
+    && Number.isFinite(p.meal_minutes)
+    && typeof p.split_allowed === "boolean"
+    && (p.second_meal_threshold_minutes === null || Number.isFinite(p.second_meal_threshold_minutes))
+    && typeof p.paid_if_available === "boolean"
+    && (p.min_shift_minutes_for_meal === null || Number.isFinite(p.min_shift_minutes_for_meal))
+    && typeof p.note === "string";
+}
+
+/**
+ * Merges database legal-rule rows over the code fallback table. A row
+ * wins when its payload validates; anything missing or malformed falls
+ * back to the code table for that province, so a bad row can never
+ * break break-policy answers. Wage rows are collected separately.
+ */
+export function parseLegalRules(
+  rows: LegalRuleRow[] | null | undefined,
+  fallbackBreaks: Record<string, ProvinceBreakRule>,
+  fallbackVerifiedDate: string,
+): ParsedLegalRules {
+  const breaks: Record<string, EffectiveBreakRule> = {};
+  for (const [code, rule] of Object.entries(fallbackBreaks)) {
+    breaks[code] = { ...rule, verified_date: fallbackVerifiedDate };
+  }
+  const wages: LegalWage[] = [];
+  for (const row of rows || []) {
+    if (!row || typeof row.rule_key !== "string") continue;
+    if (row.rule_type === "break" && isBreakPayload(row.payload)) {
+      breaks[row.payload.code] = { ...row.payload, verified_date: row.verified_date || fallbackVerifiedDate };
+    } else if (row.rule_type === "min_wage" && row.payload && Number.isFinite(row.payload.amount_cents) && typeof row.payload.effective_from === "string") {
+      wages.push({
+        province: row.province,
+        category: typeof row.payload.category === "string" ? row.payload.category : "general",
+        label: typeof row.payload.label === "string" ? row.payload.label : "General",
+        amount_cents: Math.round(row.payload.amount_cents),
+        effective_from: row.payload.effective_from,
+        verified_date: row.verified_date || fallbackVerifiedDate,
+      });
+    }
+  }
+  wages.sort((a, b) => a.province.localeCompare(b.province) || a.category.localeCompare(b.category));
+  return { breaks, wages };
+}
+
+/**
+ * Deterministic fingerprint of the live rules (FNV-1a 32-bit, hex).
+ * Part of the Brain's reply-cache key: any content change — a new
+ * rate, a new verified date, a touched row — changes the fingerprint
+ * and cached law answers stop matching, so the next identical
+ * question is answered fresh. A stable table means a stable key.
+ */
+export function legalRulesFingerprint(rows: LegalRuleRow[] | null | undefined): string {
+  const canonical = (rows || [])
+    .filter((r) => r && typeof r.rule_key === "string")
+    .map((r) => [r.rule_key, r.province, r.rule_type, JSON.stringify(r.payload ?? null), r.verified_date || "", r.updated_at || ""].join("|"))
+    .sort()
+    .join("\n");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < canonical.length; i++) {
+    hash ^= canonical.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }

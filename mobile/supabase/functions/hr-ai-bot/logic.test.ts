@@ -52,6 +52,8 @@ import {
   normalizePromptForCache,
   payrollPeriodSummary,
   resolveExpenseCandidate,
+  parseLegalRules,
+  legalRulesFingerprint,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -1091,5 +1093,96 @@ describe("resolveExpenseCandidate", () => {
   });
   test("non-matching filter is none", () => {
     expect(resolveExpenseCandidate(list, { date: "2026-11-12" })).toEqual({ kind: "none" });
+  });
+});
+
+describe("parseLegalRules", () => {
+  const fallback = {
+    ON: PROVINCE_BREAK_RULES.ON,
+    BC: PROVINCE_BREAK_RULES.BC,
+  };
+  const breakRow = (code: string, meal_minutes: number, verified_date = "2026-11-13") => ({
+    rule_key: `${code}.break`,
+    province: code,
+    rule_type: "break",
+    payload: { ...PROVINCE_BREAK_RULES[code as keyof typeof PROVINCE_BREAK_RULES], meal_minutes },
+    verified_date,
+    source_url: null,
+    updated_at: "2026-11-13T00:00:00Z",
+  });
+
+  test("a valid database row overrides the fallback and carries its verified date", () => {
+    const parsed = parseLegalRules([breakRow("ON", 45)], fallback, "2026-10-28");
+    expect(parsed.breaks.ON.meal_minutes).toBe(45);
+    expect(parsed.breaks.ON.verified_date).toBe("2026-11-13");
+  });
+  test("a province with no row keeps the fallback and the fallback date", () => {
+    const parsed = parseLegalRules([breakRow("ON", 45)], fallback, "2026-10-28");
+    expect(parsed.breaks.BC.meal_minutes).toBe(30);
+    expect(parsed.breaks.BC.verified_date).toBe("2026-10-28");
+  });
+  test("a malformed payload falls back instead of breaking", () => {
+    const bad = { rule_key: "ON.break", province: "ON", rule_type: "break", payload: { code: "ON" }, verified_date: "2026-11-13" };
+    const parsed = parseLegalRules([bad as any], fallback, "2026-10-28");
+    expect(parsed.breaks.ON.meal_minutes).toBe(30);
+    expect(parsed.breaks.ON.verified_date).toBe("2026-10-28");
+  });
+  test("null rows mean pure fallback", () => {
+    const parsed = parseLegalRules(null, fallback, "2026-10-28");
+    expect(parsed.breaks.ON.meal_minutes).toBe(30);
+    expect(parsed.wages).toEqual([]);
+  });
+  test("wage rows parse and sort by province and category", () => {
+    const wage = (category: string, cents: number) => ({
+      rule_key: `ON.min_wage_${category}`,
+      province: "ON",
+      rule_type: "min_wage",
+      payload: { category, label: category, amount_cents: cents, effective_from: "2026-10-01" },
+      verified_date: "2026-11-13",
+    });
+    const parsed = parseLegalRules([wage("student", 1690), wage("general", 1795)], fallback, "2026-10-28");
+    expect(parsed.wages).toHaveLength(2);
+    expect(parsed.wages[0].category).toBe("general");
+    expect(parsed.wages[0].amount_cents).toBe(1795);
+    expect(parsed.wages[1].category).toBe("student");
+  });
+  test("a wage row without a valid amount is ignored", () => {
+    const bad = { rule_key: "ON.min_wage_general", province: "ON", rule_type: "min_wage", payload: { category: "general", effective_from: "2026-10-01" }, verified_date: "2026-11-13" };
+    expect(parseLegalRules([bad as any], fallback, "2026-10-28").wages).toEqual([]);
+  });
+});
+
+describe("legalRulesFingerprint", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    rule_key: "ON.break",
+    province: "ON",
+    rule_type: "break",
+    payload: { code: "ON", meal_minutes: 30 },
+    verified_date: "2026-11-13",
+    source_url: null,
+    updated_at: "2026-11-13T00:00:00Z",
+    ...over,
+  });
+  test("is deterministic for the same rows", () => {
+    expect(legalRulesFingerprint([row()])).toBe(legalRulesFingerprint([row()]));
+  });
+  test("is order-independent", () => {
+    const a = row();
+    const b = row({ rule_key: "BC.break", province: "BC" });
+    expect(legalRulesFingerprint([a, b])).toBe(legalRulesFingerprint([b, a]));
+  });
+  test("changes when a payload changes", () => {
+    expect(legalRulesFingerprint([row()])).not.toBe(
+      legalRulesFingerprint([row({ payload: { code: "ON", meal_minutes: 45 } })]),
+    );
+  });
+  test("changes when a verified date changes", () => {
+    expect(legalRulesFingerprint([row()])).not.toBe(
+      legalRulesFingerprint([row({ verified_date: "2026-11-14" })]),
+    );
+  });
+  test("empty and null inputs give a stable value", () => {
+    expect(legalRulesFingerprint([])).toBe(legalRulesFingerprint(null));
+    expect(legalRulesFingerprint([])).toMatch(/^[0-9a-f]{8}$/);
   });
 });
