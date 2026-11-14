@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activity';
 import { colors, fontFamily, spacing, radius, buttons } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -114,6 +115,7 @@ export default function OnboardingScreen() {
   };
 
   const signOut = async () => {
+    await logActivity('sign_out');
     await supabase.auth.signOut();
     router.replace('/');
   };

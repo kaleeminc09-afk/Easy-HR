@@ -442,3 +442,8 @@ verify_jwt = false
 # through the service-role client; the table has no app-role policies.
 [functions.submit-demo-request]
 verify_jwt = false
+
+# CRM backoffice: the caller JWT is verified at the gateway AND the
+# function checks the CRM_ADMIN_EMAILS allowlist before answering.
+[functions.admin-clients]
+verify_jwt = true

@@ -5,6 +5,7 @@ import * as Linking from 'expo-linking';
 import WebSidebar from '../components/WebSidebar';
 import WebAssistant from '../components/WebAssistant';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activity';
 import {
   useFonts,
   Inter_400Regular,
@@ -40,8 +41,12 @@ export default function RootLayout() {
   // subscription in app/index.js.
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session));
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setSession(session);
+      // CRM footprint: a fresh sign-in (not a restored session — that
+      // arrives as INITIAL_SESSION, and refreshes as TOKEN_REFRESHED).
+      // Fire-and-forget; logging never blocks the shell.
+      if (event === 'SIGNED_IN' && session) logActivity('sign_in', { userId: session.user.id });
     });
     return () => subscription.unsubscribe();
   }, []);

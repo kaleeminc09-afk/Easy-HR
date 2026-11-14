@@ -6,6 +6,7 @@ import { Link, useRouter } from 'expo-router';
 import { NAV_ICONS } from '../components/NavIcons';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activity';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
 import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
@@ -232,6 +233,9 @@ export default function App() {
   };
 
   const handleLogout = async () => {
+    // CRM footprint: log while still signed in — after signOut the
+    // session is gone and the log insert has no identity.
+    await logActivity('sign_out', { userId: session?.user?.id, businessId: myBusinessId });
     await supabase.auth.signOut();
     setActiveSession(null);
     setActiveBreak(null);

@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activity';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -200,6 +201,7 @@ export default function ProfileScreen() {
   };
 
   const handleSignOut = async () => {
+    await logActivity('sign_out');
     await supabase.auth.signOut();
     router.replace('/');
   };

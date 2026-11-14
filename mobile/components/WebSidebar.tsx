@@ -11,6 +11,7 @@ import React, { useEffect, useState } from 'react';
 import { Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { logActivity } from '../lib/activity';
 import { NAV_ICONS } from './NavIcons';
 import { colors, fontFamily, radius, spacing } from '../lib/theme';
 
@@ -57,6 +58,12 @@ export default function WebSidebar() {
 
   const isManager = role === 'manager' || role === 'admin';
 
+  // CRM footprint: log while still signed in, then sign out.
+  const handleSignOut = async () => {
+    await logActivity('sign_out');
+    await supabase.auth.signOut();
+  };
+
   return (
     <View style={styles.sidebar}>
       <Text style={styles.title}>NorthShift</Text>
@@ -82,7 +89,7 @@ export default function WebSidebar() {
         );
       })}
       </ScrollView>
-      <TouchableOpacity style={styles.signOut} onPress={() => supabase.auth.signOut()}>
+      <TouchableOpacity style={styles.signOut} onPress={handleSignOut}>
         <Text style={styles.signOutText}>Sign out</Text>
       </TouchableOpacity>
     </View>
