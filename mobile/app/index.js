@@ -432,7 +432,9 @@ export default function App() {
           user_id: session.user.id,
           clock_in: new Date().toISOString(),
           ai_anomaly_flag: viaApprovedException ? 'Exception Approved' : 'Normal Shift',
-          worksite_id: nearestWorksite.id
+          worksite_id: nearestWorksite.id,
+          clock_in_latitude: latitude,
+          clock_in_longitude: longitude
         }])
         .select()
         .single();

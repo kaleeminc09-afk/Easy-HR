@@ -159,6 +159,8 @@ export default function ScanScreen() {
           clock_in: new Date().toISOString(),
           ai_anomaly_flag: 'Normal Shift',
           worksite_id: site.id,
+          clock_in_latitude: latitude,
+          clock_in_longitude: longitude,
         }]);
         if (inErr) throw new Error(inErr.message);
         setResult({ ok: true, title: 'Clocked in', message: `You are on the clock at ${site.name}.` });
