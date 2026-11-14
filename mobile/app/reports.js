@@ -25,6 +25,7 @@ export default function ReportsScreen() {
     else router.replace('/');
   };
   const [loading, setLoading] = useState(true);
+  const [weekLoading, setWeekLoading] = useState(true);
   const [isManager, setIsManager] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [rows, setRows] = useState([]);
@@ -56,6 +57,7 @@ export default function ReportsScreen() {
 
   const loadWeek = async () => {
     setMessage('');
+    setWeekLoading(true);
     const fromIso = new Date(weekStart).toISOString();
     const toIso = new Date(weekStart + WEEK_MS).toISOString();
     const { data: planned, error: e1 } = await supabase
@@ -66,18 +68,20 @@ export default function ReportsScreen() {
       .lt('start_time', toIso);
     const { data: logs, error: e2 } = await supabase
       .from('time_logs')
-      .select('user_id, clock_in, clock_out')
+      .select('user_id, clock_in, clock_out, ai_anomaly_flag')
       .gte('clock_in', fromIso)
       .lt('clock_in', toIso);
     if (e1 || e2) {
       setMessage('Could not load this week. ' + ((e1 || e2).message || ''));
       setRows([]);
+      setWeekLoading(false);
       return;
     }
     setRows(plannedVsActual(planned || [], logs || [], weekStart, Date.now()));
+    setWeekLoading(false);
   };
 
-  if (loading) {
+  if (loading || weekLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={colors.accent} />

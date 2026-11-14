@@ -8,8 +8,9 @@ import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
 import { getCurrentPosition } from '../lib/location';
+import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
+import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES, isVoidedLog, STALE_OPEN_HOURS } from '../supabase/functions/hr-ai-bot/logic';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -32,6 +33,7 @@ export default function App() {
 
   // Time Tracker State
   const [activeSession, setActiveSession] = useState(null);
+  const [autoClosedNotice, setAutoClosedNotice] = useState('');
   const [activeBreak, setActiveBreak] = useState(null);
   const [breakSeconds, setBreakSeconds] = useState(0);
   const [now, setNow] = useState(new Date());
@@ -246,6 +248,13 @@ export default function App() {
 
   const fetchTimeData = async (userId) => {
     try {
+      // Auto-close sweep first: a shift left open 24h+ is closed and
+      // voided (with an audit row) before the active shift loads, so
+      // a forgotten shift never shows as still running.
+      const closedCount = await sweepStaleOpenShifts(supabase, userId, userId);
+      if (closedCount > 0) {
+        setAutoClosedNotice(`A shift left open over 24 hours was auto-closed and voided. Your manager can see the audit record — talk to them if this looks wrong.`);
+      }
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
 
@@ -285,6 +294,7 @@ export default function App() {
       if (logsData) {
         let totalMs = 0;
         logsData.forEach(log => {
+          if (isVoidedLog(log.ai_anomaly_flag)) return;
           const start = new Date(log.clock_in).getTime();
           const end = log.clock_out ? new Date(log.clock_out).getTime() : new Date().getTime();
           if (end > start) totalMs += (end - start);
@@ -802,6 +812,14 @@ export default function App() {
           <Text style={styles.heroTime}>{formatHeroTime(now)}</Text>
           <Text style={styles.heroDate}>{formatHeroDate(now)}</Text>
         </View>
+        {autoClosedNotice ? (
+          <TouchableOpacity onPress={() => setAutoClosedNotice('')}>
+            <View style={styles.empExceptionBox}>
+              <Text style={styles.empExceptionText}>{autoClosedNotice}</Text>
+              <Text style={styles.empExceptionText}>Tap to dismiss.</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
         {outOfRangeData ? (
           <View style={styles.empExceptionBox}>
             <Text style={styles.empExceptionTitle}>Out of Range</Text>
@@ -854,6 +872,9 @@ export default function App() {
                   </Text>
                   {activeBreak ? (
                     <Text style={styles.empShiftSub}>Shift: {formatTimeCounter(activeSessionSeconds)}</Text>
+                  ) : null}
+                  {(now.getTime() - new Date(activeSession.clock_in).getTime()) / 3600000 >= STALE_OPEN_HOURS ? (
+                    <Text style={styles.empShiftSub}>You've been clocked in {Math.floor((now.getTime() - new Date(activeSession.clock_in).getTime()) / 3600000)}h — forgot to clock out? Shifts left open 24 hours are auto-closed and voided.</Text>
                   ) : null}
                 </>
               ) : (

@@ -1525,7 +1525,7 @@ Deno.serve(async (req) => {
           const startIso = new Date(weekStartMs(Date.now())).toISOString();
           const { data, error } = await supabase
             .from("time_logs")
-            .select("user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .select("user_id, clock_in, clock_out, ai_anomaly_flag, profiles!time_logs_user_id_fkey(full_name)")
             .in("user_id", bizUserIds)
             .gte("clock_in", startIso);
           if (error) {
@@ -1536,6 +1536,7 @@ Deno.serve(async (req) => {
               full_name: l.profiles?.full_name,
               clock_in: l.clock_in,
               clock_out: l.clock_out,
+              ai_anomaly_flag: l.ai_anomaly_flag,
             })), Date.now());
             output = otRows.length === 0
               ? { message: "Nobody has logged hours yet this week." }
@@ -1905,12 +1906,12 @@ Deno.serve(async (req) => {
         } else if (fn === "get_my_hours") {
           const startIso = new Date(weekStartMs(Date.now())).toISOString();
           const { data, error } = await supabase.from("time_logs")
-            .select("clock_in, clock_out")
+            .select("clock_in, clock_out, ai_anomaly_flag")
             .eq("user_id", effectiveUserId).gte("clock_in", startIso);
           if (error) {
             output = { error: error.message };
           } else {
-            const logs = (data || []).map((l: any) => ({ user_id: effectiveUserId, clock_in: l.clock_in, clock_out: l.clock_out }));
+            const logs = (data || []).map((l: any) => ({ user_id: effectiveUserId, clock_in: l.clock_in, clock_out: l.clock_out, ai_anomaly_flag: l.ai_anomaly_flag }));
             const rows = payrollPeriodSummary(logs, Date.now());
             const week = rows[0] || { hours: 0, overtime_hours: 0 };
             output = {

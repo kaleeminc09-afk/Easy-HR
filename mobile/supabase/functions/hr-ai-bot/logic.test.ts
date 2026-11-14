@@ -4,6 +4,10 @@
 import {
   haversineMeters,
   computeTodayHours,
+  isVoidedLog,
+  isReviewedFlag,
+  autoCloseForOpenShift,
+  AUTO_CLOSE_HOURS,
   matchByName,
   findNearestWorksite,
   anomalyFlagForShift,
@@ -428,6 +432,127 @@ describe("audit CSV export", () => {
       { ...base, full_name: "Rao, Asha", clock_in: iso(0), clock_out: iso(2) },
     ], NOW);
     expect(csv.split("\n")[1]).toContain('"Rao, Asha"');
+  });
+});
+
+describe("voided and reviewed logs (Nov 14 testing gaps)", () => {
+  test("isVoidedLog matches only the void marker", () => {
+    expect(isVoidedLog("Voided by manager — Normal Shift")).toBe(true);
+    expect(isVoidedLog("Voided — auto-closed after 24h open")).toBe(true);
+    expect(isVoidedLog("Normal Shift")).toBe(false);
+    expect(isVoidedLog("⚠️ Flagged: Unusually Short Shift (< 3 Mins)")).toBe(false);
+    expect(isVoidedLog(null)).toBe(false);
+    expect(isVoidedLog(undefined)).toBe(false);
+  });
+
+  test("isReviewedFlag matches approve/reject decisions only", () => {
+    expect(isReviewedFlag("✓ Approved by manager — Flagged: Excessive Duration (> 12 Hours)")).toBe(true);
+    expect(isReviewedFlag("✕ Rejected by manager — Flagged: Excessive Duration (> 12 Hours)")).toBe(true);
+    expect(isReviewedFlag("⚠️ Flagged: Excessive Duration (> 12 Hours)")).toBe(false);
+    expect(isReviewedFlag("Normal Shift")).toBe(false);
+  });
+
+  test("computeTodayHours counts voided logs as 0", () => {
+    const now = new Date(2026, 9, 19, 18).getTime();
+    const at = (h: number) => new Date(2026, 9, 19, h).toISOString();
+    expect(computeTodayHours([
+      { clock_in: at(9), clock_out: at(17) },
+      { clock_in: at(9), clock_out: at(17), ai_anomaly_flag: "Voided by manager — test data" },
+    ], now)).toBe(8);
+  });
+
+  test("computeWeeklyOvertime excludes voided logs", () => {
+    const now = new Date(2026, 9, 24, 12).getTime();
+    const at = (d: number, h: number) => new Date(2026, 9, d, h).toISOString();
+    const rows = computeWeeklyOvertime([
+      { user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17) },
+      { user_id: "asha", clock_in: at(20, 9), clock_out: at(20, 17), ai_anomaly_flag: "Voided by manager — duplicate" },
+    ], now);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hours).toBe(8);
+    expect(rows[0].status).toBe("ok");
+  });
+
+  test("plannedVsActual ignores voided logs for actual hours and worked counts", () => {
+    const weekStart = new Date(2026, 9, 19).getTime();
+    const now = new Date(2026, 9, 24, 12).getTime();
+    const at = (day: number, h: number) => new Date(2026, 9, day, h).toISOString();
+    const rows = plannedVsActual(
+      [{ user_id: "asha", start_time: at(19, 9), end_time: at(19, 17) }],
+      [{ user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17), ai_anomaly_flag: "Voided by manager — test" }],
+      weekStart, now,
+    );
+    expect(rows[0].actualHours).toBe(0);
+    expect(rows[0].workedCount).toBe(0);
+    expect(rows[0].missedCount).toBe(1);
+  });
+
+  test("audit CSV keeps a voided row as a record with 0 paid hours and excludes it from week totals", () => {
+    const T0 = new Date(2026, 9, 19, 9, 0, 0);
+    const iso = (h: number) => new Date(T0.getTime() + h * 3600000).toISOString();
+    const NOW = T0.getTime() + 72 * 3600000;
+    const csv = buildAuditCsv([
+      { log_id: "a", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca", worksite_name: "Depot", clock_in: iso(0), clock_out: iso(8), anomaly_flag: "Normal Shift", breaks: [] },
+      { log_id: "b", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca", worksite_name: "Depot", clock_in: iso(24), clock_out: iso(32), anomaly_flag: "Voided by manager — test data", breaks: [] },
+    ], NOW);
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[1]).toContain(",8.00,0,8.00,");
+    expect(lines[2]).toContain("Voided by manager");
+    expect(lines[2]).toContain(",8.00,0,0.00,");
+    expect(lines[1]).toContain(",8.00,0.00");
+  });
+
+  test("findMealBreakViolations honours the province rule passed in", () => {
+    const shift = {
+      log_id: "s1", user_id: "u1", full_name: "Asha Rao",
+      clock_in: new Date(2026, 9, 19, 9).toISOString(),
+      clock_out: new Date(2026, 9, 19, 15).toISOString(),
+      breaks: [],
+    };
+    const now = new Date(2026, 9, 19, 16).getTime();
+    expect(findMealBreakViolations([shift], now, PROVINCE_BREAK_RULES.NB)).toHaveLength(0);
+    const nl = findMealBreakViolations([shift], now, PROVINCE_BREAK_RULES.NL);
+    expect(nl).toHaveLength(1);
+    expect(nl[0].message).toContain("60-minute");
+    expect(findMealBreakViolations([shift], now)).toHaveLength(1);
+  });
+});
+
+describe("auto-close (24h threshold, Nov 14 decision)", () => {
+  test("threshold is 24 hours", () => {
+    expect(AUTO_CLOSE_HOURS).toBe(24);
+  });
+
+  test("a shift open under 24h is left alone", () => {
+    const clockIn = new Date(2026, 9, 19, 9).toISOString();
+    expect(autoCloseForOpenShift(clockIn, new Date(2026, 9, 20, 8, 59).getTime())).toBeNull();
+  });
+
+  test("a shift open 24h or more closes at exactly clock_in + 24h, voided", () => {
+    const clockIn = new Date(2026, 9, 19, 9).toISOString();
+    const at24 = autoCloseForOpenShift(clockIn, new Date(2026, 9, 20, 9).getTime());
+    expect(at24).not.toBeNull();
+    expect(at24!.clock_out).toBe(new Date(2026, 9, 20, 9).toISOString());
+    expect(isVoidedLog(at24!.flag)).toBe(true);
+    const at30 = autoCloseForOpenShift(clockIn, new Date(2026, 9, 20, 15).getTime());
+    expect(at30!.clock_out).toBe(new Date(2026, 9, 20, 9).toISOString());
+  });
+
+  test("an unparseable clock-in never closes", () => {
+    expect(autoCloseForOpenShift("not-a-date", Date.now())).toBeNull();
+  });
+
+  test("payrollPeriodSummary excludes voided logs", () => {
+    const now = new Date(2026, 9, 24, 12).getTime();
+    const at = (d: number, h: number) => new Date(2026, 9, d, h).toISOString();
+    const rows = payrollPeriodSummary([
+      { user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17) },
+      { user_id: "asha", clock_in: at(20, 9), clock_out: at(20, 17), ai_anomaly_flag: "Voided by manager — duplicate" },
+    ], now);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hours).toBe(8);
+    expect(rows[0].overtime_hours).toBe(0);
   });
 });
 

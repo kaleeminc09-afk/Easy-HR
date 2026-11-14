@@ -93,18 +93,39 @@ export default function ScanScreen() {
       // A missing radius means no limit was set (same as the GPS flow,
       // where distance > null is false) — the manager sets the radius.
       if (site.radius_meters != null && distance > site.radius_meters) {
-        await supabase.from('time_exceptions').insert([{
-          user_id: session.user.id,
-          worksite_id: site.id,
-          attempted_at: new Date().toISOString(),
-          latitude,
-          longitude,
-          distance_meters: Math.round(distance),
-          reason_note: 'QR scan outside worksite radius',
-          status: 'pending',
-        }]);
-        setResult({ ok: false, title: 'Too far from this worksite', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). An exception was filed for your manager. Move within range and scan again.` });
-        return;
+        // Approved-exception unlock, same day-scope rule as GPS
+        // clock-in: an approval covers the whole day at this worksite,
+        // and a pending request waits without a duplicate filing.
+        const todayStart = new Date();
+        todayStart.setHours(0, 0, 0, 0);
+        const { data: todaysExceptions } = await supabase
+          .from('time_exceptions')
+          .select('status')
+          .eq('user_id', session.user.id)
+          .eq('worksite_id', site.id)
+          .in('status', ['pending', 'approved'])
+          .gte('attempted_at', todayStart.toISOString())
+          .order('attempted_at', { ascending: false })
+          .limit(1);
+        const latest = todaysExceptions && todaysExceptions[0];
+        if (!(latest && latest.status === 'approved')) {
+          if (latest && latest.status === 'pending') {
+            setResult({ ok: false, title: 'Exception waiting for approval', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). Your exception request is waiting for manager approval.` });
+            return;
+          }
+          await supabase.from('time_exceptions').insert([{
+            user_id: session.user.id,
+            worksite_id: site.id,
+            attempted_at: new Date().toISOString(),
+            latitude,
+            longitude,
+            distance_meters: Math.round(distance),
+            reason_note: 'QR scan outside worksite radius',
+            status: 'pending',
+          }]);
+          setResult({ ok: false, title: 'Too far from this worksite', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). An exception was filed for your manager. Move within range and scan again.` });
+          return;
+        }
       }
 
       const { data: open } = await supabase

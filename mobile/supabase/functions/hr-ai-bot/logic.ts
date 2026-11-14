@@ -17,14 +17,57 @@ export function haversineMeters(lat1: number, lon1: number, lat2: number, lon2: 
 export interface ShiftLog {
   clock_in: string;
   clock_out: string | null;
+  ai_anomaly_flag?: string | null;
 }
 
-/** Total hours worked since local midnight, given raw time_logs rows. */
+// ---- Voided / reviewed time logs ----
+// A voided log is dead for payroll: it stays visible as a record, but
+// every hours computation in this file skips it. The void marker lives
+// in ai_anomaly_flag (no schema change); a void is always paired with
+// an agent_audit_logs row written by the same action (see manager.js).
+export const VOIDED_FLAG_PREFIX = "Voided";
+
+export function isVoidedLog(flag: string | null | undefined): boolean {
+  return (flag || "").startsWith(VOIDED_FLAG_PREFIX);
+}
+
+/** A log a manager already approved or rejected in anomaly review. */
+export function isReviewedFlag(flag: string | null | undefined): boolean {
+  const f = flag || "";
+  return f.startsWith("✓ Approved by manager") || f.startsWith("✕ Rejected by manager");
+}
+
+// ---- Auto-close: a shift left open too long ----
+// Threshold decided by the owner (Nov 14, 2026): 24 hours. The close
+// books the shift as open exactly 24h and VOIDS it — no invented
+// end-of-shift time, no payable hours — and the caller must write an
+// agent_audit_logs row for the action (see lib/autoClose.js). The
+// 12h mark only surfaces a "forgot to clock out?" warning.
+export const AUTO_CLOSE_HOURS = 24;
+export const STALE_OPEN_HOURS = 12;
+
+export interface AutoCloseResult {
+  clock_out: string;
+  flag: string;
+}
+
+export function autoCloseForOpenShift(clockIn: string, nowMs: number): AutoCloseResult | null {
+  const inMs = new Date(clockIn).getTime();
+  if (Number.isNaN(inMs)) return null;
+  if (nowMs - inMs < AUTO_CLOSE_HOURS * 3600000) return null;
+  return {
+    clock_out: new Date(inMs + AUTO_CLOSE_HOURS * 3600000).toISOString(),
+    flag: "Voided — auto-closed after 24h open (system action)",
+  };
+}
+
+/** Total hours worked since local midnight, given raw time_logs rows. Voided logs count 0. */
 export function computeTodayHours(logs: ShiftLog[], nowMs: number): number {
   const todayStart = new Date(nowMs);
   todayStart.setHours(0, 0, 0, 0);
   let ms = 0;
   for (const log of logs) {
+    if (isVoidedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (s >= todayStart.getTime()) {
       const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
@@ -145,6 +188,7 @@ export interface WeeklyShiftLog {
   full_name?: string | null;
   clock_in: string;
   clock_out: string | null;
+  ai_anomaly_flag?: string | null;
 }
 
 export type OvertimeStatus = "ok" | "approaching" | "overtime";
@@ -176,6 +220,7 @@ export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): Ov
   const end = start + 7 * 24 * 3600 * 1000;
   const totals = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
+    if (isVoidedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (Number.isNaN(s) || s < start || s >= end) continue;
     const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
@@ -509,10 +554,10 @@ export interface ComplianceFlag {
 }
 
 /** Flags every non-compliant shift, newest first. */
-export function findMealBreakViolations(shifts: ShiftWithBreaks[], nowMs: number): ComplianceFlag[] {
+export function findMealBreakViolations(shifts: ShiftWithBreaks[], nowMs: number, rule: ProvinceBreakRule = PROVINCE_BREAK_RULES.ON): ComplianceFlag[] {
   const flags: ComplianceFlag[] = [];
   for (const s of shifts) {
-    const v = checkMealBreakCompliance(s, s.breaks, nowMs);
+    const v = checkMealBreakComplianceForRule(s, s.breaks, nowMs, rule);
     if (v) {
       flags.push({
         log_id: s.log_id,
@@ -551,7 +596,7 @@ export interface AuditShift {
   breaks: AuditBreak[];
 }
 
-function csvCell(v: string): string {
+export function csvCell(v: string): string {
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 
@@ -573,8 +618,10 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
   const closed = shifts.filter((s) => s.clock_out);
 
   // Person-week gross totals (Mon-Sun local), the overtime base.
+  // Voided shifts stay in the file as a record, but count 0 hours.
   const weekTotals = new Map<string, number>();
   for (const s of closed) {
+    if (isVoidedLog(s.anomaly_flag)) continue;
     const key = `${s.user_id}|${weekStartMs(new Date(s.clock_in).getTime())}`;
     const hrs = (new Date(s.clock_out as string).getTime() - new Date(s.clock_in).getTime()) / 3600000;
     weekTotals.set(key, (weekTotals.get(key) || 0) + hrs);
@@ -617,6 +664,8 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
     const weekTotal = weekTotals.get(weekKey) || 0;
     const weekOt = Math.max(0, weekTotal - OT_THRESHOLD_HOURS);
     const compliant = checkMealBreakCompliance(s, s.breaks, nowMs) ? "No" : "Yes";
+    const voided = isVoidedLog(s.anomaly_flag);
+    const paidHours = voided ? "0.00" : ((grossMin - unpaidMin) / 60).toFixed(2);
 
     const row = [
       nameOf(s),
@@ -627,7 +676,7 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
       fmtTime(s.clock_out as string),
       (grossMin / 60).toFixed(2),
       String(unpaidMin),
-      ((grossMin - unpaidMin) / 60).toFixed(2),
+      paidHours,
       breakParts.length > 0 ? breakParts.join("; ") : "None",
       (s.anomaly_flag || "").trim(),
       compliant,
@@ -821,6 +870,7 @@ export function plannedVsActual(
 
   const logDaysByUser = new Map<string, Set<string>>();
   for (const l of logs) {
+    if (isVoidedLog(l.ai_anomaly_flag)) continue;
     const ci = Date.parse(l.clock_in);
     if (Number.isNaN(ci)) continue;
     if (!logDaysByUser.has(l.user_id)) logDaysByUser.set(l.user_id, new Set());
@@ -849,6 +899,7 @@ export function plannedVsActual(
   }
 
   for (const l of logs) {
+    if (isVoidedLog(l.ai_anomaly_flag)) continue;
     const ci = Date.parse(l.clock_in);
     if (Number.isNaN(ci) || ci < weekStart || ci >= weekEnd) continue;
     const row = ensure(l.user_id);
@@ -1177,6 +1228,7 @@ export interface PayrollLogLike {
   full_name?: string | null;
   clock_in: string;
   clock_out?: string | null;
+  ai_anomaly_flag?: string | null;
 }
 
 export interface PayrollRow {
@@ -1198,6 +1250,7 @@ export interface PayrollRow {
 export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number): PayrollRow[] {
   const weekMs = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
+    if (isVoidedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (Number.isNaN(s)) continue;
     const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;

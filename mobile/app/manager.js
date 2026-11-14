@@ -5,8 +5,9 @@ import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { NAV_ICONS } from '../components/NavIcons';
 import { supabase } from '../lib/supabase';
 import { fetchBillingState } from '../lib/billing';
+import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, computeTodayHours, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, computeTodayHours, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput, isVoidedLog, isReviewedFlag, csvCell } from '../supabase/functions/hr-ai-bot/logic';
 import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
@@ -25,6 +26,7 @@ export default function ManagerDashboard() {
   const params = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [isAuthorized, setIsAuthorized] = useState(false);
+  const [noSession, setNoSession] = useState(false);
   const [userRole, setUserRole] = useState('manager');
   const [businessName, setBusinessName] = useState('');
   const [currentUser, setCurrentUser] = useState(null);
@@ -56,7 +58,7 @@ export default function ManagerDashboard() {
   const [creatingSched, setCreatingSched] = useState(false);
   const [exportDays, setExportDays] = useState(14);
   const [exportMsg, setExportMsg] = useState('');
-  const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, EXCEPTIONS, AI
+  const [filter, setFilter] = useState('ALL'); // ALL, ANOMALIES, REVIEWED, EXCEPTIONS, AI
   const [expandedLogId, setExpandedLogId] = useState(null);
   // Tool cards start collapsed except Build Schedule (the daily action);
   // headers carry the key number so the state is visible without opening.
@@ -88,10 +90,14 @@ export default function ManagerDashboard() {
       setLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
+        // Expired session is NOT a permission problem: say so, instead
+        // of the "Access Denied / manager account" card (Nov 14 test).
+        setNoSession(true);
         setIsAuthorized(false);
         setLoading(false);
         return;
       }
+      setNoSession(false);
 
       setCurrentUser(session.user);
       const { data: profile, error: profileError } = await supabase
@@ -151,6 +157,12 @@ export default function ManagerDashboard() {
   };
 
   const fetchAllManagerData = async () => {
+    // Auto-close sweep first: shifts open 24h+ are closed and voided
+    // (with an audit row each) before the list loads, so the portal
+    // never shows a stale open shift as live.
+    const { data: { user: sweepUser } } = await supabase.auth.getUser();
+    if (sweepUser) await sweepStaleOpenShifts(supabase, sweepUser.id, null);
+
     const { data: logsData, error: logsError } = await supabase
       .from('time_logs')
       .select(`
@@ -322,6 +334,58 @@ export default function ManagerDashboard() {
     }
   };
 
+  // Void a time log: the record stays visible, counts 0 hours
+  // everywhere, and the action is written to agent_audit_logs. No
+  // void without a trail: if the audit insert fails, the flag is
+  // rolled back and nothing changes. Closed logs only — an open
+  // shift has no payable hours to void.
+  const [voidingLogId, setVoidingLogId] = useState(null);
+  const [voidNote, setVoidNote] = useState('');
+  const [voidMsg, setVoidMsg] = useState('');
+
+  const handleVoidLog = async (logId, note) => {
+    const log = logs.find((l) => l.id === logId);
+    if (!log || !log.clock_out || isVoidedLog(log.ai_anomaly_flag)) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setVoidMsg('Could not verify your session. Sign in again and retry.');
+      return;
+    }
+    const original = (log.ai_anomaly_flag || '').replace(/⚠️\s*/g, '').trim() || 'Normal Shift';
+    const notePart = note && note.trim() ? ` — "${note.trim()}"` : '';
+    const newFlag = `Voided by manager — ${original}${notePart}`;
+    const { error: updErr } = await supabase
+      .from('time_logs')
+      .update({ ai_anomaly_flag: newFlag })
+      .eq('id', logId);
+    if (updErr) {
+      setVoidMsg('Void failed: ' + updErr.message);
+      return;
+    }
+    const { error: auditErr } = await supabase.from('agent_audit_logs').insert([{
+      user_id: user.id,
+      action_type: 'time_log_voided',
+      payload: {
+        log_id: logId,
+        employee_user_id: log.user_id,
+        clock_in: log.clock_in,
+        clock_out: log.clock_out,
+        previous_flag: log.ai_anomaly_flag,
+        reason: (note && note.trim()) || 'Voided by manager',
+      },
+      status: 'completed',
+    }]);
+    if (auditErr) {
+      await supabase.from('time_logs').update({ ai_anomaly_flag: log.ai_anomaly_flag }).eq('id', logId);
+      setVoidMsg('Void failed: the audit record could not be written. Nothing was changed.');
+      return;
+    }
+    setVoidingLogId(null);
+    setVoidNote('');
+    setVoidMsg('');
+    fetchAllManagerData();
+  };
+
   const formatDateTime = (isoString) => {
     if (!isoString) return 'Active Shift';
     const date = new Date(isoString);
@@ -343,15 +407,18 @@ export default function ManagerDashboard() {
   };
 
   const handlePayrollExport = () => {
-    // Keeping your existing export logic exactly as it was
-    if (logs.length === 0) return;
+    // Voided logs are never payable: excluded here (the audit export
+    // keeps them, flagged, as the record). Rows go through csvCell so
+    // a quote or line break in a name or review note cannot break the file.
+    const payableLogs = logs.filter(l => !isVoidedLog(l.ai_anomaly_flag));
+    if (payableLogs.length === 0) return;
     let headers = [];
     let rows = [];
     let filename = '';
 
     if (payrollFormat === 'QUICKBOOKS') {
       headers = ['Employee', 'Email', 'Location', 'Date', 'Total Hours', 'Classification'];
-      rows = logs.map(log => {
+      rows = payableLogs.map(log => {
         const name = (log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`).replace(/,/g, '');
         const email = log.profiles?.email || '';
         const worksite = (log.worksites?.name || 'Office').replace(/,/g, '');
@@ -362,33 +429,33 @@ export default function ManagerDashboard() {
           hours = (diffMs / (1000 * 60 * 60)).toFixed(2);
         }
         const payType = log.ai_anomaly_flag?.includes('⚠️') ? 'Review Needed' : 'Regular Time';
-        return `"${name}","${email}","${worksite}","${date}","${hours}","${payType}"`;
+        return [name, email, worksite, date, hours, payType].map(csvCell).join(',');
       });
       filename = `quickbooks_payroll_${new Date().toISOString().split('T')[0]}.csv`;
 
     } else if (payrollFormat === 'ADP') {
       headers = ['Employee Name', 'Email', 'Worksite', 'Clock In', 'Clock Out', 'Status Code'];
-      rows = logs.map(log => {
+      rows = payableLogs.map(log => {
         const name = (log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`).replace(/,/g, '');
         const email = log.profiles?.email || '';
         const worksite = (log.worksites?.name || 'Office').replace(/,/g, '');
         const clockIn = log.clock_in ? new Date(log.clock_in).toISOString() : '';
         const clockOut = log.clock_out ? new Date(log.clock_out).toISOString() : '';
         const statusCode = log.ai_anomaly_flag?.includes('⚠️') ? 'ERR-FLAG' : 'REG';
-        return `"${name}","${email}","${worksite}","${clockIn}","${clockOut}","${statusCode}"`;
+        return [name, email, worksite, clockIn, clockOut, statusCode].map(csvCell).join(',');
       });
       filename = `adp_workforce_export_${new Date().toISOString().split('T')[0]}.csv`;
 
     } else {
       headers = ['Employee Name', 'Email', 'Worksite', 'Clock In', 'Clock Out', 'Status'];
-      rows = logs.map(log => {
+      rows = payableLogs.map(log => {
         const name = (log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`).replace(/,/g, '');
         const email = log.profiles?.email || '';
         const worksite = (log.worksites?.name || 'Unassigned').replace(/,/g, '');
         const clockIn = log.clock_in ? new Date(log.clock_in).toISOString() : '';
         const clockOut = log.clock_out ? new Date(log.clock_out).toISOString() : '';
         const status = (log.ai_anomaly_flag || 'Normal Shift').replace(/,/g, '');
-        return `"${name}","${email}","${worksite}","${clockIn}","${clockOut}","${status}"`;
+        return [name, email, worksite, clockIn, clockOut, status].map(csvCell).join(',');
       });
       filename = `easy_hr_standard_export_${new Date().toISOString().split('T')[0]}.csv`;
     }
@@ -460,6 +527,14 @@ export default function ManagerDashboard() {
   // Summary strip + queue derivations (computed from loaded rows only).
   const onShiftNow = logs.filter(l => l.clock_in && !l.clock_out).length;
   const anomalyCount = logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')).length;
+  const reviewedCount = logs.filter(l => isReviewedFlag(l.ai_anomaly_flag)).length;
+  // Reviewed items keep a visible home: without this tab, approving or
+  // denying an anomaly made it vanish with no trail (Nov 14 test).
+  const visibleLogs = filter === 'ANOMALIES'
+    ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️'))
+    : filter === 'REVIEWED'
+      ? logs.filter(l => isReviewedFlag(l.ai_anomaly_flag))
+      : logs;
   const hoursToday = computeTodayHours(logs.filter(l => l.user_id), Date.now());
   const pendingExcList = exceptions.filter(e => e.status === 'pending');
   const anomalyList = logs.filter(l => l.ai_anomaly_flag?.includes('⚠️'));
@@ -471,6 +546,7 @@ export default function ManagerDashboard() {
       full_name: l.profiles?.full_name,
       clock_in: l.clock_in,
       clock_out: l.clock_out,
+      ai_anomaly_flag: l.ai_anomaly_flag,
     })),
     Date.now()
   );
@@ -501,8 +577,10 @@ export default function ManagerDashboard() {
         return;
       }
       const csv = buildAuditCsv(rows, Date.now());
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const filename = `northshift-audit-${stamp}.csv`;
+      const dayKey = (ms) => new Date(ms).toISOString().split('T')[0];
+      const filename = `northshift-audit-${dayKey(sinceMs)}-to-${dayKey(Date.now())}.csv`;
+      const rangeLabel = `${new Date(sinceMs).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+      const exportDoneMsg = `Exported ${rows.length} completed shift${rows.length === 1 ? '' : 's'} (${rangeLabel}).`;
       if (Platform.OS === 'web') {
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
@@ -511,7 +589,7 @@ export default function ManagerDashboard() {
         a.download = filename;
         a.click();
         URL.revokeObjectURL(url);
-        setExportMsg(`Exported ${rows.length} shifts.`);
+        setExportMsg(exportDoneMsg);
       } else {
         const { File, Paths } = require('expo-file-system');
         const Sharing = require('expo-sharing');
@@ -519,7 +597,7 @@ export default function ManagerDashboard() {
         file.write(csv);
         if (await Sharing.isAvailableAsync()) {
           await Sharing.shareAsync(file.uri, { mimeType: 'text/csv', dialogTitle: 'NorthShift audit export' });
-          setExportMsg(`Exported ${rows.length} shifts.`);
+          setExportMsg(exportDoneMsg);
         } else {
           setExportMsg('Sharing is not available on this device.');
         }
@@ -530,9 +608,19 @@ export default function ManagerDashboard() {
   };
 
   const fourteenDaysAgo = Date.now() - 14 * 24 * 3600 * 1000;
+  // The check runs the BUSINESS's province rule (not always Ontario)
+  // over the last 14 days. Short shifts are never violations — the
+  // rule only bites after meal_threshold_minutes of continuous work —
+  // so the all-clear message states what was actually checked instead
+  // of claiming every shift had a meal break (Nov 14 test).
+  const complianceRule = PROVINCE_BREAK_RULES[breakPolicy?.province] || PROVINCE_BREAK_RULES.ON;
+  const complianceWindow = logs.filter(l => l.user_id && new Date(l.clock_in).getTime() >= fourteenDaysAgo);
+  const complianceChecked = complianceRule.meal_threshold_minutes == null ? 0 : complianceWindow.filter(l => {
+    const end = l.clock_out ? new Date(l.clock_out).getTime() : Date.now();
+    return (end - new Date(l.clock_in).getTime()) / 60000 > complianceRule.meal_threshold_minutes;
+  }).length;
   const complianceFlags = findMealBreakViolations(
-    logs
-      .filter(l => l.user_id && new Date(l.clock_in).getTime() >= fourteenDaysAgo)
+    complianceWindow
       .map(l => ({
         log_id: l.id,
         user_id: l.user_id,
@@ -543,7 +631,8 @@ export default function ManagerDashboard() {
           .filter(b => b.time_log_id === l.id)
           .map(b => ({ start_time: b.start_time, end_time: b.end_time })),
       })),
-    Date.now()
+    Date.now(),
+    complianceRule
   );
 
   if (loading) {
@@ -560,11 +649,23 @@ export default function ManagerDashboard() {
       <SafeAreaView style={styles.container}>
         <View style={styles.centerContainer}>
           <View style={styles.deniedCard}>
-            <Text style={styles.deniedTitle}>Access Denied</Text>
-            <Text style={styles.deniedText}>You must be logged in with a Manager account to view this portal.</Text>
-            <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
-              <Text style={styles.primaryButtonText}>← Return to Employee Portal</Text>
-            </TouchableOpacity>
+            {noSession ? (
+              <>
+                <Text style={styles.deniedTitle}>Session expired</Text>
+                <Text style={styles.deniedText}>Your session ended. Sign in again to continue.</Text>
+                <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
+                  <Text style={styles.primaryButtonText}>Sign in again →</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Text style={styles.deniedTitle}>Access Denied</Text>
+                <Text style={styles.deniedText}>You must be logged in with a Manager account to view this portal.</Text>
+                <TouchableOpacity style={styles.primaryButton} onPress={() => router.push('/')}>
+                  <Text style={styles.primaryButtonText}>← Return to Employee Portal</Text>
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         </View>
       </SafeAreaView>
@@ -635,6 +736,9 @@ export default function ManagerDashboard() {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.filterTab, filter === 'ANOMALIES' && styles.activeFilterTab]} onPress={() => setFilter('ANOMALIES')}>
           <Text style={[styles.filterText, filter === 'ANOMALIES' && styles.activeFilterText]}>AI Anomalies ({anomalyCount})</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.filterTab, filter === 'REVIEWED' && styles.activeFilterTab]} onPress={() => setFilter('REVIEWED')}>
+          <Text style={[styles.filterText, filter === 'REVIEWED' && styles.activeFilterText]}>Reviewed ({reviewedCount})</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.filterTab, filter === 'EXCEPTIONS' && styles.activeFilterTab]} onPress={() => setFilter('EXCEPTIONS')}>
           <Text style={[styles.filterText, filter === 'EXCEPTIONS' && styles.activeFilterText]}>Geo Exceptions ({pendingExceptionsCount} pending)</Text>
@@ -925,7 +1029,9 @@ export default function ManagerDashboard() {
         {!collapsedTools.break && (
           <>
         {complianceFlags.length === 0 ? (
-          <Text style={styles.otClear}>All clear — every recent shift had its 30-minute meal break.</Text>
+          <Text style={styles.otClear}>{complianceRule.meal_threshold_minutes == null
+            ? `No statutory meal-break rule for ${complianceRule.name} — nothing to check.`
+            : `All clear — ${complianceChecked} shift${complianceChecked === 1 ? '' : 's'} over ${complianceRule.meal_threshold_minutes / 60}h in the last 14 days checked, all had the ${complianceRule.meal_minutes}-minute meal break. Shorter shifts don't require one.`}</Text>
         ) : (
           <>
             {complianceFlags.slice(0, 5).map(f => (
@@ -1039,17 +1145,19 @@ export default function ManagerDashboard() {
               })
             )
           ) : (
-            (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).length === 0 ? (
+            visibleLogs.length === 0 ? (
               <View style={styles.emptyCard}>
-                <Text style={styles.emptyTitle}>{filter === 'ANOMALIES' ? 'No anomalies' : 'No time logs yet'}</Text>
+                <Text style={styles.emptyTitle}>{filter === 'ANOMALIES' ? 'No anomalies' : filter === 'REVIEWED' ? 'Nothing reviewed yet' : 'No time logs yet'}</Text>
                 <Text style={styles.emptyText}>
                   {filter === 'ANOMALIES'
                     ? 'Nothing flagged by the AI. Shifts that look unusual will show up here automatically.'
-                    : 'Once your team starts clocking in, their shifts will appear here.'}
+                    : filter === 'REVIEWED'
+                      ? 'Anomalies you approve or deny will show up here with their decision.'
+                      : 'Once your team starts clocking in, their shifts will appear here.'}
                 </Text>
               </View>
             ) : (
-              (filter === 'ANOMALIES' ? logs.filter(l => l.ai_anomaly_flag?.includes('⚠️')) : logs).map((log) => {
+              visibleLogs.map((log) => {
                 const isAnomaly = log.ai_anomaly_flag?.includes('⚠️');
                 const expanded = expandedLogId === log.id;
                 const employeeName = log.profiles?.full_name || `${log.profiles?.first_name || ''} ${log.profiles?.last_name || ''}`.trim() || 'Unknown Employee';
@@ -1073,10 +1181,35 @@ export default function ManagerDashboard() {
                           <Text style={[styles.statusBadge, styles.badgeDanger]}>{log.ai_anomaly_flag}</Text>
                         </View>
                       ) : null}
+                      {!isAnomaly && isReviewedFlag(log.ai_anomaly_flag) ? (
+                        <View style={{ alignSelf: 'flex-start' }}>
+                          <Text style={[styles.statusBadge, styles.badgeNormal]}>{log.ai_anomaly_flag}</Text>
+                        </View>
+                      ) : null}
+                      {isVoidedLog(log.ai_anomaly_flag) ? (
+                        <View style={{ alignSelf: 'flex-start' }}>
+                          <Text style={[styles.statusBadge, styles.badgeDanger]}>{log.ai_anomaly_flag}</Text>
+                        </View>
+                      ) : null}
                       <View style={styles.infoRow}><Text style={styles.label}>Worksite Location:</Text><Text style={styles.worksiteValue}>{worksiteName}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock In:</Text><Text style={styles.value}>{formatDateTime(log.clock_in)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Clock Out:</Text><Text style={styles.value}>{formatDateTime(log.clock_out)}</Text></View>
                       <View style={styles.infoRow}><Text style={styles.label}>Total Duration:</Text><Text style={styles.valueBold}>{calculateDuration(log.clock_in, log.clock_out)}</Text></View>
+                      {(() => {
+                        const logBreaks = breaks.filter(b => b.time_log_id === log.id);
+                        if (logBreaks.length === 0) {
+                          return (<View style={styles.infoRow}><Text style={styles.label}>Breaks:</Text><Text style={styles.value}>No breaks taken</Text></View>);
+                        }
+                        return logBreaks.map((b, i) => {
+                          const dur = b.start_time && b.end_time ? Math.max(0, Math.round((new Date(b.end_time).getTime() - new Date(b.start_time).getTime()) / 60000)) : null;
+                          return (
+                            <View key={b.id || i} style={styles.infoRow}>
+                              <Text style={styles.label}>{i === 0 ? 'Breaks:' : ''}</Text>
+                              <Text style={styles.value}>{b.break_type} · {b.start_time ? fmtTime(b.start_time) : '—'} – {b.end_time ? fmtTime(b.end_time) : 'ongoing'}{dur != null ? ` (${dur} min)` : ''}</Text>
+                            </View>
+                          );
+                        });
+                      })()}
                       {(() => {
                         const logBreaks = breaks.filter(b => b.time_log_id === log.id);
                         const notes = [];
@@ -1120,6 +1253,32 @@ export default function ManagerDashboard() {
                               <Text style={styles.rejectButtonText}>✕ Deny</Text>
                             </TouchableOpacity>
                           </View>
+                        )
+                      )}
+                      {log.clock_out && !isVoidedLog(log.ai_anomaly_flag) && (
+                        voidingLogId === log.id ? (
+                          <View style={styles.reviewNoteWrap}>
+                            <TextInput
+                              style={styles.reviewNoteInput}
+                              placeholder="Reason (optional) — e.g. test entry, duplicate"
+                              placeholderTextColor={colors.inputPlaceholder}
+                              value={voidNote}
+                              onChangeText={setVoidNote}
+                            />
+                            <View style={styles.approvalButtons}>
+                              <TouchableOpacity style={styles.rejectButton} onPress={() => handleVoidLog(log.id, voidNote)}>
+                                <Text style={styles.rejectButtonText}>Confirm void</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity style={styles.approveButton} onPress={() => { setVoidingLogId(null); setVoidNote(''); setVoidMsg(''); }}>
+                                <Text style={styles.approveButtonText}>Cancel</Text>
+                              </TouchableOpacity>
+                            </View>
+                            {voidMsg ? <Text style={styles.noteText}>{voidMsg}</Text> : null}
+                          </View>
+                        ) : (
+                          <TouchableOpacity style={styles.voidButton} onPress={() => { setVoidingLogId(log.id); setVoidMsg(''); }}>
+                            <Text style={styles.voidButtonText}>Void this log</Text>
+                          </TouchableOpacity>
                         )
                       )}
                     </View>
@@ -1250,6 +1409,8 @@ const styles = StyleSheet.create({
   approvalButtons: { flexDirection: 'row', gap: 10, marginTop: spacing.md },
   approveButton: { ...buttons.compact, flex: 1 },
   rejectButton: { ...buttons.compact, flex: 1, backgroundColor: 'transparent', borderWidth: 1, borderColor: colors.danger },
+  voidButton: { marginTop: spacing.sm, minHeight: 44, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: colors.danger, borderRadius: radius.md },
+  voidButtonText: { fontSize: 14, fontFamily: fontFamily.semibold, color: colors.danger },
   reviewNoteWrap: { marginTop: spacing.md, gap: 8 },
   reviewNoteInput: { backgroundColor: colors.inputBackground, borderWidth: 1, borderColor: colors.inputBorder, borderRadius: radius.sm, padding: spacing.sm, fontSize: 14, fontFamily: fontFamily.regular, color: colors.textPrimary },
 

@@ -242,7 +242,7 @@ export default function ManagerBoardScreen() {
             <Text style={buttons.secondaryText}>Full manager portal →</Text>
           </TouchableOpacity>
         </Link>
-        <Text style={styles.footNote}>Approvals, scheduling and the AI assistant arrive in later steps — this board is read-only for now.</Text>
+        <Text style={styles.footNote}>Read-only board — approvals, scheduling and the AI assistant live in the Manager Portal.</Text>
       </ScrollView>
     </SafeAreaView>
   );
