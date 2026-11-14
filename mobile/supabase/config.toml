@@ -436,3 +436,9 @@ verify_jwt = true
 
 [functions.stripe-webhook]
 verify_jwt = false
+
+# Demo-request lead capture: called by the public marketing-site form,
+# so no caller JWT. The function validates, honeypots bots, and writes
+# through the service-role client; the table has no app-role policies.
+[functions.submit-demo-request]
+verify_jwt = false
