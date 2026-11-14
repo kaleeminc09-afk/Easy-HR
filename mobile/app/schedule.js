@@ -175,6 +175,28 @@ export default function ScheduleScreen() {
   const deleteShift = async (shift) => {
     if (confirmingDeleteId !== shift.id) { setConfirmingDeleteId(shift.id); return; }
     setBusyId(shift.id);
+    // Integrity: a shift with clock-in records must not vanish — the
+    // time entries would lose the shift they belong to. Refuse, and
+    // say why, instead of deleting. Overlap is checked in code: a log
+    // counts if it starts before the shift ends and ends (or is still
+    // open) after the shift starts.
+    if (shift.user_id) {
+      const startMs = new Date(shift.start_time).getTime();
+      const { data: logs } = await supabase.from('time_logs').select('clock_in, clock_out')
+        .eq('user_id', shift.user_id)
+        .gte('clock_in', new Date(startMs - 24 * 3600 * 1000).toISOString())
+        .lt('clock_in', shift.end_time);
+      const hasOverlap = (logs || []).some((l) => {
+        const outMs = l.clock_out ? new Date(l.clock_out).getTime() : Infinity;
+        return outMs > startMs;
+      });
+      if (hasOverlap) {
+        setMessage('This shift has clock-in records and can’t be deleted. Keep it for the payroll record.');
+        setConfirmingDeleteId(null);
+        setBusyId(null);
+        return;
+      }
+    }
     const { error } = await supabase.from('shifts').delete().eq('id', shift.id);
     if (error) setMessage('Could not delete: ' + error.message);
     setConfirmingDeleteId(null);

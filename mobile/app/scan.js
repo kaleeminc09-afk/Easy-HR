@@ -5,6 +5,7 @@ import { CameraView, useCameraPermissions } from 'expo-camera';
 import { Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import * as Location from 'expo-location';
+import { getCurrentPosition } from '../lib/location';
 import { colors, spacing, radius, fontFamily, buttons } from '../lib/theme';
 
 const QR_PREFIX = 'northshift-site:';
@@ -85,7 +86,8 @@ export default function ScanScreen() {
         setResult({ ok: false, title: 'Location permission needed', message: 'QR clock-in needs your location to confirm you are at the worksite. Allow location access and scan again.' });
         return;
       }
-      const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      // Timeout-wrapped: same 10s fail-loud rule as GPS clock-in.
+      const currentLocation = await getCurrentPosition();
       const { latitude, longitude } = currentLocation.coords;
       const distance = calculateDistance(latitude, longitude, site.latitude, site.longitude);
       // A missing radius means no limit was set (same as the GPS flow,

@@ -835,7 +835,7 @@ export default function ManagerDashboard() {
                 </TouchableOpacity>
               ))}
             </View>
-            <Text style={styles.label}>Dates — tap each date (one shift per date)</Text>
+            <Text style={styles.label}>Dates — one shift is created for each date picked</Text>
             <View style={styles.schedChipRow}>
               {[0, 1, 2, 3, 4, 5, 6].map((i) => {
                 const d = new Date(schedWeekStart + i * DAY_MS);
@@ -851,6 +851,18 @@ export default function ManagerDashboard() {
             </View>
             <Text style={styles.label}>Or type a date (YYYY-MM-DD) to add it</Text>
             <TextInput style={styles.reviewNoteInput} value={schedTypedDate} onChangeText={(v) => { setSchedTypedDate(v); if (/^\d{4}-\d{2}-\d{2}$/.test(v) && !schedDates.includes(v)) { setSchedDates([...schedDates, v]); setSchedTypedDate(''); } }} placeholder="YYYY-MM-DD" placeholderTextColor={colors.inputPlaceholder} keyboardType="numbers-and-punctuation" />
+            {schedDates.length > 0 && (
+              <View>
+                <Text style={styles.label}>Selected dates ({schedDates.length}) — tap to remove</Text>
+                <View style={styles.schedChipRow}>
+                  {[...schedDates].sort().map((dayStr) => (
+                    <TouchableOpacity key={dayStr} style={[styles.filterTab, styles.activeFilterTab]} onPress={() => setSchedDates(schedDates.filter((x) => x !== dayStr))}>
+                      <Text style={[styles.filterText, styles.activeFilterText]}>{dayStr} ×</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            )}
             <View style={styles.schedTimeRow}>
               <View style={{ flex: 1 }}>
                 <Text style={styles.label}>Start (24h)</Text>

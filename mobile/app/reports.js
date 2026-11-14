@@ -35,7 +35,11 @@ export default function ReportsScreen() {
   const weekLabel = new Date(weekStart).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 
   useEffect(() => { init(); }, []);
-  useEffect(() => { if (!loading) loadWeek(); }, [weekOffset]);
+  // loadWeek must run once init finishes: with only [weekOffset] as
+  // deps, the first visit skipped the load (loading was still true)
+  // and the page showed 0h until the week was paged — the Nov 14
+  // "Reports disagrees with Schedule" finding.
+  useEffect(() => { if (!loading) loadWeek(); }, [weekOffset, loading]);
 
   const init = async () => {
     const { data: { session } } = await supabase.auth.getSession();

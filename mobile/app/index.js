@@ -7,6 +7,7 @@ import { NAV_ICONS } from '../components/NavIcons';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
+import { getCurrentPosition } from '../lib/location';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
 import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
@@ -362,7 +363,9 @@ export default function App() {
         return;
       }
 
-      const currentLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      // Timeout-wrapped: a stuck GPS read must fail with an error
+      // after 10s, never hang the button forever (Nov 14 test).
+      const currentLocation = await getCurrentPosition();
       const { latitude, longitude } = currentLocation.coords;
 
       let nearestWorksite = null;
