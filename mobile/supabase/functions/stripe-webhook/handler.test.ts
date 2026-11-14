@@ -43,6 +43,9 @@ class FakeDb implements Db {
     const row = Object.values(this.rows).find((r) => r.stripe_customer_id === cid);
     return row ? { business_id: row.business_id as string } : null;
   }
+  async getManualHold(businessId: string) {
+    return this.rows[businessId]?.manual_hold === true;
+  }
   async upsertSubscription(row: Record<string, unknown>) {
     this.rows[row.business_id as string] = { ...(this.rows[row.business_id as string] || {}), ...row };
   }
@@ -73,6 +76,11 @@ describe("subscriptionRowFromStripe", () => {
     const row = subscriptionRowFromStripe(sampleSub({ items: { data: [{ price: { id: "price_nope" } }] } }), "biz_1", "owner_1", PRICE_IDS);
     expect(row.plan).toBe("starter");
     expect(row.employee_limit).toBe(5);
+  });
+
+  test("a Stripe subscription row always clears the manual hold", () => {
+    const row = subscriptionRowFromStripe(sampleSub(), "biz_1", "owner_1", PRICE_IDS);
+    expect(row.manual_hold).toBe(false);
   });
 });
 
@@ -164,5 +172,49 @@ describe("processStripeEvent", () => {
     );
     expect(res.handled).toBe(false);
     expect(db.events).toHaveLength(0);
+  });
+
+  test("subscription.updated on a manual-hold row skips the upsert but still logs the event", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", plan: "starter", status: "trialing", manual_hold: true, stripe_customer_id: "cus_test_1" };
+    const res = await processStripeEvent(
+      db,
+      event("evt_8", "customer.subscription.updated", { ...(sampleSub({ status: "active" }) as unknown as Record<string, unknown>) }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(res.action).toMatch(/manually managed/);
+    expect(db.rows["biz_1"].status).toBe("trialing");
+    expect(db.rows["biz_1"].plan).toBe("starter");
+    expect(db.rows["biz_1"].manual_hold).toBe(true);
+    expect(db.events).toHaveLength(1);
+    expect(db.events[0].detail.manual_hold_skipped).toBe(true);
+  });
+
+  test("checkout.session.completed supersedes a manual hold and clears it", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", plan: "starter", status: "trialing", manual_hold: true, stripe_customer_id: "cus_test_1" };
+    const res = await processStripeEvent(
+      db,
+      event("evt_9", "checkout.session.completed", { subscription: "sub_test_1", customer: "cus_test_1", metadata: { business_id: "biz_1" } }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => sampleSub(), nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(db.rows["biz_1"].plan).toBe("growth");
+    expect(db.rows["biz_1"].manual_hold).toBe(false);
+    expect(db.rows["biz_1"].stripe_subscription_id).toBe("sub_test_1");
+  });
+
+  test("invoice.payment_failed on a manual-hold row sets no grace but still logs the event", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", status: "trialing", manual_hold: true, stripe_customer_id: "cus_test_1" };
+    const res = await processStripeEvent(
+      db,
+      event("evt_10", "invoice.payment_failed", { id: "in_test_3", subscription: null, customer: "cus_test_1" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(db.rows["biz_1"].grace_until).toBeUndefined();
+    expect(db.events).toHaveLength(1);
   });
 });

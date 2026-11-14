@@ -58,6 +58,13 @@ serve(async (req) => {
         const { data } = await db.from("subscriptions").select("business_id").eq("stripe_customer_id", cid).maybeSingle();
         return data as { business_id: string } | null;
       },
+      getManualHold: async (businessId) => {
+        // If the manual_hold column does not exist yet (migration not
+        // run), the select errors, data is null, and this returns
+        // false — the webhook behaves exactly as before.
+        const { data } = await db.from("subscriptions").select("manual_hold").eq("business_id", businessId).maybeSingle();
+        return (data as { manual_hold?: boolean } | null)?.manual_hold === true;
+      },
       upsertSubscription: async (row) => {
         const { error } = await db.from("subscriptions").upsert(row, { onConflict: "business_id" });
         if (error) throw error;

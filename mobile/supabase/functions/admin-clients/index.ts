@@ -12,22 +12,31 @@ const json = (body: unknown, status = 200) =>
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
 
-// CRM backoffice, Phase 1: read-only client list + client detail.
+// CRM backoffice: client list + detail (Phase 1/2), write actions
+// (Phase 3: notes/outreach, manual subscription activation, leads).
 //
-// The ONLY cross-business read path in the system. The caller must be
-// signed in (verify_jwt = true) AND their email must be on the
+// The ONLY cross-business read/write path in the system. The caller
+// must be signed in (verify_jwt = true) AND their email must be on the
 // CRM_ADMIN_EMAILS allowlist (comma-separated Supabase secret). The
 // check is server-side: hiding the UI is never the security boundary.
 // Fails closed — an unset or empty allowlist authorizes nobody.
 //
-// Reads use the service-role client (RLS never applies to it), so the
-// CRM tables and the activity log keep zero app-role policies.
-// Write actions (notes, outreach, subscription activation) arrive in
-// Phase 3; this function answers list + detail only.
+// Reads/writes use the service-role client (RLS never applies to it),
+// so the CRM tables and the activity log keep zero app-role policies.
+// Every Phase 3 write also lands in admin_audit.
+//
+// Manual subscriptions: activate_subscription sets manual_hold on the
+// subscriptions row. The stripe-webhook never overwrites a held row;
+// only a real Stripe checkout clears the hold (see handler.ts).
+// A live Stripe subscription is never touched from here — it is
+// managed in the Stripe dashboard, and these actions refuse to.
 //
 // Speed: every independent fetch runs in parallel (Promise.all). The
 // first version ran them one after another and the list took far too
 // long to load; sequential fetches are the thing not to reintroduce.
+
+const PLAN_LIMITS: Record<string, number> = { starter: 5, growth: 15, business: 40 };
+const INTERACTION_KINDS = ["note", "call", "email", "meeting"];
 
 type Profile = {
   id: string;
@@ -85,11 +94,23 @@ serve(async (req) => {
     const action = String(body.action || "");
     const db = createClient(SUPABASE_URL, SERVICE_KEY);
 
+    // Audit trail for Phase 3 writes. Best-effort: a failed audit
+    // insert never blocks the action itself, but it is logged.
+    const writeAudit = async (auditAction: string, targetBusinessId: string | null, detail: Record<string, unknown>) => {
+      const { error } = await db.from("admin_audit").insert([{
+        actor_id: user.id, action: auditAction,
+        target_business_id: targetBusinessId, detail,
+      }]);
+      if (error) console.error("admin_audit insert failed:", error.message);
+    };
+    const isStripeManaged = (sub: Record<string, unknown> | undefined) =>
+      !!sub && !!sub.stripe_subscription_id && (sub.status === "active" || sub.status === "trialing") && sub.manual_hold !== true;
+
     // All independent reads in parallel — never sequential.
     const [bizRes, profRes, subRes, lastSeen] = await Promise.all([
       db.from("businesses").select("id, account_number, business_name, owner_id, created_at").order("created_at", { ascending: true }),
       db.from("profiles").select("id, first_name, last_name, full_name, email, phone, role, business_id"),
-      db.from("subscriptions").select("business_id, plan, status, employee_limit, trial_end, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end"),
+      db.from("subscriptions").select("business_id, plan, status, employee_limit, trial_end, current_period_end, stripe_customer_id, stripe_subscription_id, cancel_at_period_end, manual_hold, manual_note"),
       loadLastSeen(db),
     ]);
     const businesses = bizRes.data;
@@ -150,6 +171,7 @@ serve(async (req) => {
           members: members.length,
           plan: sub?.plan ?? null,
           status: sub?.status ?? null,
+          manual_hold: sub?.manual_hold === true,
           trial_end: sub?.trial_end ?? null,
           current_period_end: sub?.current_period_end ?? null,
           last_sign_in_at: lastSignIn,
@@ -196,8 +218,8 @@ serve(async (req) => {
       ]);
 
       // Activity log: recent events + counts (bounded fetch, small scale).
-      // Runs in parallel with the interactions read.
-      const [eventsRes, interactionsRes] = await Promise.all([
+      // Runs in parallel with the interactions and audit reads.
+      const [eventsRes, interactionsRes, auditRes] = await Promise.all([
         db.from("activity_events")
           .select("id, user_id, event, meta, created_at")
           .or(`business_id.eq.${businessId},user_id.in.(${memberIds.join(",") || "00000000-0000-0000-0000-000000000000"})`)
@@ -208,9 +230,15 @@ serve(async (req) => {
           .eq("business_id", businessId)
           .order("created_at", { ascending: false })
           .limit(50),
+        db.from("admin_audit")
+          .select("id, actor_id, action, detail, created_at")
+          .eq("target_business_id", businessId)
+          .order("created_at", { ascending: false })
+          .limit(20),
       ]);
       const events = eventsRes.data;
       const interactions = interactionsRes.data;
+      const audit = auditRes.data;
       const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
       const counts: Record<string, number> = {};
       const counts30d: Record<string, number> = {};
@@ -255,7 +283,112 @@ serve(async (req) => {
             ? displayName(profById.get(i.author_id as string)!)
             : null,
         })),
+        audit: (audit || []).map((a: Record<string, unknown>) => ({
+          id: a.id,
+          action: a.action,
+          detail: a.detail,
+          created_at: a.created_at,
+          actor: a.actor_id && profById.get(a.actor_id as string)
+            ? displayName(profById.get(a.actor_id as string)!)
+            : null,
+        })),
       });
+    }
+
+    if (action === "add_interaction") {
+      const businessId = String(body.business_id || "");
+      const kind = String(body.kind || "");
+      const text = String(body.body || "").trim();
+      if (!bizList.find((b: Record<string, unknown>) => b.id === businessId)) {
+        return json({ error: "Business not found." }, 404);
+      }
+      if (!INTERACTION_KINDS.includes(kind)) return json({ error: "Kind must be note, call, email, or meeting." }, 400);
+      if (text.length < 1 || text.length > 4000) return json({ error: "Write something (1–4000 characters)." }, 400);
+      const { error } = await db.from("crm_interactions").insert([{
+        business_id: businessId, author_id: user.id, kind, body: text,
+      }]);
+      if (error) return json({ error: "Could not save the note." }, 500);
+      await writeAudit("crm_interaction_add", businessId, { kind });
+      return json({ ok: true });
+    }
+
+    if (action === "activate_subscription") {
+      const businessId = String(body.business_id || "");
+      const biz = bizList.find((b: Record<string, unknown>) => b.id === businessId);
+      if (!biz) return json({ error: "Business not found." }, 404);
+      const plan = String(body.plan || "");
+      const note = String(body.note || "").trim().slice(0, 500);
+      const trialEnd = new Date(String(body.trial_end || ""));
+      if (!PLAN_LIMITS[plan]) return json({ error: "Plan must be starter, growth, or business." }, 400);
+      if (isNaN(trialEnd.getTime())) return json({ error: "Pick a valid end date." }, 400);
+      if (trialEnd.getTime() <= Date.now()) return json({ error: "End date must be in the future." }, 400);
+      const existing = subByBiz.get(businessId);
+      if (isStripeManaged(existing)) {
+        return json({ error: "This subscription is managed by Stripe — change it in the Stripe dashboard, not here." }, 409);
+      }
+      const nowIso = new Date().toISOString();
+      const { error } = await db.from("subscriptions").upsert([{
+        business_id: businessId,
+        owner_id: biz.owner_id ?? null,
+        plan,
+        status: "trialing",
+        employee_limit: PLAN_LIMITS[plan],
+        trial_start: nowIso,
+        trial_end: trialEnd.toISOString(),
+        current_period_start: null,
+        current_period_end: null,
+        cancel_at_period_end: false,
+        stripe_subscription_id: null,
+        grace_until: null,
+        manual_hold: true,
+        manual_note: note || null,
+        updated_at: nowIso,
+      }], { onConflict: "business_id" });
+      if (error) return json({ error: "Could not activate the subscription." }, 500);
+      await writeAudit("subscription_activate_manual", businessId, { plan, trial_end: trialEnd.toISOString(), note: note || null });
+      return json({ ok: true });
+    }
+
+    if (action === "deactivate_subscription") {
+      const businessId = String(body.business_id || "");
+      if (!bizList.find((b: Record<string, unknown>) => b.id === businessId)) {
+        return json({ error: "Business not found." }, 404);
+      }
+      const existing = subByBiz.get(businessId);
+      if (isStripeManaged(existing)) {
+        return json({ error: "This subscription is managed by Stripe — cancel it in the Stripe dashboard, not here." }, 409);
+      }
+      if (!existing) return json({ error: "No subscription to end." }, 400);
+      const nowIso = new Date().toISOString();
+      const { error } = await db.from("subscriptions")
+        .update({ status: "canceled", current_period_end: nowIso, updated_at: nowIso })
+        .eq("business_id", businessId);
+      if (error) return json({ error: "Could not end the subscription." }, 500);
+      await writeAudit("subscription_deactivate_manual", businessId, { plan: existing.plan ?? null });
+      return json({ ok: true });
+    }
+
+    if (action === "list_leads") {
+      const { data: leads, error } = await db.from("demo_requests")
+        .select("id, first_name, last_name, phone, email, source, contacted_at, notes, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100);
+      if (error) return json({ error: "Could not load leads." }, 500);
+      return json({ leads: leads || [] });
+    }
+
+    if (action === "mark_contacted") {
+      const leadId = String(body.lead_id || "");
+      const contacted = body.contacted === true;
+      const { data: lead, error: findErr } = await db.from("demo_requests")
+        .select("id, email").eq("id", leadId).maybeSingle();
+      if (findErr || !lead) return json({ error: "Lead not found." }, 404);
+      const { error } = await db.from("demo_requests")
+        .update({ contacted_at: contacted ? new Date().toISOString() : null })
+        .eq("id", leadId);
+      if (error) return json({ error: "Could not update the lead." }, 500);
+      await writeAudit(contacted ? "lead_contacted" : "lead_unmarked", null, { lead_id: leadId, email: (lead as { email: string }).email });
+      return json({ ok: true });
     }
 
     return json({ error: "Unknown action." }, 400);

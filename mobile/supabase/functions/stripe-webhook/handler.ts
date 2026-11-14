@@ -8,6 +8,14 @@
 // billing_events is the proof log — in particular trial_will_end, which
 // is the record that the pre-charge notice event arrived (Stripe's
 // built-in trial-ending email itself is a dashboard setting).
+//
+// MANUAL HOLD (Phase 3): the backoffice can activate a subscription
+// without Stripe (pilots, invoiced clients) by setting manual_hold on
+// the subscriptions row. Stripe events must never overwrite a manual
+// row — subscription and invoice events skip the upsert/update for a
+// held row but still write the billing_events proof row. The ONE
+// exception is checkout.session.completed: a real Stripe checkout
+// supersedes the manual hold, and its upsert clears manual_hold.
 
 import { priceIdToPlan, stripeTsToIso, PLAN_LIMITS } from "./verify.ts";
 
@@ -28,6 +36,7 @@ export interface Db {
   getBusiness(businessId: string): Promise<{ id: string; owner_id: string | null } | null>;
   getSubscriptionByStripeId(stripeSubscriptionId: string): Promise<{ business_id: string } | null>;
   getSubscriptionByCustomer(stripeCustomerId: string): Promise<{ business_id: string } | null>;
+  getManualHold(businessId: string): Promise<boolean>;
   upsertSubscription(row: Record<string, unknown>): Promise<void>;
   updateSubscriptionByBusiness(businessId: string, patch: Record<string, unknown>): Promise<void>;
   insertBillingEvent(row: { business_id: string | null; event_type: string; stripe_event_id: string; detail: Record<string, unknown> }): Promise<void>;
@@ -64,6 +73,7 @@ export function subscriptionRowFromStripe(
     current_period_start: stripeTsToIso(sub.current_period_start),
     current_period_end: stripeTsToIso(sub.current_period_end),
     cancel_at_period_end: !!sub.cancel_at_period_end,
+    manual_hold: false,
     updated_at: new Date().toISOString(),
   };
 }
@@ -121,32 +131,37 @@ export async function processStripeEvent(
     case "customer.subscription.deleted": {
       const businessId = businessIdFrom(obj);
       if (!businessId) return { handled: false, businessId: null, action: `${type} without business metadata` };
+      const held = await db.getManualHold(businessId);
       const biz = await db.getBusiness(businessId);
-      await db.upsertSubscription(subscriptionRowFromStripe(obj as unknown as StripeSubLike, businessId, biz?.owner_id ?? null, opts.priceIds));
+      if (!held) {
+        await db.upsertSubscription(subscriptionRowFromStripe(obj as unknown as StripeSubLike, businessId, biz?.owner_id ?? null, opts.priceIds));
+      }
       await db.insertBillingEvent({
         business_id: businessId,
         event_type: type,
         stripe_event_id: event.id,
-        detail: { subscription_id: typeof obj.id === "string" ? obj.id : null, status: typeof obj.status === "string" ? obj.status : null },
+        detail: { subscription_id: typeof obj.id === "string" ? obj.id : null, status: typeof obj.status === "string" ? obj.status : null, manual_hold_skipped: held },
       });
-      return { handled: true, businessId, action: "subscription upserted" };
+      return { handled: true, businessId, action: held ? "skipped — manually managed subscription" : "subscription upserted" };
     }
     case "invoice.paid": {
-      // Payment recovered: clear any grace window.
+      // Payment recovered: clear any grace window (never on a manual row).
       const row = await findRowForInvoice(db, obj as { subscription?: string | null; customer?: string | null });
-      if (row) await db.updateSubscriptionByBusiness(row.business_id, { grace_until: null, updated_at: nowIso });
+      const held = row ? await db.getManualHold(row.business_id) : false;
+      if (row && !held) await db.updateSubscriptionByBusiness(row.business_id, { grace_until: null, updated_at: nowIso });
       await db.insertBillingEvent({
         business_id: row?.business_id ?? null,
         event_type: type,
         stripe_event_id: event.id,
         detail: { invoice_id: typeof obj.id === "string" ? obj.id : null, subscription_id: typeof obj.subscription === "string" ? obj.subscription : null },
       });
-      return { handled: true, businessId: row?.business_id ?? null, action: "grace cleared" };
+      return { handled: true, businessId: row?.business_id ?? null, action: held ? "grace clear skipped — manually managed" : "grace cleared" };
     }
     case "invoice.payment_failed": {
-      // Failed payment: 7 days' grace from now, then the app soft-locks setup.
+      // Failed payment: 7 days' grace from now, then the app soft-locks setup (never on a manual row).
       const row = await findRowForInvoice(db, obj as { subscription?: string | null; customer?: string | null });
-      if (row) {
+      const held = row ? await db.getManualHold(row.business_id) : false;
+      if (row && !held) {
         await db.updateSubscriptionByBusiness(row.business_id, {
           grace_until: new Date(nowMs + GRACE_MS).toISOString(),
           updated_at: nowIso,
@@ -158,7 +173,7 @@ export async function processStripeEvent(
         stripe_event_id: event.id,
         detail: { invoice_id: typeof obj.id === "string" ? obj.id : null, subscription_id: typeof obj.subscription === "string" ? obj.subscription : null },
       });
-      return { handled: true, businessId: row?.business_id ?? null, action: "grace_until set +7d" };
+      return { handled: true, businessId: row?.business_id ?? null, action: held ? "grace skipped — manually managed" : "grace_until set +7d" };
     }
     case "customer.subscription.trial_will_end": {
       // Proof record for the pre-charge notice. No subscription change.
