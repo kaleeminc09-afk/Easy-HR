@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, ScrollView, ActivityIndicator, TouchableOpacity, TextInput, KeyboardAvoidingView, Platform, FlatList, Image, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
@@ -342,10 +342,19 @@ export default function ManagerDashboard() {
   const [voidingLogId, setVoidingLogId] = useState(null);
   const [voidNote, setVoidNote] = useState('');
   const [voidMsg, setVoidMsg] = useState('');
+  const [voidBusy, setVoidBusy] = useState(false);
+  // In-flight guard: the void button stays tappable while the async
+  // void runs, and the state guard reads stale logs — a double-tap
+  // used to write two identical audit rows (found live Nov 17).
+  const voidInFlightRef = useRef(new Set());
 
   const handleVoidLog = async (logId, note) => {
     const log = logs.find((l) => l.id === logId);
     if (!log || !log.clock_out || isVoidedLog(log.ai_anomaly_flag)) return;
+    if (voidInFlightRef.current.has(logId)) return;
+    voidInFlightRef.current.add(logId);
+    setVoidBusy(true);
+    try {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
       setVoidMsg('Could not verify your session. Sign in again and retry.');
@@ -384,6 +393,10 @@ export default function ManagerDashboard() {
     setVoidNote('');
     setVoidMsg('');
     fetchAllManagerData();
+    } finally {
+      voidInFlightRef.current.delete(logId);
+      setVoidBusy(false);
+    }
   };
 
   const formatDateTime = (isoString) => {
@@ -1266,8 +1279,8 @@ export default function ManagerDashboard() {
                               onChangeText={setVoidNote}
                             />
                             <View style={styles.approvalButtons}>
-                              <TouchableOpacity style={styles.rejectButton} onPress={() => handleVoidLog(log.id, voidNote)}>
-                                <Text style={styles.rejectButtonText}>Confirm void</Text>
+                              <TouchableOpacity style={[styles.rejectButton, voidBusy && { opacity: 0.5 }]} onPress={() => handleVoidLog(log.id, voidNote)} disabled={voidBusy}>
+                                <Text style={styles.rejectButtonText}>{voidBusy ? 'Voiding…' : 'Confirm void'}</Text>
                               </TouchableOpacity>
                               <TouchableOpacity style={styles.approveButton} onPress={() => { setVoidingLogId(null); setVoidNote(''); setVoidMsg(''); }}>
                                 <Text style={styles.approveButtonText}>Cancel</Text>
