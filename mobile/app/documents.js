@@ -90,11 +90,6 @@ export default function DocumentsScreen() {
   };
 
   const pickAndUpload = async () => {
-    // DIAGNOSTIC (temporary): uploads fail on web with the generic
-    // catch message and nothing reaches storage. Track which step
-    // throws and show the real error until the cause is found.
-    let step = 'picker';
-    let uriInfo = '';
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/pdf', 'image/*', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
@@ -112,8 +107,6 @@ export default function DocumentsScreen() {
       }
       setUploading(true);
       setMessage('');
-      step = 'read';
-      uriInfo = typeof asset.uri + ':' + String(asset.uri || '').slice(0, 24);
       // New expo-file-system API: the old readAsStringAsync throws a
       // deprecation error on this SDK. File.bytes() returns the raw
       // bytes directly, no base64 round-trip — on native. On web the
@@ -129,7 +122,6 @@ export default function DocumentsScreen() {
         setUploading(false);
         return;
       }
-      step = 'upload';
       const path = buildStoragePath(selectedUser, asset.name || 'document', Date.now());
       const { error: upErr } = await supabase.storage.from(BUCKET).upload(path, bytes, {
         contentType: contentTypeFor(asset),
@@ -142,7 +134,6 @@ export default function DocumentsScreen() {
         setUploading(false);
         return;
       }
-      step = 'insert';
       const { error: insErr } = await supabase.from('documents').insert([{
         business_id: businessId,
         user_id: selectedUser,
@@ -157,7 +148,10 @@ export default function DocumentsScreen() {
       await loadDocs(selectedUser);
       setUploading(false);
     } catch (e) {
-      setMessage('DIAG upload failed at step "' + step + '" (uri ' + uriInfo + '): ' + (e?.name || 'Error') + ': ' + (e?.message || String(e)));
+      const msg = e?.message || '';
+      setMessage(/deprecated|legacy|readAsStringAsync/i.test(msg)
+        ? 'Upload failed because the file reader is out of date. Please reload the app and try again.'
+        : 'Could not upload that file. Please try again.');
       setUploading(false);
     }
   };
