@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, Linking } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, Linking, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import * as DocumentPicker from 'expo-document-picker';
@@ -109,8 +109,14 @@ export default function DocumentsScreen() {
       setMessage('');
       // New expo-file-system API: the old readAsStringAsync throws a
       // deprecation error on this SDK. File.bytes() returns the raw
-      // bytes directly, no base64 round-trip.
-      const bytes = await new File(asset.uri).bytes();
+      // bytes directly, no base64 round-trip — on native. On web the
+      // picker returns a blob: URI, which the File API cannot read
+      // (it only knows paths inside its own virtual filesystem), so
+      // File.bytes() throws and the upload never reaches storage.
+      // fetch() reads a blob: URI directly.
+      const bytes = Platform.OS === 'web'
+        ? new Uint8Array(await (await fetch(asset.uri)).arrayBuffer())
+        : await new File(asset.uri).bytes();
       if (bytes.length > MAX_BYTES) {
         setMessage(`That file is ${formatFileSize(bytes.length)} — over the 10 MB limit.`);
         setUploading(false);

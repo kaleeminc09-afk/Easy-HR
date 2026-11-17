@@ -265,7 +265,13 @@ export default function ExpensesScreen() {
     }
     setPicking(true);
     try {
-      const bytes = await new File(asset.uri).bytes();
+      // Web: the picker returns a blob: URI, which the expo-file-system
+      // File API cannot read (it only knows paths inside its own
+      // virtual filesystem) — File.bytes() throws. fetch() reads a
+      // blob: URI directly. Native keeps File.bytes().
+      const bytes = Platform.OS === 'web'
+        ? new Uint8Array(await (await fetch(asset.uri)).arrayBuffer())
+        : await new File(asset.uri).bytes();
       if (bytes.length > MAX_BYTES) {
         setMessage(`That file is ${formatFileSize(bytes.length)} — over the 10 MB limit.`);
         return;
