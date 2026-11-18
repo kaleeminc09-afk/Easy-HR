@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -328,6 +328,20 @@ const managerTools = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "log_unanswered_question",
+      description: "Logs a question you cannot answer so a human can approve an answer for it later. Call this ONLY when the user's question cannot be answered from any tool, the LEGAL RULES block, the APPROVED KNOWLEDGE block, or the app guide — never for questions you already answered. Pass the user's question exactly as asked. After calling it, reply honestly that you don't know and the question was logged for review.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "The user's question, exactly as asked." },
+        },
+        required: ["question"],
+      },
+    },
+  },
 ];
 
 // ---------- Employee tools ----------
@@ -463,6 +477,20 @@ const employeeTools = [
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "log_unanswered_question",
+      description: "Logs a question you cannot answer so a human can approve an answer for it later. Call this ONLY when the user's question cannot be answered from any tool, the LEGAL RULES block, the APPROVED KNOWLEDGE block, or the app guide — never for questions you already answered. Pass the user's question exactly as asked. After calling it, reply honestly that you don't know and the question was logged for review.",
+      parameters: {
+        type: "object",
+        properties: {
+          question: { type: "string", description: "The user's question, exactly as asked." },
+        },
+        required: ["question"],
+      },
+    },
+  },
 ];
 
 const managerSystemPrompt = `You are the NorthShift AI Manager Assistant.
@@ -527,6 +555,9 @@ LAW & RULES — READ THIS BEFORE ANSWERING ANY LAW QUESTION:
 - If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer — point them at the official provincial employment-standards site. Never invent a law change, a new rate, or a new threshold.
 - If someone asks for the official source link, quote the Source URL from the LEGAL RULES block exactly as written. If the block lists no source URL for that fact, name the official site without giving a link. Never construct, guess, shorten, or rewrite a URL.
 - The province rules are a compliance aid, never legal advice. Say so when the question has legal consequences.
+KNOWLEDGE & GAPS:
+- The APPROVED KNOWLEDGE block holds curated answers approved in the backoffice. When a question matches one, use it — quote its wording and its source URL. Never contradict it.
+- If you cannot answer from your tools, the LEGAL RULES block, the APPROVED KNOWLEDGE block, or the app guide, call log_unanswered_question with the user's question first, then reply honestly in one short sentence that you don't know and the question has been logged for review. Never guess, never invent an answer, a link, or a feature.
 
 PROFILES:
 - Job title, department, start date, phone, or emergency contact questions → get_employee_profile.
@@ -599,6 +630,9 @@ LAW & RULES:
 - You do NOT detect law changes on your own. A law that changed after the verified date in the block is not in your rules.
 - If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer. Never invent a law change.
 - If someone asks for the official source link, quote the Source URL from the LEGAL RULES block exactly as written. If the block lists no source URL for that fact, name the official site without giving a link. Never construct, guess, shorten, or rewrite a URL.
+KNOWLEDGE & GAPS:
+- The APPROVED KNOWLEDGE block holds curated answers approved in the backoffice. When a question matches one, use it — quote its wording and its source URL. Never contradict it.
+- If you cannot answer from your tools, the LEGAL RULES block, the APPROVED KNOWLEDGE block, or the app guide, call log_unanswered_question with the user's question first, then reply honestly in one short sentence that you don't know and the question has been logged for review. Never guess, never invent an answer, a link, or a feature.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -734,11 +768,26 @@ Deno.serve(async (req) => {
     };
     const legalBlock = `\n\nLEGAL RULES (read live from the database on this request — quote exactly, never from memory):\n- ${provRule.name} meal break: ${provRule.meal_threshold_minutes == null ? "no express statutory meal break — employer policy governs" : `${provRule.meal_minutes} minutes after no more than ${Math.round(provRule.meal_threshold_minutes / 60)} consecutive hours`}${provRule.split_allowed ? "; may be split into two periods by agreement" : ""}. ${provRule.note} Verified ${fmtLegalDate(provRule.verified_date)}.${provRule.source_url ? ` Source: ${provRule.source_url}.` : ""}${provWages.length ? "\n" + provWages.map((w: any) => `- ${provRule.name} minimum wage (${w.label}): $${(w.amount_cents / 100).toFixed(2)}/hr, effective ${fmtLegalDate(w.effective_from)}. Verified ${fmtLegalDate(w.verified_date)}.${w.source_url ? ` Source: ${w.source_url}.` : ""}`).join("\n") : ""}`;
 
+    // ----- Approved knowledge -----
+    // Curated answers approved in the backoffice (brain_knowledge).
+    // Read on every request like the legal rules; any failure means
+    // an empty block, so chat never breaks. The fingerprint joins
+    // the cache key so an approved edit invalidates cached replies.
+    let knowledgeRows: any[] = [];
+    try {
+      const { data: kn, error: knErr } = await supabase.from("brain_knowledge")
+        .select("id, topic, answer, source_url, verified_date, updated_at")
+        .eq("is_active", true).order("topic").limit(100);
+      if (!knErr && kn) knowledgeRows = kn;
+    } catch { /* empty knowledge block */ }
+    const knowledgeFingerprintValue = knowledgeFingerprint(knowledgeRows);
+    const knowledgeBlock = buildKnowledgeSection(knowledgeRows);
+
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
 
     let messages = [
-      { role: "system", content: systemPrompt + contextNote + legalBlock },
+      { role: "system", content: systemPrompt + contextNote + legalBlock + knowledgeBlock },
       ...cleanHistory,
       { role: "user", content: prompt },
     ];
@@ -776,6 +825,7 @@ Deno.serve(async (req) => {
         effectiveRole,
         BRAIN_RULES_VERSION,
         rulesFingerprint,
+        knowledgeFingerprintValue,
         await sha256Hex(canonicalPrompt),
         await sha256Hex(JSON.stringify(cleanHistory)),
       ].join("|"));
@@ -1925,6 +1975,26 @@ Deno.serve(async (req) => {
               overtime_hours_this_week: week.overtime_hours,
               overtime_threshold_hours: 44,
             };
+          }
+        } else if (fn === "log_unanswered_question") {
+          // Gap log: the model calls this when it cannot answer from
+          // tools, rules, knowledge, or the app guide. Best-effort —
+          // a failed insert never blocks the reply.
+          try {
+            const q = String(args.question || "").trim().slice(0, 2000);
+            if (q) {
+              const qHash = await sha256Hex(normalizePromptForCache(q));
+              await supabase.from("brain_gaps").insert([{
+                business_id: callerBusinessId,
+                user_id: effectiveUserId,
+                question: q,
+                question_hash: qHash,
+                status: "open",
+              }]);
+            }
+            output = { success: true, logged: true };
+          } catch {
+            output = { success: true, logged: false };
           }
         }
 

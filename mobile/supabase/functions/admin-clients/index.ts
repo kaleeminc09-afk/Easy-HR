@@ -391,6 +391,80 @@ serve(async (req) => {
       return json({ ok: true });
     }
 
+    if (action === "list_gaps") {
+      const { data: gaps, error } = await db.from("brain_gaps")
+        .select("id, business_id, user_id, question, question_hash, status, created_at")
+        .order("created_at", { ascending: false })
+        .limit(1000);
+      if (error) return json({ error: "Could not load Brain gaps." }, 500);
+      const bizName = new Map(bizList.map((b: Record<string, unknown>) => [b.id as string, b.business_name as string]));
+      const groups = new Map<string, { question_hash: string; question: string; ask_count: number; last_asked: string; first_asked: string; has_open: boolean; businesses: string[] }>();
+      for (const g of gaps || []) {
+        const row = g as { business_id: string | null; question: string; question_hash: string; status: string; created_at: string };
+        const grp = groups.get(row.question_hash) || {
+          question_hash: row.question_hash, question: row.question, ask_count: 0,
+          last_asked: row.created_at, first_asked: row.created_at, has_open: false, businesses: [] as string[],
+        };
+        grp.ask_count += 1;
+        if (row.created_at > grp.last_asked) grp.last_asked = row.created_at;
+        if (row.created_at < grp.first_asked) grp.first_asked = row.created_at;
+        if (row.status === "open") grp.has_open = true;
+        const name = row.business_id ? (bizName.get(row.business_id) || "Unknown business") : null;
+        if (name && !grp.businesses.includes(name)) grp.businesses.push(name);
+        groups.set(row.question_hash, grp);
+      }
+      const list = [...groups.values()].sort((a, b) => (a.last_asked < b.last_asked ? 1 : -1));
+      return json({ gaps: list });
+    }
+
+    if (action === "list_knowledge") {
+      const { data, error } = await db.from("brain_knowledge")
+        .select("id, topic, answer, source_url, verified_date, is_active, created_at, updated_at")
+        .order("topic");
+      if (error) return json({ error: "Could not load Brain knowledge." }, 500);
+      return json({ knowledge: data || [] });
+    }
+
+    if (action === "add_knowledge") {
+      const topic = String(body.topic || "").trim();
+      const answer = String(body.answer || "").trim();
+      const sourceUrl = String(body.source_url || "").trim();
+      const verified = String(body.verified_date || "").trim();
+      if (topic.length < 1 || topic.length > 200) return json({ error: "Topic must be 1–200 characters." }, 400);
+      if (answer.length < 1 || answer.length > 4000) return json({ error: "Answer must be 1–4000 characters." }, 400);
+      if (sourceUrl && !/^https:\/\//.test(sourceUrl)) return json({ error: "Source link must start with https://" }, 400);
+      const verifiedDate = verified || new Date().toISOString().slice(0, 10);
+      if (isNaN(new Date(verifiedDate + "T12:00:00Z").getTime())) return json({ error: "Verified date is not valid." }, 400);
+      const { data, error } = await db.from("brain_knowledge").insert([{
+        topic, answer, source_url: sourceUrl || null, verified_date: verifiedDate, is_active: true,
+      }]).select("id").maybeSingle();
+      if (error) return json({ error: "Could not save the answer." }, 500);
+      await writeAudit("brain_knowledge_add", null, { topic, id: (data as { id: string } | null)?.id || null });
+      return json({ ok: true, id: (data as { id: string } | null)?.id || null });
+    }
+
+    if (action === "set_knowledge_active") {
+      const id = String(body.id || "");
+      const isActive = body.is_active === true;
+      const { data: row, error: findErr } = await db.from("brain_knowledge").select("id, topic").eq("id", id).maybeSingle();
+      if (findErr || !row) return json({ error: "Answer not found." }, 404);
+      const { error } = await db.from("brain_knowledge").update({ is_active: isActive }).eq("id", id);
+      if (error) return json({ error: "Could not update the answer." }, 500);
+      await writeAudit(isActive ? "brain_knowledge_activate" : "brain_knowledge_retire", null, { id, topic: (row as { topic: string }).topic });
+      return json({ ok: true });
+    }
+
+    if (action === "resolve_gaps") {
+      const hash = String(body.question_hash || "");
+      const status = String(body.status || "");
+      if (!hash) return json({ error: "Missing question." }, 400);
+      if (status !== "answered" && status !== "dismissed") return json({ error: "Status must be answered or dismissed." }, 400);
+      const { data, error } = await db.from("brain_gaps").update({ status }).eq("question_hash", hash).select("id");
+      if (error) return json({ error: "Could not update the gap." }, 500);
+      await writeAudit("brain_gap_resolve", null, { question_hash: hash.slice(0, 12), status, count: (data || []).length });
+      return json({ ok: true, updated: (data || []).length });
+    }
+
     return json({ error: "Unknown action." }, 400);
   } catch (e) {
     return json({ error: (e as Error).message || "Backoffice request failed." }, 500);

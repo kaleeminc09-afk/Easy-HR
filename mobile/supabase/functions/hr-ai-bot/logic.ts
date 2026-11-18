@@ -1413,3 +1413,39 @@ export function legalRulesFingerprint(rows: LegalRuleRow[] | null | undefined): 
   }
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
+
+// ---------- Approved knowledge (living brain) ----------
+// Curated answers approved in the backoffice. The Brain reads the
+// active rows on every request and quotes them; the fingerprint joins
+// the reply-cache key so an approved edit invalidates cached replies.
+
+export interface KnowledgeRow {
+  id?: string;
+  topic: string;
+  answer: string;
+  source_url?: string | null;
+  verified_date?: string | null;
+  updated_at?: string | null;
+}
+
+export function buildKnowledgeSection(rows: KnowledgeRow[] | null | undefined): string {
+  const list = (rows || []).filter((r) => r && typeof r.answer === "string" && r.answer.trim() !== "");
+  if (list.length === 0) return "";
+  const lines = list.map((r) =>
+    `- ${r.topic}: ${r.answer.trim()}${r.source_url ? ` Source: ${r.source_url}.` : ""}${r.verified_date ? ` Verified ${r.verified_date}.` : ""}`);
+  return `\n\nAPPROVED KNOWLEDGE (curated answers approved in the backoffice — quote these when the question matches; never contradict them):\n${lines.join("\n")}`;
+}
+
+export function knowledgeFingerprint(rows: KnowledgeRow[] | null | undefined): string {
+  const canonical = (rows || [])
+    .filter((r) => r && typeof r.topic === "string")
+    .map((r) => [r.id || "", r.topic, r.answer || "", r.updated_at || ""].join("|"))
+    .sort()
+    .join("\n");
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < canonical.length; i++) {
+    hash ^= canonical.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}

@@ -58,6 +58,8 @@ import {
   resolveExpenseCandidate,
   parseLegalRules,
   legalRulesFingerprint,
+  buildKnowledgeSection,
+  knowledgeFingerprint,
 } from "./logic";
 
 describe("haversineMeters", () => {
@@ -1327,5 +1329,35 @@ describe("legalRulesFingerprint", () => {
   test("empty and null inputs give a stable value", () => {
     expect(legalRulesFingerprint([])).toBe(legalRulesFingerprint(null));
     expect(legalRulesFingerprint([])).toMatch(/^[0-9a-f]{8}$/);
+  });
+});
+
+describe("buildKnowledgeSection", () => {
+  test("empty or null rows mean an empty block", () => {
+    expect(buildKnowledgeSection([])).toBe("");
+    expect(buildKnowledgeSection(null)).toBe("");
+    expect(buildKnowledgeSection([{ topic: "T", answer: "   " }])).toBe("");
+  });
+  test("rows render with source URL and verified date", () => {
+    const block = buildKnowledgeSection([
+      { id: "1", topic: "Wage link", answer: "See the ESA guide.", source_url: "https://www.ontario.ca/document/x", verified_date: "2026-11-18" },
+      { id: "2", topic: "No source", answer: "Plain answer." },
+    ]);
+    expect(block).toContain("APPROVED KNOWLEDGE");
+    expect(block).toContain("- Wage link: See the ESA guide. Source: https://www.ontario.ca/document/x. Verified 2026-11-18.");
+    expect(block).toContain("- No source: Plain answer.");
+  });
+});
+
+describe("knowledgeFingerprint", () => {
+  const rows = [{ id: "1", topic: "T", answer: "A", updated_at: "2026-11-18T00:00:00Z" }];
+  test("stable for the same rows, empty input is stable", () => {
+    expect(knowledgeFingerprint(rows)).toBe(knowledgeFingerprint(rows));
+    expect(knowledgeFingerprint([])).toBe(knowledgeFingerprint(null));
+  });
+  test("changes when an answer or updated_at changes", () => {
+    const base = knowledgeFingerprint(rows);
+    expect(knowledgeFingerprint([{ ...rows[0], answer: "B" }])).not.toBe(base);
+    expect(knowledgeFingerprint([{ ...rows[0], updated_at: "2026-11-19T00:00:00Z" }])).not.toBe(base);
   });
 });
