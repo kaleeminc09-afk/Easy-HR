@@ -384,6 +384,9 @@ export default function ExpensesScreen() {
       setDateStr(todayStr());
       setMessage(kind === 'mileage' ? 'Mileage submitted for review.' : 'Expense submitted for review.');
       await loadExpenses(myId);
+      // The report and the review queue read their own copies — refresh
+      // them too, or the new expense stays invisible until a reload.
+      await reloadManagerData();
     } catch (e) {
       setMessage('Could not submit: ' + (e?.message || 'please try again.'));
     } finally {
@@ -411,6 +414,7 @@ export default function ExpensesScreen() {
     setMessage(error ? 'Could not delete: ' + error.message : 'Expense deleted.');
     setConfirmingDeleteId(null);
     await loadExpenses(myId);
+    await reloadManagerData();
     setBusyId(null);
   };
 
@@ -591,7 +595,11 @@ export default function ExpensesScreen() {
   const totalPending = sumRows(periodRows.filter((e) => e.status === 'pending'), splitAmount);
   const totalDenied = sumRows(periodRows.filter((e) => e.status === 'denied'), splitAmount);
   const reimbDue = sumRows(periodRows.filter((e) => e.status === 'approved' && e.reimbursement_status === 'unpaid'), splitAmount);
-  const periodMileageRows = periodRows.filter((e) => e.type === 'mileage' && e.status === 'approved');
+  // Same set as the rest of the report: pending mileage counts at its
+  // stored estimate (splitAmount falls back), approved at the tier split.
+  // Filtering to approved-only here made the box read 0 while Pending
+  // already included the same mileage.
+  const periodMileageRows = periodRows.filter((e) => e.type === 'mileage');
   const periodMileageKm = sumRows(periodMileageRows, (e) => Number(e.mileage_km) || 0);
   const periodMileageAmt = sumRows(periodMileageRows, splitAmount);
   const tierRows = mileageTierSplit(approvedMileageYear, periodYear);
@@ -867,6 +875,7 @@ export default function ExpensesScreen() {
                   </TouchableOpacity>
                   {!collapsedReport.tier && (
                     <>
+                      <Text style={styles.cardText}>Full {periodYear} year to date — all approved mileage, not just this period.</Text>
                       {tierRows.length === 0 ? (
                         <Text style={styles.emptyText}>No approved mileage this year.</Text>
                       ) : tierRows.map((t) => (
