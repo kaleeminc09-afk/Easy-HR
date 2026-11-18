@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -525,6 +525,7 @@ LAW & RULES — READ THIS BEFORE ANSWERING ANY LAW QUESTION:
 - Your break rules and minimum-wage figures come from the LEGAL RULES block in your context, which is read live from the database on every question — quote it exactly, never from memory. Each fact carries its own verified date: state it when you answer, and add that employment law changes, so confirm against the official source for the province before acting on it.
 - You do NOT detect law changes on your own. A law that changed after the verified date in the block is not in your rules.
 - If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer — point them at the official provincial employment-standards site. Never invent a law change, a new rate, or a new threshold.
+- If someone asks for the official source link, quote the Source URL from the LEGAL RULES block exactly as written. If the block lists no source URL for that fact, name the official site without giving a link. Never construct, guess, shorten, or rewrite a URL.
 - The province rules are a compliance aid, never legal advice. Say so when the question has legal consequences.
 
 PROFILES:
@@ -544,6 +545,7 @@ WRITE ACTIONS - you can change data, not just read it:
 APP GUIDE — where things live (web app, right-hand toolbar; phone app, ☰ Menu):
 - Clock In is the home screen. Schedule is the shared week view — everyone sees shifts and claims open ones there.
 - Build Schedule lives in the Manager Portal (the Build Schedule card in the tools column) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
+- Describe only the features listed in this guide. Never invent app capabilities: there is no drag-and-drop on any screen, shifts cannot be edited on the Schedule screen (Delete only), and anything not listed here does not exist — say so plainly instead of describing it as if it did.
 - Break Policy, Leave Policy, QR Codes, and Manager Board are manager-only; Subscription is admin-only.
 - Expenses lives on the Expenses screen: employees submit money expenses and mileage there, managers review and mark reimbursements paid, and the report with CSV export and print is on the same screen.
 - Onboarding: a new owner signs up, creates the business, adds a location, then invites the team by email from Manage Users. An invited employee opens the invite link from their email and sets a password — they never create a business. If someone signed up directly without an invite, point them at the "I was invited" choice on the setup screen.
@@ -588,6 +590,7 @@ CAPABILITIES:
 - Their own expenses ("my expenses", "did my expense get approved", "have I been reimbursed") → get_my_expenses. Their own hours this week ("my hours this week", "am I in overtime") → get_my_hours. Other people's expenses or hours are manager-level — decline politely (see PERMISSIONS).
 - Where expenses live: the Expenses screen is where they submit a money expense or mileage, with a receipt photo for money expenses.
 - Where things live: on the web app the sections are in the right-hand toolbar; on the phone they are in the ☰ Menu. Schedule is the shared week view — open shifts there are yours to claim.
+- Describe only the features listed here. Never invent app capabilities — there is no drag-and-drop on any screen, and if something is not listed, say it is not available rather than describing it as if it existed.
 - If you were invited, open the invite link from your email to join your manager's business — do not create a business on the setup screen.
 - Billing: the first 30 days are free on every plan (Starter $25, Growth $49, Business $99 per month after that), a card is taken at signup, and billing lives on the Subscription screen for admins. Checkout is running in Stripe test mode — never say a real payment went through or a real card was charged. Billing questions are manager-level: point them at their manager.
 
@@ -595,6 +598,7 @@ LAW & RULES:
 - Your break rules and minimum-wage figures come from the LEGAL RULES block in your context, which is read live from the database on every question — quote it exactly, never from memory. Each fact carries its own verified date: state it when you answer, and add that employment law changes, so confirm against the official source for the province before acting on it.
 - You do NOT detect law changes on your own. A law that changed after the verified date in the block is not in your rules.
 - If someone asks whether a law changed, or about a rule newer than the verified date, say plainly that your rules are as of that date and you cannot confirm anything newer. Never invent a law change.
+- If someone asks for the official source link, quote the Source URL from the LEGAL RULES block exactly as written. If the block lists no source URL for that fact, name the official site without giving a link. Never construct, guess, shorten, or rewrite a URL.
 
 CONVERSATION MEMORY:
 - You receive the recent conversation history with every request. USE IT.
@@ -728,7 +732,7 @@ Deno.serve(async (req) => {
     const fmtLegalDate = (iso: string) => {
       try { return new Date(iso + "T12:00:00Z").toLocaleDateString("en-US", { timeZone: "UTC", month: "long", day: "numeric", year: "numeric" }); } catch { return iso; }
     };
-    const legalBlock = `\n\nLEGAL RULES (read live from the database on this request — quote exactly, never from memory):\n- ${provRule.name} meal break: ${provRule.meal_threshold_minutes == null ? "no express statutory meal break — employer policy governs" : `${provRule.meal_minutes} minutes after no more than ${Math.round(provRule.meal_threshold_minutes / 60)} consecutive hours`}${provRule.split_allowed ? "; may be split into two periods by agreement" : ""}. ${provRule.note} Verified ${fmtLegalDate(provRule.verified_date)}.${provWages.length ? "\n" + provWages.map((w: any) => `- ${provRule.name} minimum wage (${w.label}): $${(w.amount_cents / 100).toFixed(2)}/hr, effective ${fmtLegalDate(w.effective_from)}. Verified ${fmtLegalDate(w.verified_date)}.`).join("\n") : ""}`;
+    const legalBlock = `\n\nLEGAL RULES (read live from the database on this request — quote exactly, never from memory):\n- ${provRule.name} meal break: ${provRule.meal_threshold_minutes == null ? "no express statutory meal break — employer policy governs" : `${provRule.meal_minutes} minutes after no more than ${Math.round(provRule.meal_threshold_minutes / 60)} consecutive hours`}${provRule.split_allowed ? "; may be split into two periods by agreement" : ""}. ${provRule.note} Verified ${fmtLegalDate(provRule.verified_date)}.${provRule.source_url ? ` Source: ${provRule.source_url}.` : ""}${provWages.length ? "\n" + provWages.map((w: any) => `- ${provRule.name} minimum wage (${w.label}): $${(w.amount_cents / 100).toFixed(2)}/hr, effective ${fmtLegalDate(w.effective_from)}. Verified ${fmtLegalDate(w.verified_date)}.${w.source_url ? ` Source: ${w.source_url}.` : ""}`).join("\n") : ""}`;
 
     const tools = effectiveRole === "manager" ? managerTools : employeeTools;
     const systemPrompt = effectiveRole === "manager" ? managerSystemPrompt : employeeSystemPrompt(location);
@@ -1363,12 +1367,12 @@ Deno.serve(async (req) => {
             const startIso = new Date(zonedTimeToUtc(bounds.start, "00:00", callerTz)).toISOString();
             const endIso = new Date(zonedTimeToUtc(bounds.end, "00:00", callerTz)).toISOString();
             const { data, error } = await supabase.from("time_logs")
-              .select("user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+              .select("user_id, clock_in, clock_out, ai_anomaly_flag, profiles!time_logs_user_id_fkey(full_name)")
               .in("user_id", bizUserIds).gte("clock_in", startIso).lt("clock_in", endIso);
             if (error) {
               output = { error: error.message };
             } else {
-              const rows = payrollPeriodSummary((data || []).map((l: any) => ({ user_id: l.user_id, full_name: l.profiles?.full_name, clock_in: l.clock_in, clock_out: l.clock_out })), Date.now());
+              const rows = payrollPeriodSummary((data || []).map((l: any) => ({ user_id: l.user_id, full_name: l.profiles?.full_name, clock_in: l.clock_in, clock_out: l.clock_out, ai_anomaly_flag: l.ai_anomaly_flag })), Date.now());
               const totalHours = +rows.reduce((a, r) => a + r.hours, 0).toFixed(2);
               const totalOt = +rows.reduce((a, r) => a + r.overtime_hours, 0).toFixed(2);
               output = rows.length === 0
@@ -1550,19 +1554,20 @@ Deno.serve(async (req) => {
           const sinceIso = new Date(Date.now() - 14 * 24 * 3600 * 1000).toISOString();
           const { data: logs, error } = await supabase
             .from("time_logs")
-            .select("id, user_id, clock_in, clock_out, profiles!time_logs_user_id_fkey(full_name)")
+            .select("id, user_id, clock_in, clock_out, ai_anomaly_flag, profiles!time_logs_user_id_fkey(full_name)")
             .in("user_id", bizUserIds)
             .gte("clock_in", sinceIso);
           if (error) {
             output = { error: error.message };
           } else {
-            const ids = (logs || []).map((l: any) => l.id);
+            const liveLogs = (logs || []).filter((l: any) => !isVoidedLog(l.ai_anomaly_flag));
+            const ids = liveLogs.map((l: any) => l.id);
             let brks: any[] = [];
             if (ids.length > 0) {
               const { data: b } = await supabase.from("time_breaks").select("time_log_id, start_time, end_time").in("time_log_id", ids);
               brks = b || [];
             }
-            const flags = findMealBreakViolations((logs || []).map((l: any) => ({
+            const flags = findMealBreakViolations(liveLogs.map((l: any) => ({
               log_id: l.id,
               user_id: l.user_id,
               full_name: l.profiles?.full_name,

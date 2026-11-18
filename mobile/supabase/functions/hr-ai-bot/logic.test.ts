@@ -1271,6 +1271,24 @@ describe("parseLegalRules", () => {
     expect(parsed.wages[0].amount_cents).toBe(1795);
     expect(parsed.wages[1].category).toBe("student");
   });
+  test("a break row carries its source URL through, and null stays null", () => {
+    const withUrl = { ...breakRow("ON", 30), source_url: "https://www.ontario.ca/document/example" };
+    expect(parseLegalRules([withUrl], fallback, "2026-10-28").breaks.ON.source_url).toBe("https://www.ontario.ca/document/example");
+    expect(parseLegalRules([breakRow("ON", 30)], fallback, "2026-10-28").breaks.ON.source_url).toBeNull();
+  });
+  test("a wage row carries its source URL through", () => {
+    const wage = {
+      rule_key: "ON.min_wage_general",
+      province: "ON",
+      rule_type: "min_wage",
+      payload: { category: "general", label: "General", amount_cents: 1795, effective_from: "2026-10-01" },
+      verified_date: "2026-11-13",
+      source_url: "https://www.ontario.ca/document/your-guide-employment-standards-act-0/minimum-wage",
+    };
+    const parsed = parseLegalRules([wage], fallback, "2026-10-28");
+    expect(parsed.wages).toHaveLength(1);
+    expect(parsed.wages[0].source_url).toBe("https://www.ontario.ca/document/your-guide-employment-standards-act-0/minimum-wage");
+  });
   test("a wage row without a valid amount is ignored", () => {
     const bad = { rule_key: "ON.min_wage_general", province: "ON", rule_type: "min_wage", payload: { category: "general", effective_from: "2026-10-01" }, verified_date: "2026-11-13" };
     expect(parseLegalRules([bad as any], fallback, "2026-10-28").wages).toEqual([]);

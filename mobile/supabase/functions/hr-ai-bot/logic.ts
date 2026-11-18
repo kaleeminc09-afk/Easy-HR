@@ -1327,7 +1327,7 @@ export interface LegalRuleRow {
   updated_at?: string | null;
 }
 
-export type EffectiveBreakRule = ProvinceBreakRule & { verified_date: string };
+export type EffectiveBreakRule = ProvinceBreakRule & { verified_date: string; source_url?: string | null };
 
 export interface LegalWage {
   province: string;
@@ -1336,6 +1336,7 @@ export interface LegalWage {
   amount_cents: number;
   effective_from: string; // YYYY-MM-DD
   verified_date: string;
+  source_url?: string | null;
 }
 
 export interface ParsedLegalRules {
@@ -1375,7 +1376,7 @@ export function parseLegalRules(
   for (const row of rows || []) {
     if (!row || typeof row.rule_key !== "string") continue;
     if (row.rule_type === "break" && isBreakPayload(row.payload)) {
-      breaks[row.payload.code] = { ...row.payload, verified_date: row.verified_date || fallbackVerifiedDate };
+      breaks[row.payload.code] = { ...row.payload, verified_date: row.verified_date || fallbackVerifiedDate, source_url: row.source_url ?? null };
     } else if (row.rule_type === "min_wage" && row.payload && Number.isFinite(row.payload.amount_cents) && typeof row.payload.effective_from === "string") {
       wages.push({
         province: row.province,
@@ -1384,6 +1385,7 @@ export function parseLegalRules(
         amount_cents: Math.round(row.payload.amount_cents),
         effective_from: row.payload.effective_from,
         verified_date: row.verified_date || fallbackVerifiedDate,
+        source_url: row.source_url ?? null,
       });
     }
   }
