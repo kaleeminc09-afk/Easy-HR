@@ -10,7 +10,7 @@ import { logActivity } from '../lib/activity';
 import { getCurrentPosition } from '../lib/location';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES, isVoidedLog, STALE_OPEN_HOURS } from '../supabase/functions/hr-ai-bot/logic';
+import { chooseBreakType, maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES, isVoidedLog, isDisregardedLog, STALE_OPEN_HOURS } from '../supabase/functions/hr-ai-bot/logic';
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -294,7 +294,7 @@ export default function App() {
       if (logsData) {
         let totalMs = 0;
         logsData.forEach(log => {
-          if (isVoidedLog(log.ai_anomaly_flag)) return;
+          if (isDisregardedLog(log.ai_anomaly_flag)) return;
           const start = new Date(log.clock_in).getTime();
           const end = log.clock_out ? new Date(log.clock_out).getTime() : new Date().getTime();
           if (end > start) totalMs += (end - start);

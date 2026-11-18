@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, isDisregardedLog, scheduleGuideReply, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -577,6 +577,7 @@ WRITE ACTIONS - you can change data, not just read it:
 APP GUIDE — where things live (web app, right-hand toolbar; phone app, ☰ Menu):
 - Clock In is the home screen. Schedule is the shared week view — everyone sees shifts and claims open ones there.
 - Build Schedule lives in the Manager Portal (the Build Schedule card in the tools column) — that is the only place managers create shifts. Never tell anyone to create a shift on the Schedule screen.
+- Building a schedule, step by step: Build Schedule card → '+ Build Shifts' → pick the employee chip (or 'Open shift') → pick the worksite chip (or 'None') → tap the date chips (one shift is created for each date picked; typing YYYY-MM-DD adds a date; tap a selected-date chip to remove it) → enter Start and End in 24h form (toggle 'Ends next day' for overnight) → optional note → 'Create Shift' or 'Post Open Shift'. Shifts appear on the Schedule screen immediately — there is no publish step, no drag-and-drop, no 'Available Shifts' list, and no editing on the Schedule screen (Delete only).
 - Describe only the features listed in this guide. Never invent app capabilities: there is no drag-and-drop on any screen, shifts cannot be edited on the Schedule screen (Delete only), and anything not listed here does not exist — say so plainly instead of describing it as if it did.
 - Break Policy, Leave Policy, QR Codes, and Manager Board are manager-only; Subscription is admin-only.
 - Expenses lives on the Expenses screen: employees submit money expenses and mileage there, managers review and mark reimbursements paid, and the report with CSV export and print is on the same screen.
@@ -623,6 +624,7 @@ CAPABILITIES:
 - Where expenses live: the Expenses screen is where they submit a money expense or mileage, with a receipt photo for money expenses.
 - Where things live: on the web app the sections are in the right-hand toolbar; on the phone they are in the ☰ Menu. Schedule is the shared week view — open shifts there are yours to claim.
 - Describe only the features listed here. Never invent app capabilities — there is no drag-and-drop on any screen, and if something is not listed, say it is not available rather than describing it as if it existed.
+- Employees never build schedules — that is manager-only (Build Schedule card in the Manager Portal).
 - If you were invited, open the invite link from your email to join your manager's business — do not create a business on the setup screen.
 - Billing: the first 30 days are free on every plan (Starter $25, Growth $49, Business $99 per month after that), a card is taken at signup, and billing lives on the Subscription screen for admins. Checkout is running in Stripe test mode — never say a real payment went through or a real card was charged. Billing questions are manager-level: point them at their manager.
 
@@ -730,6 +732,16 @@ Deno.serve(async (req) => {
     const dbRole = myProfileRow?.role || "employee";
     // Managers and admins both get the manager toolset.
     const effectiveRole = dbRole === "employee" ? "employee" : "manager";
+    // ----- Deterministic schedule-building guide -----
+    // Guidance questions about building schedules get the fixed true
+    // answer from code, before the cache and the model: a cached
+    // hallucination must never serve, and the model must never be
+    // asked to invent these steps again. Create-shift commands and
+    // data questions do not match and flow through untouched.
+    const guideReply = scheduleGuideReply(prompt, effectiveRole);
+    if (guideReply) {
+      return new Response(JSON.stringify({ reply: guideReply }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
     // Caller's timezone for human-readable shift labels (the server runs
     // in UTC, so raw timestamps would read back with the wrong times).
     let callerTz = "America/Toronto";
@@ -1612,7 +1624,7 @@ Deno.serve(async (req) => {
           if (error) {
             output = { error: error.message };
           } else {
-            const liveLogs = (logs || []).filter((l: any) => !isVoidedLog(l.ai_anomaly_flag));
+            const liveLogs = (logs || []).filter((l: any) => !isDisregardedLog(l.ai_anomaly_flag));
             const ids = liveLogs.map((l: any) => l.id);
             let brks: any[] = [];
             if (ids.length > 0) {

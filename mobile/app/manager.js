@@ -7,7 +7,7 @@ import { supabase } from '../lib/supabase';
 import { fetchBillingState } from '../lib/billing';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
-import { computeWeeklyOvertime, computeTodayHours, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput, isVoidedLog, isReviewedFlag, csvCell } from '../supabase/functions/hr-ai-bot/logic';
+import { computeWeeklyOvertime, computeTodayHours, OT_THRESHOLD_HOURS, findMealBreakViolations, buildAuditCsv, weekStartMs, shiftsOverlap, validateShiftInput, isVoidedLog, isDisregardedLog, isReviewedFlag, csvCell } from '../supabase/functions/hr-ai-bot/logic';
 import { maxMinutesForBreakType, DEFAULT_BREAK_POLICY, PROVINCE_BREAK_RULES } from '../supabase/functions/hr-ai-bot/logic';
 
 // Added Keys for the Edge Function connection
@@ -420,10 +420,10 @@ export default function ManagerDashboard() {
   };
 
   const handlePayrollExport = () => {
-    // Voided logs are never payable: excluded here (the audit export
+    // Voided and rejected logs are never payable: excluded here (the audit export
     // keeps them, flagged, as the record). Rows go through csvCell so
     // a quote or line break in a name or review note cannot break the file.
-    const payableLogs = logs.filter(l => !isVoidedLog(l.ai_anomaly_flag));
+    const payableLogs = logs.filter(l => !isDisregardedLog(l.ai_anomaly_flag));
     if (payableLogs.length === 0) return;
     let headers = [];
     let rows = [];

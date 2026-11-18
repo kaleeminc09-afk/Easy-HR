@@ -5,7 +5,10 @@ import {
   haversineMeters,
   computeTodayHours,
   isVoidedLog,
+  isRejectedLog,
+  isDisregardedLog,
   isReviewedFlag,
+  scheduleGuideReply,
   autoCloseForOpenShift,
   AUTO_CLOSE_HOURS,
   matchByName,
@@ -1359,5 +1362,106 @@ describe("knowledgeFingerprint", () => {
     const base = knowledgeFingerprint(rows);
     expect(knowledgeFingerprint([{ ...rows[0], answer: "B" }])).not.toBe(base);
     expect(knowledgeFingerprint([{ ...rows[0], updated_at: "2026-11-19T00:00:00Z" }])).not.toBe(base);
+  });
+});
+
+describe("scheduleGuideReply (deterministic schedule guide, Nov 18)", () => {
+  test("matches guidance questions with the true steps, no drag-and-drop", () => {
+    const r = scheduleGuideReply("How do I build next week's schedule in the app?", "manager");
+    expect(r).toContain("Build Schedule");
+    expect(r).toContain("Create Shift");
+    expect(r).not.toMatch(/drag/i);
+    expect(r).not.toContain("Publish");
+    expect(scheduleGuideReply("how to create a shift", "manager")).toContain("Build Shifts");
+    expect(scheduleGuideReply("Where do I build shifts?", "manager")).toContain("Build Schedule");
+    expect(scheduleGuideReply("walk me through building the schedule", "manager")).toContain("Open shift");
+  });
+
+  test("employees get the manager-only redirect", () => {
+    const r = scheduleGuideReply("How do I build a schedule?", "employee");
+    expect(r).toContain("manager job");
+    expect(r).not.toContain("Create Shift");
+  });
+
+  test("create commands and data questions pass through untouched", () => {
+    expect(scheduleGuideReply("Create a shift for Sam tomorrow 9am to 5pm", "manager")).toBeNull();
+    expect(scheduleGuideReply("schedule Asha Friday 9 to 5", "manager")).toBeNull();
+    expect(scheduleGuideReply("how many shifts this week", "manager")).toBeNull();
+    expect(scheduleGuideReply("how do I see my shifts", "manager")).toBeNull();
+    expect(scheduleGuideReply("show me pending expenses", "manager")).toBeNull();
+    expect(scheduleGuideReply("", "manager")).toBeNull();
+  });
+});
+
+describe("rejected logs count 0 (Nov 18 payroll gap)", () => {
+  test("isRejectedLog / isDisregardedLog match the reject marker only", () => {
+    expect(isRejectedLog("✕ Rejected by manager — Flagged: Unusually Short Shift (< 3 Mins)")).toBe(true);
+    expect(isRejectedLog("✓ Approved by manager — Flagged: Excessive Duration (> 12 Hours)")).toBe(false);
+    expect(isRejectedLog("Voided by manager — test data")).toBe(false);
+    expect(isRejectedLog("Normal Shift")).toBe(false);
+    expect(isRejectedLog(null)).toBe(false);
+    expect(isDisregardedLog("✕ Rejected by manager — test data")).toBe(true);
+    expect(isDisregardedLog("Voided by manager — test data")).toBe(true);
+    expect(isDisregardedLog("✓ Approved by manager — test data")).toBe(false);
+    expect(isDisregardedLog("Normal Shift")).toBe(false);
+  });
+
+  test("computeTodayHours counts rejected logs as 0", () => {
+    const now = new Date(2026, 9, 19, 18).getTime();
+    const at = (h: number) => new Date(2026, 9, 19, h).toISOString();
+    expect(computeTodayHours([
+      { clock_in: at(9), clock_out: at(17) },
+      { clock_in: at(9), clock_out: at(17), ai_anomaly_flag: "✕ Rejected by manager — test data" },
+    ], now)).toBe(8);
+  });
+
+  test("computeWeeklyOvertime excludes rejected logs", () => {
+    const now = new Date(2026, 9, 24, 12).getTime();
+    const at = (d: number, h: number) => new Date(2026, 9, d, h).toISOString();
+    const rows = computeWeeklyOvertime([
+      { user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17) },
+      { user_id: "asha", clock_in: at(20, 9), clock_out: at(20, 17), ai_anomaly_flag: "✕ Rejected by manager — duplicate" },
+    ], now);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].hours).toBe(8);
+  });
+
+  test("plannedVsActual ignores rejected logs for actual hours and worked counts", () => {
+    const weekStart = new Date(2026, 9, 19).getTime();
+    const now = new Date(2026, 9, 24, 12).getTime();
+    const at = (day: number, h: number) => new Date(2026, 9, day, h).toISOString();
+    const rows = plannedVsActual(
+      [{ user_id: "asha", start_time: at(19, 9), end_time: at(19, 17) }],
+      [{ user_id: "asha", clock_in: at(19, 9), clock_out: at(19, 17), ai_anomaly_flag: "✕ Rejected by manager — test" }],
+      weekStart, now,
+    );
+    expect(rows[0].actualHours).toBe(0);
+    expect(rows[0].workedCount).toBe(0);
+    expect(rows[0].missedCount).toBe(1);
+  });
+
+  test("audit CSV keeps a rejected row as a record with 0 paid hours and excludes it from week totals", () => {
+    const T0 = new Date(2026, 9, 19, 9, 0, 0);
+    const iso = (h: number) => new Date(T0.getTime() + h * 3600000).toISOString();
+    const NOW = T0.getTime() + 72 * 3600000;
+    const csv = buildAuditCsv([
+      { log_id: "a", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca", worksite_name: "Depot", clock_in: iso(0), clock_out: iso(8), anomaly_flag: "Normal Shift", breaks: [] },
+      { log_id: "b", user_id: "u1", full_name: "Asha Rao", email: "asha@x.ca", worksite_name: "Depot", clock_in: iso(24), clock_out: iso(32), anomaly_flag: "✕ Rejected by manager — test data", breaks: [] },
+    ], NOW);
+    const lines = csv.split("\n");
+    expect(lines).toHaveLength(3);
+    expect(lines[2]).toContain("Rejected by manager");
+    expect(lines[2]).toContain(",8.00,0,0.00,");
+    expect(lines[1]).toContain(",8.00,0.00");
+  });
+
+  test("payrollPeriodSummary excludes rejected logs entirely", () => {
+    const now = new Date(2026, 10, 18, 12).getTime();
+    const at = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+    const rows = payrollPeriodSummary([
+      { user_id: "u1", full_name: "Staff Member", clock_in: at(12, 16, 40), clock_out: at(12, 16, 41), ai_anomaly_flag: "✕ Rejected by manager — test data" },
+      { user_id: "u1", full_name: "Staff Member", clock_in: at(12, 16, 58), clock_out: at(12, 17, 0), ai_anomaly_flag: "Voided by manager — test data" },
+    ], now);
+    expect(rows).toHaveLength(0);
   });
 });

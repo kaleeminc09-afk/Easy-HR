@@ -31,6 +31,20 @@ export function isVoidedLog(flag: string | null | undefined): boolean {
   return (flag || "").startsWith(VOIDED_FLAG_PREFIX);
 }
 
+export const REJECTED_FLAG_PREFIX = "✕ Rejected by manager";
+
+/** A log a manager rejected in anomaly review — the time does not count. */
+export function isRejectedLog(flag: string | null | undefined): boolean {
+  return (flag || "").startsWith(REJECTED_FLAG_PREFIX);
+}
+
+/** Voided or rejected: disregarded time. Every hours computation in
+ *  this file skips it, exactly like a void — a manager rejecting a
+ *  bogus log must remove it from payable hours, not just flag it. */
+export function isDisregardedLog(flag: string | null | undefined): boolean {
+  return isVoidedLog(flag) || isRejectedLog(flag);
+}
+
 /** A log a manager already approved or rejected in anomaly review. */
 export function isReviewedFlag(flag: string | null | undefined): boolean {
   const f = flag || "";
@@ -67,7 +81,7 @@ export function computeTodayHours(logs: ShiftLog[], nowMs: number): number {
   todayStart.setHours(0, 0, 0, 0);
   let ms = 0;
   for (const log of logs) {
-    if (isVoidedLog(log.ai_anomaly_flag)) continue;
+    if (isDisregardedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (s >= todayStart.getTime()) {
       const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
@@ -220,7 +234,7 @@ export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): Ov
   const end = start + 7 * 24 * 3600 * 1000;
   const totals = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
-    if (isVoidedLog(log.ai_anomaly_flag)) continue;
+    if (isDisregardedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (Number.isNaN(s) || s < start || s >= end) continue;
     const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
@@ -618,10 +632,10 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
   const closed = shifts.filter((s) => s.clock_out);
 
   // Person-week gross totals (Mon-Sun local), the overtime base.
-  // Voided shifts stay in the file as a record, but count 0 hours.
+  // Voided and rejected shifts stay in the file as a record, but count 0 hours.
   const weekTotals = new Map<string, number>();
   for (const s of closed) {
-    if (isVoidedLog(s.anomaly_flag)) continue;
+    if (isDisregardedLog(s.anomaly_flag)) continue;
     const key = `${s.user_id}|${weekStartMs(new Date(s.clock_in).getTime())}`;
     const hrs = (new Date(s.clock_out as string).getTime() - new Date(s.clock_in).getTime()) / 3600000;
     weekTotals.set(key, (weekTotals.get(key) || 0) + hrs);
@@ -664,8 +678,8 @@ export function buildAuditCsv(shifts: AuditShift[], nowMs: number): string {
     const weekTotal = weekTotals.get(weekKey) || 0;
     const weekOt = Math.max(0, weekTotal - OT_THRESHOLD_HOURS);
     const compliant = checkMealBreakCompliance(s, s.breaks, nowMs) ? "No" : "Yes";
-    const voided = isVoidedLog(s.anomaly_flag);
-    const paidHours = voided ? "0.00" : ((grossMin - unpaidMin) / 60).toFixed(2);
+    const disregarded = isDisregardedLog(s.anomaly_flag);
+    const paidHours = disregarded ? "0.00" : ((grossMin - unpaidMin) / 60).toFixed(2);
 
     const row = [
       nameOf(s),
@@ -870,7 +884,7 @@ export function plannedVsActual(
 
   const logDaysByUser = new Map<string, Set<string>>();
   for (const l of logs) {
-    if (isVoidedLog(l.ai_anomaly_flag)) continue;
+    if (isDisregardedLog(l.ai_anomaly_flag)) continue;
     const ci = Date.parse(l.clock_in);
     if (Number.isNaN(ci)) continue;
     if (!logDaysByUser.has(l.user_id)) logDaysByUser.set(l.user_id, new Set());
@@ -899,7 +913,7 @@ export function plannedVsActual(
   }
 
   for (const l of logs) {
-    if (isVoidedLog(l.ai_anomaly_flag)) continue;
+    if (isDisregardedLog(l.ai_anomaly_flag)) continue;
     const ci = Date.parse(l.clock_in);
     if (Number.isNaN(ci) || ci < weekStart || ci >= weekEnd) continue;
     const row = ensure(l.user_id);
@@ -1219,6 +1233,36 @@ export const BREAK_RULES_VERIFIED_DATE = "November 13, 2026";
  * question. Anything else — different words, different order — is a
  * different question and is answered fresh.
  */
+// ---- Deterministic schedule-building guide ----
+// How-to-build-a-schedule questions get a fixed, true answer straight
+// from code: the model hallucinated drag-and-drop here twice (Nov 18,
+// 2026) even with an explicit "never invent" rule, because the prompt
+// never gave it the true steps. This matcher only fires on guidance
+// questions (how/where + build + schedule/shift); create-shift
+// commands and data questions pass through to the model untouched.
+const GUIDE_QUESTION = /\b(how|where|show me|walk me through|explain)\b/i;
+const GUIDE_BUILD = /\b(build\w*|make|creat\w*|post|add|set up|put together)\b/i;
+const GUIDE_TARGET = /\b(schedul\w*|shift\w*|rota)\b/i;
+const GUIDE_EXCLUDE = /\bhow (many|much|long)\b/i;
+
+const SCHEDULE_GUIDE_MANAGER = `To build a schedule, open the Manager Portal and tap the Build Schedule card, then '+ Build Shifts'.
+- Pick the employee, or 'Open shift' if anyone can claim it.
+- Pick the worksite, or 'None'.
+- Tap the dates you want — one shift is created for each date picked. You can also type a date as YYYY-MM-DD to add it, and tap a selected date to remove it.
+- Enter the start and end times in 24-hour form, and toggle 'Ends next day' for an overnight shift.
+- Add a note if you like, then tap 'Create Shift' — or 'Post Open Shift' for an open shift.
+The shifts appear on the shared Schedule screen right away. There is no publish step, and shifts can't be edited on the Schedule screen — Delete only. Or just ask me here — for example: 'Create a shift for Sam tomorrow 9am to 5pm.'`;
+
+const SCHEDULE_GUIDE_EMPLOYEE = `Building schedules is a manager job — managers build shifts in the Build Schedule card in the Manager Portal. You can see your shifts and claim open ones on the Schedule screen. If you need a shift changed, ask your manager.`;
+
+/** Fixed schedule-building answer for guidance questions, or null to let the model answer. */
+export function scheduleGuideReply(prompt: string, role: string): string | null {
+  const q = (prompt || "").toLowerCase().replace(/\s+/g, " ").trim();
+  if (!q || GUIDE_EXCLUDE.test(q)) return null;
+  if (!GUIDE_QUESTION.test(q) || !GUIDE_BUILD.test(q) || !GUIDE_TARGET.test(q)) return null;
+  return role === "employee" ? SCHEDULE_GUIDE_EMPLOYEE : SCHEDULE_GUIDE_MANAGER;
+}
+
 export function normalizePromptForCache(prompt: string): string {
   return String(prompt || "").toLowerCase().replace(/\s+/g, " ").trim().replace(/[?.!]+$/, "").trim();
 }
@@ -1250,7 +1294,7 @@ export interface PayrollRow {
 export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number): PayrollRow[] {
   const weekMs = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
-    if (isVoidedLog(log.ai_anomaly_flag)) continue;
+    if (isDisregardedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
     if (Number.isNaN(s)) continue;
     const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
