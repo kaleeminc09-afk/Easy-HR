@@ -7,7 +7,7 @@ import { fetchBillingState, startCheckout, startPortal, openBillingUrl } from '.
 import { getBillingState } from '../supabase/functions/hr-ai-bot/logic';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 
-// First month free on every plan — no permanent free tier.
+// First month free until a business has paid once — no permanent free tier.
 const PLANS = {
   starter: { name: 'Starter', price: '$25/mo', limit: 5, features: ['Up to 5 employees', 'Geofenced clock in/out', 'Shift logs & exceptions'] },
   growth: { name: 'Growth', price: '$49/mo', limit: 15, features: ['Up to 15 employees', 'Everything in Starter', 'AI assistant & anomaly review', 'Payroll CSV export'] },
@@ -16,7 +16,7 @@ const PLANS = {
 
 export default function SubscriptionScreen() {
   const router = useRouter();
-  const { checkout } = useLocalSearchParams();
+  const { checkout, trial } = useLocalSearchParams();
 
   // Back means back: return to the screen we came from, not a
   // role-based destination. A deep link with no history falls back
@@ -44,7 +44,7 @@ export default function SubscriptionScreen() {
 
   const init = async () => {
     // Stripe returns here after Checkout: ?checkout=success / cancelled.
-    if (checkout === 'success') setCheckoutMsg('Subscription started — welcome aboard. Your card is on file; the first charge lands after your free month.');
+    if (checkout === 'success') setCheckoutMsg(trial === '0' ? 'Subscription started — welcome aboard. Your card is on file and your plan is active.' : 'Subscription started — welcome aboard. Your card is on file; the first charge lands after your free month.');
     else if (checkout === 'cancelled') setCheckoutMsg('Checkout cancelled — nothing was charged. Your free trial keeps running.');
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) { router.replace('/'); return; }
@@ -237,7 +237,7 @@ export default function SubscriptionScreen() {
 
         <View style={styles.allPlansCard}>
           <Text style={styles.sectionLabel}>All plans</Text>
-          <Text style={styles.trialNote}>Every plan starts with a free first month. Card at signup; charged after day 30 unless you cancel.</Text>
+          <Text style={styles.trialNote}>First month free for businesses that haven't used a free month yet. Card at signup; charged after day 30 unless you cancel.</Text>
           {Object.entries(PLANS).map(([key, p]) => (
             <View key={key} style={[styles.planRow, key === plan && styles.planRowActive]}>
               <View>

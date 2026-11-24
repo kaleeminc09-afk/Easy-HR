@@ -17,8 +17,13 @@ const json = (body: unknown, status = 200) =>
 // Stripe price — the client never picks a price ID or an amount. Cards
 // are collected on Stripe's page only; no card data ever touches our
 // code. Model: card at signup (day 1), 30 days free, charged day 31
-// unless cancelled. A business that already had a subscription gets NO
-// second free trial — the trial applies to the first subscription only.
+// unless cancelled. The free month belongs to a business that has
+// never paid: a business whose first subscription was cancelled
+// during its trial (never charged) still gets its free month when it
+// subscribes again. Once a business has paid an invoice, there is no
+// second free trial. (Fixed 2026-11-24: the old rule keyed the trial
+// on "never had a subscription", so a cancelled trial blocked the
+// free month on every later checkout and Stripe charged day 1.)
 // Secrets live only in Supabase secrets (STRIPE_SECRET_KEY,
 // STRIPE_PRICE_*); nothing secret is in this file.
 // TEST-mode price IDs, created 2026-11-10. Live mode MUST override them
@@ -101,7 +106,19 @@ serve(async (req) => {
     if (existing?.stripe_subscription_id && (existing.status === "active" || existing.status === "trialing")) {
       return json({ error: "You already have an active subscription — manage it from Manage billing." }, 409);
     }
-    const hadSubscriptionBefore = !!existing?.stripe_subscription_id;
+    // Free month? A business gets its 30 days if it has never paid an
+    // invoice. The webhook logs every paid invoice in billing_events,
+    // and $0 trial invoices never land there (proven 2026-11-24: the
+    // Nov 10-11 trial produced no invoice.paid rows), so this is
+    // exactly "has paid real money".
+    const { data: paidInvoice } = await db
+      .from("billing_events")
+      .select("id")
+      .eq("business_id", caller.business_id)
+      .eq("event_type", "invoice.paid")
+      .limit(1)
+      .maybeSingle();
+    const trialGranted = !paidInvoice;
 
     // One Stripe Customer per business, reused across checkouts.
     let customerId = existing?.stripe_customer_id as string | null;
@@ -132,12 +149,12 @@ serve(async (req) => {
       "line_items[0][quantity]": "1",
       // Card at signup, always — even for the free trial.
       payment_method_collection: "always",
-      success_url: `${APP_URL}/subscription?checkout=success`,
+      success_url: `${APP_URL}/subscription?checkout=success&trial=${trialGranted ? "1" : "0"}`,
       cancel_url: `${APP_URL}/subscription?checkout=cancelled`,
       "metadata[business_id]": caller.business_id,
       "subscription_data[metadata][business_id]": caller.business_id,
     };
-    if (!hadSubscriptionBefore) sessionParams["subscription_data[trial_period_days]"] = "30";
+    if (trialGranted) sessionParams["subscription_data[trial_period_days]"] = "30";
     const session = await stripePost("/checkout/sessions", sessionParams, STRIPE_KEY);
 
     return json({ url: session.url as string });
