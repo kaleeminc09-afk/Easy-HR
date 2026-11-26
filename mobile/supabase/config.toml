@@ -453,3 +453,11 @@ verify_jwt = true
 # the function then separates user callers from service callers.
 [functions.send-push]
 verify_jwt = true
+
+# Reminder sweep: runs every 15 minutes on the platform's own
+# schedule (no key in SQL, no dashboard cron to create — the
+# schedule ships with the deploy). Service-only: the sweep sends
+# for every business, so no user caller may trigger it.
+[functions.reminder-sweep]
+verify_jwt = true
+schedule = "*/15 * * * *"
