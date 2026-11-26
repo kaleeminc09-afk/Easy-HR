@@ -447,3 +447,9 @@ verify_jwt = false
 # function checks the CRM_ADMIN_EMAILS allowlist before answering.
 [functions.admin-clients]
 verify_jwt = true
+
+# Push sender: called by the app (user JWT) and by first-party
+# functions (service key). The gateway validates the JWT either way;
+# the function then separates user callers from service callers.
+[functions.send-push]
+verify_jwt = true

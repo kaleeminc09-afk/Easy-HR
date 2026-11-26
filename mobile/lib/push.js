@@ -42,6 +42,25 @@ export function setupPushNotifications() {
   });
 }
 
+// Tap handling: when the user taps a notification, open the screen the
+// sender named in data.url (a path like "/timeoff"). Call once from the
+// root layout with its router; returns the subscription so the layout
+// can remove it. A missing or non-path url is ignored — a ping with a
+// dead link is a sender test failure, never a crash. Web is a no-op.
+export function setupPushResponseListener(router) {
+  if (Platform.OS === "web") return null;
+  return Notifications.addNotificationResponseReceivedListener((response) => {
+    const url = response?.notification?.request?.content?.data?.url;
+    if (typeof url === "string" && url.startsWith("/")) {
+      try {
+        router.push(url);
+      } catch {
+        // Bad link: ignore here, fix at the sender.
+      }
+    }
+  });
+}
+
 // Register this device for push, saving its Expo token in push_tokens.
 // request=true asks the OS for permission, but only when it has never
 // been asked (status 'undetermined'); a past 'denied' is never re-asked.

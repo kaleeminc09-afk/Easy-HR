@@ -6,7 +6,7 @@ import WebSidebar from '../components/WebSidebar';
 import WebAssistant from '../components/WebAssistant';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
-import { setupPushNotifications, ensurePushToken } from '../lib/push';
+import { setupPushNotifications, setupPushResponseListener, ensurePushToken } from '../lib/push';
 import {
   useFonts,
   Inter_400Regular,
@@ -64,6 +64,13 @@ export default function RootLayout() {
   // no-op on web — so this is safe in the shared root layout.
   useEffect(() => {
     setupPushNotifications();
+  }, []);
+
+  // Push v1 step 2: a tap on a notification deep-links to its screen.
+  // The sender puts the path in data.url.
+  useEffect(() => {
+    const sub = setupPushResponseListener(router);
+    return () => sub?.remove?.();
   }, []);
   const [loaded] = useFonts({
     Inter_400Regular,
