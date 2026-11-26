@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, isDisregardedLog, scheduleGuideReply, dayStartMsInTz, weekStartMsInTz, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, isDisregardedLog, scheduleGuideReply, dayStartMsInTz, weekStartMsInTz, validateShiftInput, billingGateRefusal, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1756,7 +1756,19 @@ Deno.serve(async (req) => {
             let targetId: string | null = null;
             let targetName = "Open shift";
             let failure: string | null = null;
-            if (!isOpen) {
+            // Billing gate (build #7): the service-role client bypasses
+            // RLS, so the DB shifts-insert policy never fires for
+            // Brain-created shifts. Check the same gate the DB uses,
+            // before any validation or insert. A manager with no business
+            // yet cannot create shifts — they need the business first.
+            if (!callerBusinessId) {
+              failure = "Set up your business first, then create shifts.";
+            } else {
+              const { data: allowed, error: gateErr } = await supabase.rpc("billing_write_allowed", { p_business_id: callerBusinessId });
+              const gateRefusal = billingGateRefusal(allowed, gateErr ? gateErr.message : null, "Your trial ended — subscribe to keep posting shifts. Clock-in and reports keep working.");
+              if (gateRefusal) failure = gateRefusal.error;
+            }
+            if (!failure && !isOpen) {
               const { data: emps } = await supabase.from("profiles").select("id, full_name").eq("business_id", businessScope);
               const m = matchByName(emps || [], (p: any) => p.full_name || "", empName);
               if (m.kind === "none") failure = `No team member matches "${empName}".`;

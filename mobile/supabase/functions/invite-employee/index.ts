@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
@@ -19,7 +18,12 @@ const json = (body: unknown, status = 200) =>
 // and the caller can NOT choose the invitee's role or business: every
 // invite lands as an employee in the inviter's own business, which matches
 // the single-business-per-workspace model.
-serve(async (req) => {
+//
+// Deno.serve is the built-in entry point. The std `serve` import
+// (deno.land/std@0.177.0) is no longer supported by Supabase's bundler —
+// it fails the deploy with "Cannot import from deno.com". The Brain
+// (hr-ai-bot) already runs on Deno.serve.
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "POST only." }, 405);
   try {
@@ -43,6 +47,23 @@ serve(async (req) => {
       .maybeSingle();
     if (!caller || (caller.role !== "manager" && caller.role !== "admin")) {
       return json({ error: "Only managers and admins can invite employees." }, 403);
+    }
+
+    // Billing gate (build #7): the service-role client bypasses RLS, and
+    // invites have no DB gate at all — nothing stops a locked business
+    // from inviting today. Check the same gate the DB uses for
+    // shifts/worksites, before the invite is created (an invite cannot be
+    // cleanly undone once the auth user + email exist). A manager with no
+    // business yet cannot invite — there is no business to join.
+    if (!caller.business_id) {
+      return json({ error: "Set up your business first, then invite your team." }, 403);
+    }
+    const { data: allowed, error: gateErr } = await db.rpc("billing_write_allowed", { p_business_id: caller.business_id });
+    if (gateErr) {
+      return json({ error: "Couldn't check your subscription right now. Please try again." }, 500);
+    }
+    if (allowed !== true) {
+      return json({ error: "Your trial ended — subscribe to invite more staff." }, 403);
     }
 
     const body = await req.json().catch(() => ({}));

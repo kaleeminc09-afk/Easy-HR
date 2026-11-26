@@ -763,6 +763,24 @@ export function validateShiftInput(startIso: string, endIso: string): string | n
   return null;
 }
 
+// Billing gate (build #7): the service-role client bypasses RLS, so the
+// DB shifts/worksites INSERT policies never fire for Brain-created shifts
+// or function-sent invites. The gate is the same SQL function the DB
+// uses — billing_write_allowed(p_business_id) — called via .rpc().
+// This turns the rpc result into the refusal the handler returns, or null
+// when the write may proceed. Fail CLOSED on anything unexpected: a
+// billing check is the only gate on these paths, so an unknown state must
+// not silently reopen it.
+export function billingGateRefusal(
+  allowed: boolean | null | undefined,
+  rpcError: string | null,
+  lockMessage: string,
+): { success: false; error: string } | null {
+  if (allowed === true) return null;
+  if (allowed === false && !rpcError) return { success: false, error: lockMessage };
+  return { success: false, error: "Couldn't check your subscription right now. Please try again." };
+}
+
 export function shiftDurationHours(s: ShiftLike): number {
   return +(((new Date(s.end_time).getTime() - new Date(s.start_time).getTime()) / 3600000).toFixed(2));
 }

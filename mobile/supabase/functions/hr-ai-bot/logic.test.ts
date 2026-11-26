@@ -31,6 +31,7 @@ import {
   type AuditBreak,
   shiftsOverlap,
   validateShiftInput,
+  billingGateRefusal,
   shiftDurationHours,
   countBusinessDays,
   dateRangesOverlap,
@@ -586,6 +587,28 @@ describe("shift scheduling helpers", () => {
 
   test("duration hours", () => {
     expect(shiftDurationHours({ start_time: S(9), end_time: S(17, 30) })).toBe(8.5);
+  });
+});
+
+describe("billing gate (build #7)", () => {
+  const LOCK = "Your trial ended — subscribe to keep posting shifts. Clock-in and reports keep working.";
+
+  test("allowed writes proceed", () => {
+    expect(billingGateRefusal(true, null, LOCK)).toBeNull();
+  });
+
+  test("locked business gets the lock message", () => {
+    expect(billingGateRefusal(false, null, LOCK)).toEqual({ success: false, error: LOCK });
+  });
+
+  test("an rpc error fails closed with the retry message, never the lock message", () => {
+    expect(billingGateRefusal(null, "connection failed", LOCK)).toEqual({ success: false, error: "Couldn't check your subscription right now. Please try again." });
+    expect(billingGateRefusal(false, "connection failed", LOCK)).toEqual({ success: false, error: "Couldn't check your subscription right now. Please try again." });
+  });
+
+  test("an unexpected null result fails closed", () => {
+    expect(billingGateRefusal(null, null, LOCK)).toEqual({ success: false, error: "Couldn't check your subscription right now. Please try again." });
+    expect(billingGateRefusal(undefined, null, LOCK)).toEqual({ success: false, error: "Couldn't check your subscription right now. Please try again." });
   });
 });
 
