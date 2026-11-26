@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, TextInput } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ActivityIndicator, ScrollView, TextInput, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -87,7 +87,15 @@ export default function UsersScreen() {
     const email = inviteEmail.trim().toLowerCase();
     if (!email.includes('@')) { setMessage('Enter a valid email to invite.'); return; }
     // Trial lock: no NEW invites once the trial is over and unpaid.
-    if (billing.state === 'locked') { setMessage('Your trial ended — subscribe to invite more staff.'); return; }
+    // Say it out loud: the inline message alone is a quiet grey line
+    // and a blocked invite reads as a dead button. The Alert pops on
+    // phone and web alike.
+    if (billing.state === 'locked') {
+      const lockMsg = 'Your trial ended — subscribe to invite more staff.';
+      setMessage(lockMsg);
+      Alert.alert('Trial ended', lockMsg);
+      return;
+    }
     setInviting(true);
     setMessage('');
     try {
@@ -99,7 +107,15 @@ export default function UsersScreen() {
         body: JSON.stringify({ email, first_name: inviteFirst.trim(), last_name: inviteLast.trim() }),
       });
       const out = await res.json().catch(() => ({}));
-      if (!res.ok) { setMessage(out.error || 'Invite failed. Try again.'); return; }
+      if (!res.ok) {
+        const errMsg = out.error || 'Invite failed. Try again.';
+        setMessage(errMsg);
+        // The function's billing gate (build #7) returns 403 when the
+        // trial is over — e.g. when this screen's billing state is stale.
+        // Same rule as the UI block above: say it out loud.
+        if (res.status === 403) Alert.alert('Trial ended', errMsg);
+        return;
+      }
       setMessage(`Invite sent to ${email}. They tap the link in the email, open the app, then set their password on the Profile screen.`);
       setInviteEmail('');
       setInviteFirst('');
