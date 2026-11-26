@@ -69,6 +69,10 @@ Deno.serve(async (req) => {
         const { data } = await db.from("subscriptions").select("manual_hold").eq("business_id", businessId).maybeSingle();
         return (data as { manual_hold?: boolean } | null)?.manual_hold === true;
       },
+      getGraceUntil: async (businessId) => {
+        const { data } = await db.from("subscriptions").select("grace_until").eq("business_id", businessId).maybeSingle();
+        return (data as { grace_until?: string | null } | null)?.grace_until ?? null;
+      },
       upsertSubscription: async (row) => {
         const { error } = await db.from("subscriptions").upsert(row, { onConflict: "business_id" });
         if (error) throw error;
@@ -101,10 +105,37 @@ Deno.serve(async (req) => {
       return (await res.json()) as never;
     };
 
+    // Step 5: the card on file, for the card-expiry check (Stripe
+    // sends no card-expiring webhook, so the webhook checks the card
+    // whenever a subscription event arrives).
+    const fetchPaymentMethod = async (id: string) => {
+      if (!STRIPE_KEY) return null;
+      const res = await fetch(`https://api.stripe.com/v1/payment_methods/${id}`, {
+        headers: { Authorization: `Bearer ${STRIPE_KEY}` },
+      });
+      if (!res.ok) return null;
+      return (await res.json()) as { id: string; card?: { exp_month: number; exp_year: number } };
+    };
+
+    // Step 5: fire a billing alert through send-push. A failed ping
+    // never breaks the billing record — the handler already guards
+    // it, and this fetch catches too.
+    const notify = async (payload: Record<string, unknown>) => {
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SERVICE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // A failed ping never breaks the billing record.
+      }
+    };
+
     const result = await processStripeEvent(
       svc,
       event,
-      { priceIds: priceIdsFromEnv((k) => Deno.env.get(k)), fetchSubscription },
+      { priceIds: priceIdsFromEnv((k) => Deno.env.get(k)), fetchSubscription, fetchPaymentMethod, notify },
     );
     return json({ received: true, ...result });
   } catch (e) {

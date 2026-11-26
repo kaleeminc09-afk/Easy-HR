@@ -37,6 +37,7 @@ export interface Db {
   getSubscriptionByStripeId(stripeSubscriptionId: string): Promise<{ business_id: string } | null>;
   getSubscriptionByCustomer(stripeCustomerId: string): Promise<{ business_id: string } | null>;
   getManualHold(businessId: string): Promise<boolean>;
+  getGraceUntil(businessId: string): Promise<string | null>;
   upsertSubscription(row: Record<string, unknown>): Promise<void>;
   updateSubscriptionByBusiness(businessId: string, patch: Record<string, unknown>): Promise<void>;
   insertBillingEvent(row: { business_id: string | null; event_type: string; stripe_event_id: string; detail: Record<string, unknown> }): Promise<void>;
@@ -45,12 +46,57 @@ export interface Db {
 export interface HandlerOpts {
   priceIds: Record<string, string>;
   fetchSubscription: (id: string) => Promise<StripeSubLike | null>;
+  // Step 5: fire a billing alert through send-push. Implemented in
+  // index.ts as a service-key fetch; never throws, so a failed ping
+  // never breaks the billing record. Omitted in tests that do not
+  // need it — then no ping is sent.
+  notify?: (input: Record<string, unknown>) => Promise<void>;
+  // Step 5: fetch a payment method for the card-expiry check.
+  // Stripe sends no card-expiring webhook, so the card on file is
+  // checked whenever a subscription event arrives.
+  fetchPaymentMethod?: (id: string) => Promise<{ id: string; card?: { exp_month: number; exp_year: number } } | null>;
   nowMs?: number;
 }
 
 export type HandlerResult = { handled: boolean; businessId: string | null; action: string };
 
 const GRACE_MS = 7 * 24 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+// Billing alerts carry no caller timezone (Stripe is the caller),
+// so they use the business default — the same default the sweep
+// uses. The quiet rule then holds overnight billing pings until
+// 7 AM, except the one exception the plan allows (a payment
+// failure on the last grace day, passed as ignore_quiet).
+const BILLING_TZ = "America/Toronto";
+
+// Step 5: one billing ping to the business owner. Skips silently
+// when there is no notify hook, no owner, or no ref id — a ping
+// must never break the billing record, and never throw.
+async function notifyOwner(
+  opts: HandlerOpts,
+  businessId: string,
+  ownerId: string | null,
+  ping: { type: string; title: string; body: string; ref_id: string; ignore_quiet?: boolean },
+): Promise<void> {
+  if (!opts.notify || !ownerId || !ping.ref_id) return;
+  try {
+    await opts.notify({
+      business_id: businessId,
+      type: ping.type,
+      family: "billing",
+      title: ping.title,
+      body: ping.body,
+      url: "/subscription",
+      ref_type: "subscription",
+      ref_id: ping.ref_id,
+      recipient_user_id: ownerId,
+      caller_tz: BILLING_TZ,
+      ...(ping.ignore_quiet ? { ignore_quiet: true } : {}),
+    });
+  } catch {
+    // A failed ping never breaks the billing record.
+  }
+}
 
 export function subscriptionRowFromStripe(
   sub: StripeSubLike,
@@ -142,6 +188,32 @@ export async function processStripeEvent(
         stripe_event_id: event.id,
         detail: { subscription_id: typeof obj.id === "string" ? obj.id : null, status: typeof obj.status === "string" ? obj.status : null, manual_hold_skipped: held },
       });
+      // Card expiring: Stripe sends no webhook for this, so check
+      // the card on file whenever a subscription event arrives. A
+      // card within 30 days of expiry pings the owner once per card
+      // (the payment-method id is the dedupe key, so a replacement
+      // card gets its own ping). Deleted subscriptions have no card
+      // to warn about.
+      if (!held && type !== "customer.subscription.deleted" && opts.fetchPaymentMethod) {
+        const pmId = typeof obj.default_payment_method === "string" ? obj.default_payment_method : null;
+        if (pmId) {
+          const pm = await opts.fetchPaymentMethod(pmId).catch(() => null);
+          const exp = pm?.card;
+          if (exp && typeof exp.exp_month === "number" && typeof exp.exp_year === "number") {
+            // Valid through the last day of exp_month: the expiry
+            // instant is the 1st of the following month.
+            const expMs = Date.UTC(exp.exp_year, exp.exp_month, 1);
+            if (expMs > nowMs && expMs - nowMs <= 30 * DAY_MS) {
+              await notifyOwner(opts, businessId, biz?.owner_id ?? null, {
+                type: "card_expiring",
+                title: "Card expiring soon",
+                body: "Your card on file expires soon. Update it in the billing portal.",
+                ref_id: pmId,
+              });
+            }
+          }
+        }
+      }
       return { handled: true, businessId, action: held ? "skipped — manually managed subscription" : "subscription upserted" };
     }
     case "invoice.paid": {
@@ -161,6 +233,14 @@ export async function processStripeEvent(
       // Failed payment: 7 days' grace from now, then the app soft-locks setup (never on a manual row).
       const row = await findRowForInvoice(db, obj as { subscription?: string | null; customer?: string | null });
       const held = row ? await db.getManualHold(row.business_id) : false;
+      // Read the existing grace window BEFORE overwriting it: it
+      // decides both the grace ping and the quiet-rule exception.
+      const graceUntil = row ? await db.getGraceUntil(row.business_id) : null;
+      const graceUntilMs = graceUntil ? new Date(graceUntil).getTime() : null;
+      const alreadyInGrace = graceUntilMs !== null && graceUntilMs > nowMs;
+      // The plan's one quiet-rule exception: a payment failure on
+      // the last grace day goes out immediately, day or night.
+      const lastGraceDay = alreadyInGrace && graceUntilMs! - nowMs <= DAY_MS;
       if (row && !held) {
         await db.updateSubscriptionByBusiness(row.business_id, {
           grace_until: new Date(nowMs + GRACE_MS).toISOString(),
@@ -173,6 +253,29 @@ export async function processStripeEvent(
         stripe_event_id: event.id,
         detail: { invoice_id: typeof obj.id === "string" ? obj.id : null, subscription_id: typeof obj.subscription === "string" ? obj.subscription : null },
       });
+      if (row && !held) {
+        const biz = await db.getBusiness(row.business_id);
+        const ownerId = biz?.owner_id ?? null;
+        const invoiceId = typeof obj.id === "string" ? obj.id : "";
+        await notifyOwner(opts, row.business_id, ownerId, {
+          type: "payment_failed",
+          title: "Payment failed",
+          body: "Your NorthShift payment failed. Update your card to avoid a lock.",
+          ref_id: invoiceId,
+          ignore_quiet: lastGraceDay,
+        });
+        // Grace warning: only on entry into grace, not on every
+        // retry — a retry inside an open grace window is the same
+        // window the owner already heard about.
+        if (!alreadyInGrace) {
+          await notifyOwner(opts, row.business_id, ownerId, {
+            type: "grace_warning",
+            title: "Grace period started",
+            body: "NorthShift is in its grace period. Pay within 7 days to keep full access.",
+            ref_id: invoiceId,
+          });
+        }
+      }
       return { handled: true, businessId: row?.business_id ?? null, action: held ? "grace skipped — manually managed" : "grace_until set +7d" };
     }
     case "customer.subscription.trial_will_end": {
@@ -187,6 +290,17 @@ export async function processStripeEvent(
           trial_end: stripeTsToIso(typeof obj.trial_end === "number" ? obj.trial_end : null),
         },
       });
+      // Step 5: the trial-ending ping to the owner (Stripe sends
+      // this once, 3 days before the trial ends).
+      if (businessId) {
+        const biz = await db.getBusiness(businessId);
+        await notifyOwner(opts, businessId, biz?.owner_id ?? null, {
+          type: "trial_ending",
+          title: "Free month ending",
+          body: "Your free month ends in 3 days. Add billing to keep scheduling.",
+          ref_id: typeof obj.id === "string" ? obj.id : "",
+        });
+      }
       return { handled: true, businessId, action: "trial-ending notice recorded" };
     }
     default:

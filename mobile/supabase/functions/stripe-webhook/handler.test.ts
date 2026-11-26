@@ -46,6 +46,10 @@ class FakeDb implements Db {
   async getManualHold(businessId: string) {
     return this.rows[businessId]?.manual_hold === true;
   }
+  async getGraceUntil(businessId: string) {
+    const v = this.rows[businessId]?.grace_until;
+    return typeof v === "string" ? v : null;
+  }
   async upsertSubscription(row: Record<string, unknown>) {
     this.rows[row.business_id as string] = { ...(this.rows[row.business_id as string] || {}), ...row };
   }
@@ -59,6 +63,18 @@ class FakeDb implements Db {
 
 function event(id: string, type: string, object: Record<string, unknown>) {
   return { id, type, data: { object } };
+}
+
+// Step 5: a fake send-push sink and a fake payment method.
+function fakeNotify() {
+  const calls: Record<string, unknown>[] = [];
+  const notify = async (input: Record<string, unknown>) => {
+    calls.push(input);
+  };
+  return { notify, calls };
+}
+function fakePm(expMonth: number, expYear: number) {
+  return async (id: string) => ({ id, card: { exp_month: expMonth, exp_year: expYear } });
 }
 
 describe("subscriptionRowFromStripe", () => {
@@ -215,6 +231,115 @@ describe("processStripeEvent", () => {
     );
     expect(res.handled).toBe(true);
     expect(db.rows["biz_1"].grace_until).toBeUndefined();
+    expect(db.events).toHaveLength(1);
+  });
+
+  // Step 5: billing alerts.
+  test("trial_will_end pings the owner once", async () => {
+    const db = new FakeDb();
+    const { notify, calls } = fakeNotify();
+    const res = await processStripeEvent(
+      db,
+      event("evt_11", "customer.subscription.trial_will_end", { ...(sampleSub() as unknown as Record<string, unknown>) }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].type).toBe("trial_ending");
+    expect(calls[0].family).toBe("billing");
+    expect(calls[0].recipient_user_id).toBe("owner_1");
+    expect(calls[0].ref_id).toBe("sub_test_1");
+    expect(calls[0].url).toBe("/subscription");
+  });
+
+  test("a first failed payment pings payment_failed AND grace_warning", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", status: "active", stripe_subscription_id: "sub_test_1", stripe_customer_id: "cus_test_1" };
+    const { notify, calls } = fakeNotify();
+    const res = await processStripeEvent(
+      db,
+      event("evt_12", "invoice.payment_failed", { id: "in_test_4", subscription: "sub_test_1", customer: "cus_test_1" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(db.rows["biz_1"].grace_until).toBe(new Date(NOW + 7 * DAY).toISOString());
+    expect(calls.map((c) => c.type)).toEqual(["payment_failed", "grace_warning"]);
+    expect(calls[0].ref_id).toBe("in_test_4");
+    expect(calls[0].ignore_quiet).toBeUndefined(); // a first failure can wait until morning
+    expect(calls[1].ref_id).toBe("in_test_4");
+  });
+
+  test("a retry inside an open grace window pings payment_failed only", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", status: "past_due", grace_until: new Date(NOW + 3 * DAY).toISOString(), stripe_subscription_id: "sub_test_1", stripe_customer_id: "cus_test_1" };
+    const { notify, calls } = fakeNotify();
+    await processStripeEvent(
+      db,
+      event("evt_13", "invoice.payment_failed", { id: "in_test_5", subscription: "sub_test_1", customer: "cus_test_1" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(calls.map((c) => c.type)).toEqual(["payment_failed"]);
+    expect(calls[0].ignore_quiet).toBeUndefined();
+  });
+
+  test("a failure on the last grace day skips the quiet rule", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", status: "past_due", grace_until: new Date(NOW + 12 * 3600 * 1000).toISOString(), stripe_subscription_id: "sub_test_1", stripe_customer_id: "cus_test_1" };
+    const { notify, calls } = fakeNotify();
+    await processStripeEvent(
+      db,
+      event("evt_14", "invoice.payment_failed", { id: "in_test_6", subscription: "sub_test_1", customer: "cus_test_1" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(calls.map((c) => c.type)).toEqual(["payment_failed"]);
+    expect(calls[0].ignore_quiet).toBe(true);
+  });
+
+  test("a card expiring within 30 days pings once per card; a later card does not", async () => {
+    const db = new FakeDb();
+    const soon = fakeNotify();
+    await processStripeEvent(
+      db,
+      event("evt_15", "customer.subscription.updated", { ...(sampleSub({ status: "active" }) as unknown as Record<string, unknown>), default_payment_method: "pm_soon" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify: soon.notify, fetchPaymentMethod: fakePm(11, 2026), nowMs: NOW },
+    );
+    expect(soon.calls).toHaveLength(1);
+    expect(soon.calls[0].type).toBe("card_expiring");
+    expect(soon.calls[0].ref_id).toBe("pm_soon");
+    expect(soon.calls[0].recipient_user_id).toBe("owner_1");
+
+    const later = fakeNotify();
+    await processStripeEvent(
+      db,
+      event("evt_16", "customer.subscription.updated", { ...(sampleSub({ status: "active" }) as unknown as Record<string, unknown>), default_payment_method: "pm_later" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify: later.notify, fetchPaymentMethod: fakePm(12, 2026), nowMs: NOW },
+    );
+    expect(later.calls).toHaveLength(0);
+  });
+
+  test("a manual-hold row gets no billing pings", async () => {
+    const db = new FakeDb();
+    db.rows["biz_1"] = { business_id: "biz_1", status: "trialing", manual_hold: true, stripe_customer_id: "cus_test_1" };
+    const { notify, calls } = fakeNotify();
+    await processStripeEvent(
+      db,
+      event("evt_17", "invoice.payment_failed", { id: "in_test_7", subscription: null, customer: "cus_test_1" }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(calls).toHaveLength(0);
+  });
+
+  test("a business with no owner gets no ping, and nothing throws", async () => {
+    const db = new FakeDb();
+    db.businesses.set("biz_2", { id: "biz_2", owner_id: null });
+    const { notify, calls } = fakeNotify();
+    const res = await processStripeEvent(
+      db,
+      event("evt_18", "customer.subscription.trial_will_end", { ...(sampleSub({ metadata: { business_id: "biz_2" } }) as unknown as Record<string, unknown>) }),
+      { priceIds: PRICE_IDS, fetchSubscription: async () => null, notify, nowMs: NOW },
+    );
+    expect(res.handled).toBe(true);
+    expect(calls).toHaveLength(0);
     expect(db.events).toHaveLength(1);
   });
 });
