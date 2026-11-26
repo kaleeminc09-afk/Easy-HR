@@ -2,7 +2,10 @@
 // the schedule lives in config.toml, the logic in handler.ts.
 // Service-only: the platform's cron call carries the service key,
 // and no user caller may run a sweep for every business.
-import { serve } from "https://deno.land/[email protected]/http/server.ts";
+// Deno.serve is the built-in entry point. The std `serve` import
+// (deno.land/std@0.177.0) is no longer supported by Supabase's
+// bundler — it fails the deploy with "Cannot import from deno.com".
+// The Brain (hr-ai-bot) already runs on Deno.serve.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { runSweep } from "./handler.ts";
 import type { SweepDb, SendPushCall } from "./handler.ts";
@@ -16,7 +19,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
 }
 
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   try {
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;

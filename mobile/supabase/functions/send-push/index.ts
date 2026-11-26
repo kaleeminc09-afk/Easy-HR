@@ -1,4 +1,3 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import {
   sendPush,
@@ -7,6 +6,11 @@ import {
   type PushPreferences,
   type SendPushInput,
 } from "./handler.ts";
+
+// Deno.serve is the built-in entry point. The std `serve` import
+// (deno.land/std@0.177.0) is no longer supported by Supabase's
+// bundler — it fails the deploy with "Cannot import from deno.com".
+// The Brain (hr-ai-bot) already runs on Deno.serve.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -26,7 +30,7 @@ const json = (body: unknown, status = 200) =>
 // two caller kinds — a user JWT resolves to a user, the service key is
 // recognised by value. User callers are stamped from the JWT, never
 // trusted from the body. Business scope is enforced in handler.ts.
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "POST only." }, 405);
   try {

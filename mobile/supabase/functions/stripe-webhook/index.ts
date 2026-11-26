@@ -1,7 +1,11 @@
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { verifyStripeSignature, priceIdsFromEnv } from "./verify.ts";
 import { processStripeEvent, type Db } from "./handler.ts";
+
+// Deno.serve is the built-in entry point. The std `serve` import
+// (deno.land/std@0.177.0) is no longer supported by Supabase's
+// bundler — it fails the deploy with "Cannot import from deno.com".
+// The Brain (hr-ai-bot) already runs on Deno.serve.
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -21,7 +25,7 @@ const json = (body: unknown, status = 200) =>
 // BEFORE any JSON parse — parsing first would break the signature.
 // Secrets live only in Supabase secrets (STRIPE_SECRET_KEY,
 // STRIPE_WEBHOOK_SECRET); nothing secret is in this file.
-serve(async (req) => {
+Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return json({ error: "POST only." }, 405);
   try {
