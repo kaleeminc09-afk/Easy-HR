@@ -6,7 +6,7 @@ import { Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import * as Location from 'expo-location';
 import { getCurrentPosition } from '../lib/location';
-import { ensurePushToken } from '../lib/push';
+import { ensurePushToken, sendPushEvent } from '../lib/push';
 import { colors, spacing, radius, fontFamily, buttons } from '../lib/theme';
 
 const QR_PREFIX = 'northshift-site:';
@@ -68,7 +68,7 @@ export default function ScanScreen() {
       // from before scoping and still work; claim them from QR Codes.
       // No exception row is filed here: this needs no GPS, and a foreign
       // QR is usually a wrong-code mistake, not a dispute to review.
-      const { data: prof } = await supabase.from('profiles').select('business_id').eq('id', session.user.id).single();
+      const { data: prof } = await supabase.from('profiles').select('business_id, full_name').eq('id', session.user.id).single();
       if (site.business_id && site.business_id !== prof?.business_id) {
         setResult({ ok: false, title: 'Not your worksite', message: 'This location belongs to another business. Scan the code posted at your own worksite.' });
         return;
@@ -114,7 +114,7 @@ export default function ScanScreen() {
             setResult({ ok: false, title: 'Exception waiting for approval', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). Your exception request is waiting for manager approval.` });
             return;
           }
-          await supabase.from('time_exceptions').insert([{
+          const { data: insertedExc } = await supabase.from('time_exceptions').insert([{
             user_id: session.user.id,
             worksite_id: site.id,
             attempted_at: new Date().toISOString(),
@@ -123,7 +123,22 @@ export default function ScanScreen() {
             distance_meters: Math.round(distance),
             reason_note: 'QR scan outside worksite radius',
             status: 'pending',
-          }]);
+          }]).select('id').single();
+          // Push v1 step 3: ping the managers. Fire-and-forget — the
+          // exception is filed either way.
+          if (insertedExc?.id && prof?.business_id) {
+            sendPushEvent({
+              business_id: prof.business_id,
+              type: 'exception_filed',
+              family: 'requests',
+              title: 'Clock-in exception filed',
+              body: `${prof.full_name || 'A team member'} filed a clock-in exception at ${site.name}. Tap to review.`,
+              url: '/manager',
+              ref_type: 'time_exception',
+              ref_id: insertedExc.id,
+              recipient_role: 'manager',
+            });
+          }
           setResult({ ok: false, title: 'Too far from this worksite', message: `You are ${Math.round(distance)}m away (limit ${site.radius_meters}m). An exception was filed for your manager. Move within range and scan again.` });
           return;
         }

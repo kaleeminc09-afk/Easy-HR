@@ -61,6 +61,24 @@ export function setupPushResponseListener(router) {
   });
 }
 
+// Fire a v1 notification through send-push. Fire-and-forget by
+// design: a failed ping never blocks the action that caused it, and
+// the failure sits in notification_log for follow-up. The caller's
+// device timezone rides along so the sender can hold overnight
+// request pings until 7 AM (the plan's quiet rule). This works on
+// web too — the ping goes to the RECIPIENT's phone, not the
+// caller's, so the caller's platform does not matter.
+export function sendPushEvent(event) {
+  try {
+    const callerTz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    supabase.functions.invoke("send-push", {
+      body: { ...event, caller_tz: callerTz },
+    }).catch(() => {});
+  } catch {
+    // A ping must never break the action that caused it.
+  }
+}
+
 // Register this device for push, saving its Expo token in push_tokens.
 // request=true asks the OS for permission, but only when it has never
 // been asked (status 'undetermined'); a past 'denied' is never re-asked.

@@ -84,6 +84,8 @@ serve(async (req) => {
         return (data || []) as { id: string; token: string }[];
       },
       findLiveLog: async (recipientId, type, refType, refId) => {
+        // 'queued' counts as live: a ping already waiting for morning
+        // must not be queued a second time.
         const { data } = await db
           .from("notification_log")
           .select("id, status")
@@ -91,7 +93,7 @@ serve(async (req) => {
           .eq("type", type)
           .eq("ref_type", refType)
           .eq("ref_id", refId)
-          .in("status", ["sent", "sending"])
+          .in("status", ["sent", "sending", "queued"])
           .maybeSingle();
         return data as { id: string; status: string } | null;
       },
@@ -117,6 +119,38 @@ serve(async (req) => {
       },
       deactivateToken: async (tokenId) => {
         await db.from("push_tokens").update({ is_active: false }).eq("id", tokenId);
+      },
+      getDueQueued: async (nowIso) => {
+        const { data } = await db
+          .from("notification_log")
+          .select("id, recipient_user_id, business_id, type, ref_type, ref_id, title, body, url")
+          .eq("status", "queued")
+          .lte("deliver_at", nowIso)
+          .order("deliver_at", { ascending: true });
+        return (data || []) as {
+          id: string;
+          recipient_user_id: string;
+          business_id: string | null;
+          type: string;
+          ref_type: string;
+          ref_id: string;
+          title: string;
+          body: string;
+          url: string | null;
+        }[];
+      },
+      claimQueued: async (id) => {
+        // Claim only if still queued: a second sweep run that already
+        // flipped it to 'sending' updates zero rows, and this run
+        // must not send the same row twice.
+        const { data, error } = await db
+          .from("notification_log")
+          .update({ status: "sending" })
+          .eq("id", id)
+          .eq("status", "queued")
+          .select("id")
+          .maybeSingle();
+        return !!data && !error;
       },
     };
     const result = await sendPush(svc, fetch, input);

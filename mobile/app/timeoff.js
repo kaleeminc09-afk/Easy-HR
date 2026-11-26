@@ -3,7 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
-import { ensurePushToken } from '../lib/push';
+import { ensurePushToken, sendPushEvent } from '../lib/push';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { countBusinessDays, dateRangesOverlap, vacationBalance, leaveTypeBalance } from '../supabase/functions/hr-ai-bot/logic';
 
@@ -18,6 +18,13 @@ function todayStr() {
 function fmtDate(str) {
   if (!str) return '';
   return new Date(str + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+// Compact date range for push bodies ("Dec 24-27"), matching the
+// plan's lock-screen copy. fmtDate above is the on-screen style.
+function shortRange(start, end) {
+  const short = (s) => new Date(s + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return start === end ? short(start) : `${short(start)}-${short(end)}`;
 }
 
 function statusBadge(status) {
@@ -164,7 +171,7 @@ export default function TimeOffScreen() {
     }
     setSubmitting(true);
     setMessage('');
-    const { error } = await supabase.from('time_off_requests').insert([{
+    const { data: inserted, error } = await supabase.from('time_off_requests').insert([{
       business_id: businessId,
       user_id: myId,
       type: formType,
@@ -173,13 +180,28 @@ export default function TimeOffScreen() {
       half_day: formHalf && formStart === formEnd,
       reason: formReason.trim() || null,
       status: 'pending',
-    }]);
+    }]).select('id').single();
     if (error) {
       setMessage('Could not submit: ' + error.message);
     } else {
       setMessage('Request sent. Your manager will review it.');
       setFormReason('');
       setFormHalf(false);
+      // Push v1 step 3: ping the managers. Fire-and-forget — the
+      // request is saved either way.
+      if (inserted?.id) {
+        sendPushEvent({
+          business_id: businessId,
+          type: 'timeoff_requested',
+          family: 'requests',
+          title: 'New time-off request',
+          body: `New time-off request from ${nameOf(myId)}: ${shortRange(formStart, formEnd)}. Tap to review.`,
+          url: '/timeoff',
+          ref_type: 'time_off_request',
+          ref_id: inserted.id,
+          recipient_role: 'manager',
+        });
+      }
       await loadRequests(myId, myRole);
     }
     setSubmitting(false);
@@ -206,6 +228,22 @@ export default function TimeOffScreen() {
       // Push v1 step 1: a manager's first decision is the moment
       // notification permission is worth asking for. Fire-and-forget.
       ensurePushToken({ request: true });
+      // Push v1 step 3: ping the employee — only when the status
+      // actually changes (the plan's rule: a re-tap on the same
+      // decision sends nothing).
+      if (req.status !== status) {
+        sendPushEvent({
+          business_id: businessId,
+          type: 'timeoff_decided',
+          family: 'requests',
+          title: 'Time-off decision',
+          body: `Your time off ${shortRange(req.start_date, req.end_date)} was ${status === 'approved' ? 'approved' : 'declined'}.`,
+          url: '/timeoff',
+          ref_type: 'time_off_request',
+          ref_id: req.id,
+          recipient_user_id: req.user_id,
+        });
+      }
     }
     await loadRequests(myId, myRole);
     setBusyId(null);

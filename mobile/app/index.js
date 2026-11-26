@@ -7,7 +7,7 @@ import { NAV_ICONS } from '../components/NavIcons';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
-import { ensurePushToken, removePushToken } from '../lib/push';
+import { ensurePushToken, removePushToken, sendPushEvent } from '../lib/push';
 import { getCurrentPosition } from '../lib/location';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -468,8 +468,9 @@ export default function App() {
   const handleExceptionSubmit = async () => {
     if (!outOfRangeData || !session?.user) return;
     setSubmittingException(true);
+    const siteName = outOfRangeData.worksite?.name || 'your worksite';
     try {
-      const { error } = await supabase.from('time_exceptions').insert([{
+      const { data: insertedExc, error } = await supabase.from('time_exceptions').insert([{
         user_id: session.user.id,
         worksite_id: outOfRangeData.worksite?.id || null,
         attempted_at: new Date().toISOString(),
@@ -478,11 +479,27 @@ export default function App() {
         distance_meters: outOfRangeData.distance,
         reason_note: exceptionNote,
         status: 'pending',
-      }]);
+      }]).select('id').single();
       if (error) throw new Error(error.message);
       setOutOfRangeData(null);
       setExceptionNote('');
       setStatusMessage('Exception request sent to your manager.');
+      // Push v1 step 3: ping the managers. Fire-and-forget — the
+      // exception is filed either way.
+      if (insertedExc?.id && myBusinessId) {
+        const { data: prof } = await supabase.from('profiles').select('full_name').eq('id', session.user.id).single();
+        sendPushEvent({
+          business_id: myBusinessId,
+          type: 'exception_filed',
+          family: 'requests',
+          title: 'Clock-in exception filed',
+          body: `${prof?.full_name || 'A team member'} filed a clock-in exception at ${siteName}. Tap to review.`,
+          url: '/manager',
+          ref_type: 'time_exception',
+          ref_id: insertedExc.id,
+          recipient_role: 'manager',
+        });
+      }
     } catch (e) {
       setStatusMessage('❌ Could not send exception: ' + e.message);
     } finally {

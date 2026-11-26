@@ -754,6 +754,29 @@ Deno.serve(async (req) => {
     const todayInTz = new Intl.DateTimeFormat("en-US", { timeZone: callerTz, weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(new Date());
     const contextNote = `\n\nCONTEXT: Today is ${todayInTz} in the team's timezone (${callerTz}). You are talking to ${callerName} (${effectiveRole}). Convert relative dates like "Friday" or "next Monday" into YYYY-MM-DD dates using today as the anchor. Times the user gives are local wall-clock times in ${callerTz}; pass them to tools as HH:MM in 24-hour form.`;
 
+    // Push v1 step 3: fire a notification through send-push. The
+    // Brain is a service caller (caller_user_id null); the business
+    // rides in the payload and send-push enforces the scope. Awaited
+    // at the call sites — the function returns after the Brain's
+    // reply, so an un-awaited send could be cut off — but it never
+    // throws, so a failed ping never blocks the Brain's answer.
+    const notifyPush = async (payload: Record<string, unknown>) => {
+      try {
+        await fetch(`${SUPABASE_URL}/functions/v1/send-push`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ ...payload, caller_tz: callerTz }),
+        });
+      } catch {
+        // A ping must never break the Brain's answer.
+      }
+    };
+    // Compact date range for push bodies ("Dec 24-27").
+    const shortRange = (s: string, e: string) => {
+      const f = (d: string) => new Intl.DateTimeFormat("en-US", { timeZone: callerTz, month: "short", day: "numeric" }).format(new Date(d + "T12:00:00"));
+      return s === e ? f(s) : `${f(s)}-${f(e)}`;
+    };
+
     // ----- Live legal rules -----
     // Break rules and wage figures live in the legal_rules table and
     // are read on every request, so a law update (one UPDATE statement)
@@ -1006,8 +1029,33 @@ Deno.serve(async (req) => {
             }));
           }
         } else if (fn === "bulk_update_exceptions") {
+          // Push v1 step 3: ping only the exceptions whose status
+          // actually changes — fetch the current statuses first. A
+          // failed pre-read fails open: every updated row is pinged.
+          const { data: before } = await supabase.from("time_exceptions").select("id, status, user_id, attempted_at").in("id", args.exception_ids).in("user_id", bizUserIds);
           const { data, error } = await supabase.from("time_exceptions").update({ status: args.status, reviewed_by: effectiveUserId }).in("id", args.exception_ids).in("user_id", bizUserIds).select();
           output = error ? { error: error.message } : { success: true, updated_count: data?.length || 0 };
+          if (!error && data) {
+            const beforeById = new Map((before || []).map((b: any) => [b.id, b]));
+            for (const row of data as any[]) {
+              const prev = beforeById.get(row.id) as any;
+              if (prev && prev.status === args.status) continue; // no change, no ping
+              const attempted = row.attempted_at
+                ? new Intl.DateTimeFormat("en-US", { timeZone: callerTz, month: "short", day: "numeric" }).format(new Date(row.attempted_at))
+                : "today";
+              await notifyPush({
+                business_id: businessScope,
+                type: "exception_decided",
+                family: "requests",
+                title: "Clock-in exception decision",
+                body: `Your clock-in exception for ${attempted} was ${args.status === "approved" ? "approved" : "declined"}.`,
+                url: "/",
+                ref_type: "time_exception",
+                ref_id: row.id,
+                recipient_user_id: row.user_id,
+              });
+            }
+          }
         } else if (fn === "get_time_logs") {
           const { data, error } = await supabase
             .from("time_logs")
@@ -1484,7 +1532,7 @@ Deno.serve(async (req) => {
               output = { error: "No worksites are configured yet." };
             } else {
               const nearest = findNearestWorksite(worksites, location.latitude, location.longitude)!;
-              const { error: insError } = await supabase.from("time_exceptions").insert([{
+              const { data: insertedExc, error: insError } = await supabase.from("time_exceptions").insert([{
                 user_id: effectiveUserId,
                 worksite_id: nearest.site.id,
                 latitude: location.latitude,
@@ -1492,7 +1540,21 @@ Deno.serve(async (req) => {
                 distance_meters: nearest.distanceMeters,
                 reason_note: args.reason_note,
                 status: "pending",
-              }]);
+              }]).select("id").single();
+              // Push v1 step 3: ping the managers.
+              if (!insError && insertedExc?.id) {
+                await notifyPush({
+                  business_id: businessScope,
+                  type: "exception_filed",
+                  family: "requests",
+                  title: "Clock-in exception filed",
+                  body: `${callerName} filed a clock-in exception at ${nearest.site.name}. Tap to review.`,
+                  url: "/manager",
+                  ref_type: "time_exception",
+                  ref_id: insertedExc.id,
+                  recipient_role: "manager",
+                });
+              }
               output = insError
                 ? { error: insError.message }
                 : { success: true, worksite: nearest.site.name, distance_meters: nearest.distanceMeters, status: "pending — sent to your manager for review" };
@@ -1826,6 +1888,22 @@ Deno.serve(async (req) => {
                 const { error: upErr } = await supabase.from("time_off_requests")
                   .update({ status: decision, reviewed_by: effectiveUserId })
                   .eq("id", r.id);
+                // Push v1 step 3: ping the employee. The query above
+                // only matches pending requests, so the status always
+                // changes here — the plan's guard holds by construction.
+                if (!upErr) {
+                  await notifyPush({
+                    business_id: businessScope,
+                    type: "timeoff_decided",
+                    family: "requests",
+                    title: "Time-off decision",
+                    body: `Your time off ${shortRange(r.start_date, r.end_date)} was ${decision === "approved" ? "approved" : "declined"}.`,
+                    url: "/timeoff",
+                    ref_type: "time_off_request",
+                    ref_id: r.id,
+                    recipient_user_id: target.id,
+                  });
+                }
                 output = upErr
                   ? { success: false, error: "Could not update the request: " + upErr.message }
                   : { success: true, time_off: { employee: target.full_name, type: r.type, dates: `${r.start_date} to ${r.end_date}`, days: countBusinessDays(r.start_date, r.end_date, !!r.half_day), decision } };
@@ -1896,14 +1974,30 @@ Deno.serve(async (req) => {
               if (failure) {
                 output = { success: false, error: failure };
               } else {
-                const { error: insErr } = await supabase.from("time_off_requests").insert([{
+                const { data: insertedReq, error: insErr } = await supabase.from("time_off_requests").insert([{
                   business_id: callerBusinessId,
                   user_id: effectiveUserId,
                   type, start_date: start, end_date: end,
                   half_day: half,
                   reason: args.reason || null,
                   status: "pending",
-                }]);
+                }]).select("id").single();
+                // Push v1 step 3: ping the managers. Awaited — the
+                // Brain's reply must not cut the send off — but a
+                // failed ping never blocks the answer.
+                if (!insErr && insertedReq?.id) {
+                  await notifyPush({
+                    business_id: businessScope,
+                    type: "timeoff_requested",
+                    family: "requests",
+                    title: "New time-off request",
+                    body: `New time-off request from ${callerName}: ${shortRange(start, end)}. Tap to review.`,
+                    url: "/timeoff",
+                    ref_type: "time_off_request",
+                    ref_id: insertedReq.id,
+                    recipient_role: "manager",
+                  });
+                }
                 output = insErr
                   ? { success: false, error: "Could not submit the request: " + insErr.message }
                   : { success: true, requested: { type, dates: `${start} to ${end}`, days, status: "pending manager approval", ...(remainingAfter !== undefined ? { vacation_days_remaining_after: remainingAfter } : {}) } };

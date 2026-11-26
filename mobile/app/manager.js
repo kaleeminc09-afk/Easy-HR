@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { NAV_ICONS } from '../components/NavIcons';
 import { supabase } from '../lib/supabase';
-import { ensurePushToken } from '../lib/push';
+import { ensurePushToken, sendPushEvent } from '../lib/push';
 import { fetchBillingState } from '../lib/billing';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -307,6 +307,25 @@ export default function ManagerDashboard() {
       // Push v1 step 1: a manager's first decision is the moment
       // notification permission is worth asking for. Fire-and-forget.
       ensurePushToken({ request: true });
+      // Push v1 step 3: ping the employee — only when the status
+      // actually changes. Fire-and-forget.
+      const exc = exceptions.find((e) => e.id === exceptionId);
+      if (exc && exc.status !== newStatus && exc.user_id && myBusinessId) {
+        const attempted = exc.attempted_at
+          ? new Date(exc.attempted_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : 'today';
+        sendPushEvent({
+          business_id: myBusinessId,
+          type: 'exception_decided',
+          family: 'requests',
+          title: 'Clock-in exception decision',
+          body: `Your clock-in exception for ${attempted} was ${newStatus === 'approved' ? 'approved' : 'declined'}.`,
+          url: '/',
+          ref_type: 'time_exception',
+          ref_id: exceptionId,
+          recipient_user_id: exc.user_id,
+        });
+      }
       fetchAllManagerData();
     }
   };
