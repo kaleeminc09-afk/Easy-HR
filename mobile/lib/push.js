@@ -20,25 +20,61 @@ import { Platform } from 'react-native';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
+import { isValidDeepLink, shouldSuppressBanner } from './push-helpers';
 
 // The token for this device in this session. Kept in memory so sign-out
 // can delete exactly this row before the session is gone (after sign-out
 // the RLS delete has no identity and is refused).
 let currentToken = null;
 
+// The route the app is showing right now, kept by the root layout
+// (step 6). The foreground handler reads it to suppress a banner
+// when the ping points at the screen already on display.
+let currentRoute = null;
+export function setCurrentRoute(path) {
+  currentRoute = typeof path === 'string' ? path : null;
+}
+
+// A tapped notification's deep link, held for a signed-out user
+// (step 6). A tap while signed out stores the path; the root layout
+// takes it after sign-in and lands the user on that screen. Stored
+// in AsyncStorage so it survives a cold start; taken exactly once.
+const PENDING_DEEP_LINK_KEY = 'northshift_pending_deep_link';
+export async function storePendingDeepLink(url) {
+  if (!isValidDeepLink(url)) return;
+  try { await AsyncStorage.setItem(PENDING_DEEP_LINK_KEY, url); } catch { /* A lost link is a missed shortcut, never a crash. */ }
+}
+export async function takePendingDeepLink() {
+  try {
+    const url = await AsyncStorage.getItem(PENDING_DEEP_LINK_KEY);
+    if (url) await AsyncStorage.removeItem(PENDING_DEEP_LINK_KEY);
+    return isValidDeepLink(url) ? url : null;
+  } catch {
+    return null;
+  }
+}
+
 // Foreground display: a ping that arrives while the app is open still
-// shows as a banner. Call once from the root layout; web is a no-op.
+// shows as a banner — unless the app is already showing the screen
+// the ping points to (step 6: the user is looking at it, so the
+// sender logs the notification but the banner is suppressed). Call
+// once from the root layout; web is a no-op.
 // (Effects never run during the static export's prerender, so this is
 // safe to call from _layout.tsx.)
 export function setupPushNotifications() {
   if (Platform.OS === 'web') return;
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-    }),
+    handleNotification: async (notification) => {
+      const url = notification?.request?.content?.data?.url;
+      const suppressed = shouldSuppressBanner(url, currentRoute);
+      return {
+        shouldShowAlert: !suppressed,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      };
+    },
   });
 }
 
@@ -47,16 +83,23 @@ export function setupPushNotifications() {
 // root layout with its router; returns the subscription so the layout
 // can remove it. A missing or non-path url is ignored — a ping with a
 // dead link is a sender test failure, never a crash. Web is a no-op.
+// Step 6: a tap while signed out stores the path instead of pushing
+// (there is no screen to push to yet); the layout takes it after
+// sign-in and lands the user there.
 export function setupPushResponseListener(router) {
   if (Platform.OS === "web") return null;
-  return Notifications.addNotificationResponseReceivedListener((response) => {
+  return Notifications.addNotificationResponseReceivedListener(async (response) => {
     const url = response?.notification?.request?.content?.data?.url;
-    if (typeof url === "string" && url.startsWith("/")) {
-      try {
+    if (!isValidDeepLink(url)) return;
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
         router.push(url);
-      } catch {
-        // Bad link: ignore here, fix at the sender.
+      } else {
+        await storePendingDeepLink(url);
       }
+    } catch {
+      // Bad link or a failed store: ignore here, fix at the sender.
     }
   });
 }

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking, Platform } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator, ScrollView, Linking, Platform, Switch } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
@@ -17,6 +17,8 @@ const PROFILE_FIELDS = [
   'full_name', 'first_name', 'last_name', 'role', 'business_id',
   'phone',
   'job_title', 'department', 'start_date', 'employment_type', 'primary_worksite_id', 'employee_number',
+  // Push v1 step 6: the three notification families, each its own switch.
+  'push_reminders', 'push_requests', 'push_billing',
 ].join(', ');
 
 const PRIVATE_FIELDS = [
@@ -95,6 +97,18 @@ export default function ProfileScreen() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // Push v1 step 6: notification preferences (one switch per family)
+  // and the business's reminder lead time (admins only). Billing
+  // alerts go to the business owner only, so that switch shows to
+  // the owner alone.
+  const [pushReminders, setPushReminders] = useState(true);
+  const [pushRequests, setPushRequests] = useState(true);
+  const [pushBilling, setPushBilling] = useState(true);
+  const [businessId, setBusinessId] = useState(null);
+  const [isOwner, setIsOwner] = useState(false);
+  const [reminderLead, setReminderLead] = useState(60);
+  const [notifMessage, setNotifMessage] = useState('');
+
   useEffect(() => { loadProfile(); }, []);
 
   const loadProfile = async () => {
@@ -116,6 +130,12 @@ export default function ProfileScreen() {
       setLastName(ln);
       setRole(data.role || 'employee');
       setPhone(data.phone || '');
+      // Push v1 step 6: the three preference switches default on
+      // (the sender treats a missing column the same way).
+      setPushReminders(data.push_reminders !== false);
+      setPushRequests(data.push_requests !== false);
+      setPushBilling(data.push_billing !== false);
+      setBusinessId(data.business_id || null);
       const { data: priv } = await supabase.from('profile_private').select(PRIVATE_FIELDS).eq('user_id', session.user.id).maybeSingle();
       const pv = priv || {};
       setDob(pv.date_of_birth || '');
@@ -139,8 +159,15 @@ export default function ProfileScreen() {
         if (ws) setWorksiteName(ws.name || '');
       }
       if (data.business_id) {
-        const { data: biz } = await supabase.from('businesses').select('business_name, account_number').eq('id', data.business_id).single();
-        if (biz) { setBusinessName(biz.business_name || ''); setAccountNumber(biz.account_number || ''); }
+        const { data: biz } = await supabase.from('businesses').select('business_name, account_number, owner_id, reminder_lead_minutes').eq('id', data.business_id).single();
+        if (biz) {
+          setBusinessName(biz.business_name || '');
+          setAccountNumber(biz.account_number || '');
+          // Push v1 step 6: the billing switch and the lead-time
+          // control are owner/admin-only.
+          setIsOwner(biz.owner_id === session.user.id);
+          setReminderLead(biz.reminder_lead_minutes ?? 60);
+        }
       }
     }
     setLoading(false);
@@ -182,6 +209,30 @@ export default function ProfileScreen() {
     }], { onConflict: 'user_id' });
     setMessage(privError ? 'Basic profile saved, but date of birth, address and emergency contacts could not be saved — the database update may not have run yet.' : 'Profile updated.');
     setSaving(false);
+  };
+
+  // Push v1 step 6: one switch per notification family. Optimistic
+  // update, reverted on failure — a switch that lies about its state
+  // is worse than a switch that says nothing.
+  const handlePushToggle = async (key, value) => {
+    const setters = { push_reminders: setPushReminders, push_requests: setPushRequests, push_billing: setPushBilling };
+    const prev = { push_reminders: pushReminders, push_requests: pushRequests, push_billing: pushBilling }[key];
+    setters[key](value);
+    setNotifMessage('');
+    const { data: { session } } = await supabase.auth.getSession();
+    const { error } = await supabase.from('profiles').update({ [key]: value }).eq('id', session.user.id);
+    if (error) { setters[key](prev); setNotifMessage('Could not save that notification setting. Check your connection and try again.'); }
+  };
+
+  // Push v1 step 6: the reminder lead time is a business setting, so
+  // only an admin can change it (the businesses update policy
+  // enforces the same rule server-side).
+  const handleLeadChange = async (minutes) => {
+    const prev = reminderLead;
+    setReminderLead(minutes);
+    setNotifMessage('');
+    const { error } = await supabase.from('businesses').update({ reminder_lead_minutes: minutes }).eq('id', businessId);
+    if (error) { setReminderLead(prev); setNotifMessage('Could not save the reminder lead time. Check your connection and try again.'); }
   };
 
   // Change password for the signed-in account (e.g. after a business
@@ -353,6 +404,50 @@ export default function ProfileScreen() {
         </View>
 
         <View style={styles.sectionCard}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <Text style={styles.sectionNote}>Push alerts on this device. Turn a family off and its pings stop — the rest keep coming.</Text>
+          {notifMessage ? <Text style={styles.message}>{notifMessage}</Text> : null}
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLabel}>
+              <Text style={styles.toggleTitle}>Shift reminders</Text>
+              <Text style={styles.toggleDesc}>A ping before each assigned shift starts.</Text>
+            </View>
+            <Switch value={pushReminders} onValueChange={(v) => handlePushToggle('push_reminders', v)} trackColor={{ false: colors.surfaceBorder, true: colors.accent }} />
+          </View>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLabel}>
+              <Text style={styles.toggleTitle}>Requests</Text>
+              <Text style={styles.toggleDesc}>Time-off and clock-in exception requests and decisions.</Text>
+            </View>
+            <Switch value={pushRequests} onValueChange={(v) => handlePushToggle('push_requests', v)} trackColor={{ false: colors.surfaceBorder, true: colors.accent }} />
+          </View>
+          {isOwner ? (
+            <View style={styles.toggleRow}>
+              <View style={styles.toggleLabel}>
+                <Text style={styles.toggleTitle}>Billing alerts</Text>
+                <Text style={styles.toggleDesc}>Trial ending, failed payments, expiring card, grace period. Turning this off risks a surprise lock — a failed payment locks scheduling after 7 days.</Text>
+              </View>
+              <Switch value={pushBilling} onValueChange={(v) => handlePushToggle('push_billing', v)} trackColor={{ false: colors.surfaceBorder, true: colors.accent }} />
+            </View>
+          ) : (
+            <Text style={styles.sectionNote}>Billing alerts go to the business owner.</Text>
+          )}
+          {role === 'admin' && businessId ? (
+            <>
+              <Text style={styles.toggleTitle}>Reminder lead time</Text>
+              <Text style={styles.toggleDesc}>How far before a shift starts the reminder goes out.</Text>
+              <View style={styles.leadOptions}>
+                {[30, 45, 60, 90].map((m) => (
+                  <TouchableOpacity key={m} style={[styles.leadOption, reminderLead === m && styles.leadOptionSelected]} onPress={() => handleLeadChange(m)}>
+                    <Text style={[styles.leadOptionText, reminderLead === m && styles.leadOptionSelectedText]}>{m} min</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </>
+          ) : null}
+        </View>
+
+        <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Contact support</Text>
           <Text style={styles.sectionNote}>Questions about the app or your plan? Email us and we will get back to you.</Text>
           <TouchableOpacity style={styles.primaryButton} onPress={() => Linking.openURL('mailto:support@northshiftapp.com')}>
@@ -416,6 +511,16 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
   infoLabel: { ...type.label, color: colors.textSecondary },
   infoValue: { fontFamily: fontFamily.semibold, fontSize: 14, color: colors.textPrimary },
+  // Push v1 step 6: notification switches and lead-time options.
+  toggleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.surfaceBorder },
+  toggleLabel: { flex: 1 },
+  toggleTitle: { fontFamily: fontFamily.semibold, fontSize: 14, color: colors.textPrimary },
+  toggleDesc: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+  leadOptions: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.sm, flexWrap: 'wrap' },
+  leadOption: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.surfaceBorder, borderRadius: radius.pill, paddingVertical: 8, paddingHorizontal: 14 },
+  leadOptionSelected: { backgroundColor: colors.accent, borderColor: colors.accent },
+  leadOptionText: { fontFamily: fontFamily.semibold, fontSize: 13, color: colors.textPrimary },
+  leadOptionSelectedText: { color: '#FFFFFF' },
   message: { fontFamily: fontFamily.regular, fontSize: 13, color: colors.textSecondary, textAlign: 'center', marginBottom: spacing.sm },
   primaryButton: { ...buttons.primary },
   primaryButtonText: { ...buttons.primaryText },

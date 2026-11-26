@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
-import { Stack, SplashScreen, useRouter } from 'expo-router';
+import { Stack, SplashScreen, useRouter, usePathname } from 'expo-router';
 import * as Linking from 'expo-linking';
 import WebSidebar from '../components/WebSidebar';
 import WebAssistant from '../components/WebAssistant';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
-import { setupPushNotifications, setupPushResponseListener, ensurePushToken } from '../lib/push';
+import { setupPushNotifications, setupPushResponseListener, ensurePushToken, setCurrentRoute, takePendingDeepLink } from '../lib/push';
 import {
   useFonts,
   Inter_400Regular,
@@ -35,7 +35,15 @@ const screenOptions = {
 
 export default function RootLayout() {
   const router = useRouter();
+  const pathname = usePathname();
   const [session, setSession] = useState<any>(null);
+
+  // Push v1 step 6: keep the current route in lib/push so a
+  // foreground ping pointing at the open screen suppresses its
+  // banner (the user is already looking at it).
+  useEffect(() => {
+    setCurrentRoute(pathname);
+  }, [pathname]);
 
   // Session for the web shell: the toolbar and floating Assistant
   // only render on web while signed in. Mirrors the session
@@ -54,6 +62,13 @@ export default function RootLayout() {
         // value moments (first clock-in, first approval). Fire-and-
         // forget; token work never blocks the shell.
         ensurePushToken({ request: false });
+        // Push v1 step 6: a notification tapped while signed out
+        // stored its deep link; land on that screen now.
+        takePendingDeepLink().then((url) => {
+          if (url) {
+            try { router.push(url); } catch { /* A dead link is a sender test failure, never a crash. */ }
+          }
+        });
       }
     });
     return () => subscription.unsubscribe();
