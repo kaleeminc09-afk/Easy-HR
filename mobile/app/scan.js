@@ -6,6 +6,7 @@ import { Link } from 'expo-router';
 import { supabase } from '../lib/supabase';
 import * as Location from 'expo-location';
 import { getCurrentPosition } from '../lib/location';
+import { ensurePushToken } from '../lib/push';
 import { colors, spacing, radius, fontFamily, buttons } from '../lib/theme';
 
 const QR_PREFIX = 'northshift-site:';
@@ -164,6 +165,10 @@ export default function ScanScreen() {
         }]);
         if (inErr) throw new Error(inErr.message);
         setResult({ ok: true, title: 'Clocked in', message: `You are on the clock at ${site.name}.` });
+        // Push v1 step 1: first clock-in is the moment notification
+        // permission is worth asking for. Fire-and-forget; a declined
+        // or failed ask never blocks the clock-in.
+        ensurePushToken({ request: true });
       }
     } catch (e) {
       setResult({ ok: false, title: 'Something went wrong', message: e.message || 'Please try again.' });

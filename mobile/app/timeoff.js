@@ -3,6 +3,7 @@ import { StyleSheet, Text, View, TextInput, TouchableOpacity, ActivityIndicator,
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { supabase } from '../lib/supabase';
+import { ensurePushToken } from '../lib/push';
 import { colors, fontFamily, spacing, radius, type, elevation, buttons } from '../lib/theme';
 import { countBusinessDays, dateRangesOverlap, vacationBalance, leaveTypeBalance } from '../supabase/functions/hr-ai-bot/logic';
 
@@ -201,6 +202,11 @@ export default function TimeOffScreen() {
       .update({ status, reviewed_by: myId })
       .eq('id', req.id);
     setMessage(error ? 'Could not update: ' + error.message : `Request ${status}.`);
+    if (!error) {
+      // Push v1 step 1: a manager's first decision is the moment
+      // notification permission is worth asking for. Fire-and-forget.
+      ensurePushToken({ request: true });
+    }
     await loadRequests(myId, myRole);
     setBusyId(null);
   };

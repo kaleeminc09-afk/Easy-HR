@@ -1,5 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, isDisregardedLog, scheduleGuideReply, weekStartMs, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
+import { computeTodayHours, matchByName, findNearestWorksite, getTeamStatus, computeWeeklyOvertime, findMealBreakViolations, isVoidedLog, isDisregardedLog, scheduleGuideReply, dayStartMsInTz, weekStartMsInTz, validateShiftInput, shiftsOverlap, countBusinessDays, dateRangesOverlap, vacationBalance, zonedTimeToUtc, breakDueInfo, isDateOnLeave, PROVINCE_BREAK_RULES, BRAIN_RULES_VERSION, BREAK_RULES_VERIFIED_DATE, normalizePromptForCache, payrollPeriodSummary, resolveExpenseCandidate, mileageSplitByEntry, mileageTierSplit, parseLegalRules, legalRulesFingerprint, buildKnowledgeSection, knowledgeFingerprint } from "./logic.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -1473,7 +1473,7 @@ Deno.serve(async (req) => {
               clock_out: item.clock_out,
               flag: item.ai_anomaly_flag,
             }));
-            output = { today_hours: computeTodayHours(data, Date.now()), shifts };
+            output = { today_hours: computeTodayHours(data, Date.now(), callerTz), shifts };
           }
         } else if (fn === "submit_exception_request") {
           if (location?.latitude == null || location?.longitude == null) {
@@ -1508,13 +1508,15 @@ Deno.serve(async (req) => {
           output = error ? { error: error.message } : { success: true, message: "Blocker logged for manager review." };
         } else if (fn === "get_schedule") {
           const nowMs = Date.now();
-          let fromMs = weekStartMs(nowMs);
+          // Day/week bounds in the CALLER's timezone, not the server's:
+          // the edge function runs in UTC, so a server-local midnight
+          // is tomorrow after 7 PM Toronto time and today's rota reads empty.
+          let fromMs = weekStartMsInTz(nowMs, callerTz);
           let toMs = fromMs + 7 * 24 * 3600 * 1000;
           if (args.range === "today") {
-            const d = new Date(nowMs); d.setHours(0, 0, 0, 0);
-            fromMs = d.getTime(); toMs = fromMs + 24 * 3600 * 1000;
+            fromMs = dayStartMsInTz(nowMs, callerTz); toMs = fromMs + 24 * 3600 * 1000;
           } else if (args.range === "next_week") {
-            fromMs = weekStartMs(nowMs) + 7 * 24 * 3600 * 1000;
+            fromMs = weekStartMsInTz(nowMs, callerTz) + 7 * 24 * 3600 * 1000;
             toMs = fromMs + 7 * 24 * 3600 * 1000;
           }
           const { data: rows, error } = await supabase
@@ -1555,7 +1557,9 @@ Deno.serve(async (req) => {
             }
           }
         } else if (fn === "get_open_shifts") {
-          const dayStart = new Date(); dayStart.setHours(0, 0, 0, 0);
+          // Same timezone rule as get_schedule: the day starts at the
+          // caller's midnight, not the server's (UTC) midnight.
+          const dayStart = new Date(dayStartMsInTz(Date.now(), callerTz));
           const { data: rows, error } = await supabase
             .from("shifts")
             .select("id, worksite_id, start_time, end_time, status, claimed_by, notes")
@@ -1590,7 +1594,7 @@ Deno.serve(async (req) => {
             }
           }
         } else if (fn === "get_overtime_status") {
-          const startIso = new Date(weekStartMs(Date.now())).toISOString();
+          const startIso = new Date(weekStartMsInTz(Date.now(), callerTz)).toISOString();
           const { data, error } = await supabase
             .from("time_logs")
             .select("user_id, clock_in, clock_out, ai_anomaly_flag, profiles!time_logs_user_id_fkey(full_name)")
@@ -1605,7 +1609,7 @@ Deno.serve(async (req) => {
               clock_in: l.clock_in,
               clock_out: l.clock_out,
               ai_anomaly_flag: l.ai_anomaly_flag,
-            })), Date.now());
+            })), Date.now(), callerTz);
             output = otRows.length === 0
               ? { message: "Nobody has logged hours yet this week." }
               : {
@@ -1973,7 +1977,7 @@ Deno.serve(async (req) => {
             };
           }
         } else if (fn === "get_my_hours") {
-          const startIso = new Date(weekStartMs(Date.now())).toISOString();
+          const startIso = new Date(weekStartMsInTz(Date.now(), callerTz)).toISOString();
           const { data, error } = await supabase.from("time_logs")
             .select("clock_in, clock_out, ai_anomaly_flag")
             .eq("user_id", effectiveUserId).gte("clock_in", startIso);
@@ -1981,10 +1985,10 @@ Deno.serve(async (req) => {
             output = { error: error.message };
           } else {
             const logs = (data || []).map((l: any) => ({ user_id: effectiveUserId, clock_in: l.clock_in, clock_out: l.clock_out, ai_anomaly_flag: l.ai_anomaly_flag }));
-            const rows = payrollPeriodSummary(logs, Date.now());
+            const rows = payrollPeriodSummary(logs, Date.now(), callerTz);
             const week = rows[0] || { hours: 0, overtime_hours: 0 };
             output = {
-              hours_today: computeTodayHours(logs, Date.now()),
+              hours_today: computeTodayHours(logs, Date.now(), callerTz),
               hours_this_week: week.hours,
               overtime_hours_this_week: week.overtime_hours,
               overtime_threshold_hours: 44,

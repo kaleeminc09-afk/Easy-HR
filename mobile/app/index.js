@@ -7,6 +7,7 @@ import { NAV_ICONS } from '../components/NavIcons';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
+import { ensurePushToken, removePushToken } from '../lib/push';
 import { getCurrentPosition } from '../lib/location';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -237,8 +238,11 @@ export default function App() {
 
   const handleLogout = async () => {
     // CRM footprint: log while still signed in — after signOut the
-    // session is gone and the log insert has no identity.
+    // session is gone and the log insert has no identity. Same for
+    // the push token: delete it before sign-out or the RLS delete
+    // has no identity and is refused.
     await logActivity('sign_out', { userId: session?.user?.id, businessId: myBusinessId });
+    await removePushToken();
     await supabase.auth.signOut();
     setActiveSession(null);
     setActiveBreak(null);
@@ -446,6 +450,10 @@ export default function App() {
         setNoWorksites(false);
         setStatusMessage(viaApprovedException ? `Clocked in at ${nearestWorksite.name} (exception approved).` : `Clocked in at ${nearestWorksite.name}!`);
         fetchTimeData(session.user.id);
+        // Push v1 step 1: first clock-in is the moment notification
+        // permission is worth asking for. Fire-and-forget; a declined
+        // or failed ask never blocks the clock-in.
+        ensurePushToken({ request: true });
       }
     } catch (err) {
       setStatusMessage('❌ GPS Error: ' + err.message);

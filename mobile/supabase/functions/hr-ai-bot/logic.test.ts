@@ -17,6 +17,8 @@ import {
   getTeamStatus,
   computeWeeklyOvertime,
   weekStartMs,
+  dayStartMsInTz,
+  weekStartMsInTz,
   checkMealBreakCompliance,
   findMealBreakViolations,
   checkMealBreakComplianceForRule,
@@ -692,6 +694,36 @@ describe("zonedTimeToUtc", () => {
   test("bad input is NaN", () => {
     expect(Number.isNaN(zonedTimeToUtc("", "09:00", "UTC"))).toBe(true);
     expect(Number.isNaN(zonedTimeToUtc("2026-10-23", "", "UTC"))).toBe(true);
+  });
+});
+
+describe("dayStartMsInTz / weekStartMsInTz", () => {
+  test("23:04 Toronto is still Nov 25 in Toronto time (the 11 PM regression)", () => {
+    // 23:04 EST Nov 25 = 04:04 UTC Nov 26. The old server-local
+    // midnight called that Nov 26, so today's rota read empty.
+    const lateNight = Date.UTC(2026, 10, 26, 4, 4);
+    expect(dayStartMsInTz(lateNight, "America/Toronto")).toBe(Date.UTC(2026, 10, 25, 5, 0));
+    expect(weekStartMsInTz(lateNight, "America/Toronto")).toBe(Date.UTC(2026, 10, 23, 5, 0));
+  });
+
+  test("summer DST dates use the EDT offset", () => {
+    expect(dayStartMsInTz(Date.UTC(2026, 6, 15, 16, 0), "America/Toronto")).toBe(Date.UTC(2026, 6, 15, 4, 0));
+    expect(weekStartMsInTz(Date.UTC(2026, 6, 15, 16, 0), "America/Toronto")).toBe(Date.UTC(2026, 6, 13, 4, 0));
+  });
+
+  test("UTC timezone is identity", () => {
+    expect(dayStartMsInTz(Date.UTC(2026, 10, 26, 4, 4), "UTC")).toBe(Date.UTC(2026, 10, 26, 0, 0));
+    expect(weekStartMsInTz(Date.UTC(2026, 10, 26, 4, 4), "UTC")).toBe(Date.UTC(2026, 10, 23, 0, 0));
+  });
+
+  test("computeTodayHours with a timezone counts the Toronto day, not the UTC day", () => {
+    const logs = [
+      { clock_in: "2026-11-25T15:00:00.000Z", clock_out: "2026-11-25T19:00:00.000Z" },
+    ];
+    // 15:00-19:00 UTC is 10:00-14:00 EST on Nov 25: 4h on the Toronto day.
+    // (No assertion on the no-timezone path: it follows the machine's
+    // local clock, which is exactly why the server must pass one.)
+    expect(computeTodayHours(logs, Date.UTC(2026, 10, 26, 4, 4), "America/Toronto")).toBe(4);
   });
 });
 

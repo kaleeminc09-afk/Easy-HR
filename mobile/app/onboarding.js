@@ -5,6 +5,7 @@ import { useRouter } from 'expo-router';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
+import { removePushToken } from '../lib/push';
 import { colors, fontFamily, spacing, radius, buttons } from '../lib/theme';
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -116,6 +117,9 @@ export default function OnboardingScreen() {
 
   const signOut = async () => {
     await logActivity('sign_out');
+    // Push v1 step 1: delete this device's token before sign-out —
+    // after sign-out the RLS delete has no identity and is refused.
+    await removePushToken();
     await supabase.auth.signOut();
     router.replace('/');
   };

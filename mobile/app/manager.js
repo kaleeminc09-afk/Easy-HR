@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Link, useRouter, useLocalSearchParams } from 'expo-router';
 import { NAV_ICONS } from '../components/NavIcons';
 import { supabase } from '../lib/supabase';
+import { ensurePushToken } from '../lib/push';
 import { fetchBillingState } from '../lib/billing';
 import { sweepStaleOpenShifts } from '../lib/autoClose';
 import { colors, spacing, radius, type, elevation, fontFamily, buttons } from '../lib/theme';
@@ -303,6 +304,9 @@ export default function ManagerDashboard() {
     if (error) {
       console.error('Error updating exception:', error.message);
     } else {
+      // Push v1 step 1: a manager's first decision is the moment
+      // notification permission is worth asking for. Fire-and-forget.
+      ensurePushToken({ request: true });
       fetchAllManagerData();
     }
   };

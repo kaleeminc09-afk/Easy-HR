@@ -75,15 +75,19 @@ export function autoCloseForOpenShift(clockIn: string, nowMs: number): AutoClose
   };
 }
 
-/** Total hours worked since local midnight, given raw time_logs rows. Voided logs count 0. */
-export function computeTodayHours(logs: ShiftLog[], nowMs: number): number {
-  const todayStart = new Date(nowMs);
-  todayStart.setHours(0, 0, 0, 0);
+/** Total hours worked since local midnight, given raw time_logs rows. Voided logs count 0.
+ * Pass `timeZone` on the server (which runs in UTC) so "today" means the
+ * caller's day, not the UTC day; omit it on the device, where local time
+ * already is the user's timezone. */
+export function computeTodayHours(logs: ShiftLog[], nowMs: number, timeZone?: string): number {
+  const todayStartMs = timeZone
+    ? dayStartMsInTz(nowMs, timeZone)
+    : new Date(nowMs).setHours(0, 0, 0, 0);
   let ms = 0;
   for (const log of logs) {
     if (isDisregardedLog(log.ai_anomaly_flag)) continue;
     const s = new Date(log.clock_in).getTime();
-    if (s >= todayStart.getTime()) {
+    if (s >= todayStartMs) {
       const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
       if (e > s) ms += e - s;
     }
@@ -225,12 +229,42 @@ export function weekStartMs(nowMs: number): number {
 }
 
 /**
+ * YYYY-MM-DD for an instant in an IANA timezone (en-CA formats in
+ * ISO order). The edge function runs in UTC, so a day boundary taken
+ * from the server clock is tomorrow after 7 PM Toronto time — every
+ * day/week boundary the Brain answers from must go through the
+ * helpers below, never through setHours(0, 0, 0, 0) or weekStartMs.
+ */
+function dateStrInTz(nowMs: number, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date(nowMs));
+}
+
+/** 00:00 wall-clock today in `timeZone`, as a UTC instant (ms). */
+export function dayStartMsInTz(nowMs: number, timeZone: string): number {
+  return zonedTimeToUtc(dateStrInTz(nowMs, timeZone), "00:00", timeZone);
+}
+
+/** Monday 00:00 wall-clock of the week containing nowMs in `timeZone`, as a UTC instant (ms). */
+export function weekStartMsInTz(nowMs: number, timeZone: string): number {
+  const [y, mo, d] = dateStrInTz(nowMs, timeZone).split("-").map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  const dow = (dt.getUTCDay() + 6) % 7; // Mon=0 ... Sun=6
+  dt.setUTCDate(dt.getUTCDate() - dow);
+  const monday = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+  return zonedTimeToUtc(monday, "00:00", timeZone);
+}
+
+/**
  * Hours per person for the current work week (Mon-Sun, local).
  * Shifts are bucketed by their clock-in time; open shifts count up to nowMs.
  * Same gross-hours convention as computeTodayHours (breaks not deducted).
+ * Pass `timeZone` on the server so the week starts on the caller's
+ * Monday, not the UTC Monday; omit it on the device.
  */
-export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number): OvertimeRow[] {
-  const start = weekStartMs(nowMs);
+export function computeWeeklyOvertime(logs: WeeklyShiftLog[], nowMs: number, timeZone?: string): OvertimeRow[] {
+  const start = timeZone ? weekStartMsInTz(nowMs, timeZone) : weekStartMs(nowMs);
   const end = start + 7 * 24 * 3600 * 1000;
   const totals = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
@@ -1289,9 +1323,10 @@ export interface PayrollRow {
  * overtime, then weeks are summed. Open shifts count up to nowMs.
  * Same gross-hours convention as the rest of the app (breaks are
  * not deducted). Hours only — never pay: NorthShift holds no pay
- * rates, taxes, or deductions.
+ * rates, taxes, or deductions. Pass `timeZone` on the server so
+ * weeks bucket on the caller's Monday; omit it on the device.
  */
-export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number): PayrollRow[] {
+export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number, timeZone?: string): PayrollRow[] {
   const weekMs = new Map<string, { name: string; ms: number }>();
   for (const log of logs) {
     if (isDisregardedLog(log.ai_anomaly_flag)) continue;
@@ -1299,7 +1334,7 @@ export function payrollPeriodSummary(logs: PayrollLogLike[], nowMs: number): Pay
     if (Number.isNaN(s)) continue;
     const e = log.clock_out ? new Date(log.clock_out).getTime() : nowMs;
     if (e <= s) continue;
-    const key = `${log.user_id}|${weekStartMs(s)}`;
+    const key = `${log.user_id}|${timeZone ? weekStartMsInTz(s, timeZone) : weekStartMs(s)}`;
     const cur = weekMs.get(key) || { name: (log.full_name || "").trim() || "Unknown", ms: 0 };
     cur.ms += e - s;
     weekMs.set(key, cur);

@@ -6,6 +6,7 @@ import WebSidebar from '../components/WebSidebar';
 import WebAssistant from '../components/WebAssistant';
 import { supabase } from '../lib/supabase';
 import { logActivity } from '../lib/activity';
+import { setupPushNotifications, ensurePushToken } from '../lib/push';
 import {
   useFonts,
   Inter_400Regular,
@@ -46,9 +47,23 @@ export default function RootLayout() {
       // CRM footprint: a fresh sign-in (not a restored session — that
       // arrives as INITIAL_SESSION, and refreshes as TOKEN_REFRESHED).
       // Fire-and-forget; logging never blocks the shell.
-      if (event === 'SIGNED_IN' && session) logActivity('sign_in', { userId: session.user.id });
+      if (event === 'SIGNED_IN' && session) {
+        logActivity('sign_in', { userId: session.user.id });
+        // Push v1 step 1: refresh this device's token when permission
+        // is already granted. Never asks here — the ask happens at the
+        // value moments (first clock-in, first approval). Fire-and-
+        // forget; token work never blocks the shell.
+        ensurePushToken({ request: false });
+      }
     });
     return () => subscription.unsubscribe();
+  }, []);
+
+  // Push v1 step 1: foreground display handler. Effects never run
+  // during the static export's prerender, and the setup itself is a
+  // no-op on web — so this is safe in the shared root layout.
+  useEffect(() => {
+    setupPushNotifications();
   }, []);
   const [loaded] = useFonts({
     Inter_400Regular,
